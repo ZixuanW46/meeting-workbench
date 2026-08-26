@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from meeting_api.config import Settings
+from meeting_api.events import EventStore
 from meeting_api.models import Meeting, SpeakerCluster, TranscriptSegment
 from meeting_api.pipeline.asr import AsrBackend, AsrSegment, get_asr_backend
 from meeting_api.pipeline.diarization import (
@@ -40,12 +41,14 @@ class Worker:
         asr_backend: AsrBackend | None = None,
         diarization_backend: DiarizationBackend | None = None,
         model_slot: SingleModelSlot | None = None,
+        event_store: EventStore | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.settings = settings
         self.asr_backend = asr_backend or get_asr_backend("fake")
         self.diarization_backend = diarization_backend or get_diarization_backend("fake")
         self.model_slot = model_slot or SingleModelSlot()
+        self.events = event_store or EventStore()
         self._process_lock = threading.Lock()
 
     def process_next(self) -> str | None:
@@ -75,6 +78,7 @@ class Worker:
             meeting.processing_step = STEP_VALIDATING
             meeting.processing_error = None
             session.commit()
+            self._publish(meeting)
 
             try:
                 audio_path = self._validate_audio(meeting)
@@ -104,6 +108,7 @@ class Worker:
                     MeetingState.AWAITING_SPEAKER_REVIEW,
                 ).value
                 session.commit()
+                self._publish(meeting)
             except Exception as exc:
                 session.rollback()
                 meeting = session.get(Meeting, meeting_id)
@@ -113,6 +118,7 @@ class Worker:
                     ).value
                     meeting.processing_error = f"{type(exc).__name__}: {exc}"
                     session.commit()
+                    self._publish(meeting)
             return meeting_id
 
     def _validate_audio(self, meeting: Meeting) -> Path:
@@ -125,10 +131,13 @@ class Worker:
             raise ValueError("会议音频大小与上传记录不一致")
         return audio_path
 
-    @staticmethod
-    def _set_step(session: Session, meeting: Meeting, step: str) -> None:
+    def _set_step(self, session: Session, meeting: Meeting, step: str) -> None:
         meeting.processing_step = step
         session.commit()
+        self._publish(meeting)
+
+    def _publish(self, meeting: Meeting) -> None:
+        self.events.publish(meeting.id, meeting.state, meeting.processing_step)
 
     @staticmethod
     def _persist_segments(

@@ -8,6 +8,8 @@ from fastapi import FastAPI
 
 from meeting_api.config import Settings
 from meeting_api.db import init_db, make_engine, make_session_factory
+from meeting_api.events import EventStore
+from meeting_api.events import router as events_router
 from meeting_api.routes import health, meetings, upload
 from meeting_api.worker import Worker
 
@@ -34,7 +36,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         init_db(engine)
         app.state.engine = engine
         app.state.session_factory = make_session_factory(engine)
-        app.state.worker = Worker(app.state.session_factory, settings)
+        app.state.events = EventStore()
+        app.state.worker = Worker(
+            app.state.session_factory,
+            settings,
+            event_store=app.state.events,
+        )
         stop_event = threading.Event()
         worker_thread: threading.Thread | None = None
         if not settings.worker_disabled:
@@ -58,6 +65,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(meetings.router)
     app.include_router(upload.router)
+    app.include_router(events_router)
     return app
 
 

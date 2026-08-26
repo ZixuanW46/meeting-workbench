@@ -46,3 +46,9 @@ class MeetingListResponse(BaseModel):
 class UploadResponse(BaseModel):
     size: int
     sha256: str
+
+
+class ProgressResponse(BaseModel):
+    state: str
+    processing_step: str | None
+    seq: int

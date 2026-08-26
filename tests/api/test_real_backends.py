@@ -10,7 +10,12 @@ from fastapi.testclient import TestClient
 
 from meeting_api.config import Settings
 from meeting_api.main import create_app
-from meeting_api.pipeline.asr import FakeAsrBackend, Qwen3AsrMlxBackend, get_asr_backend
+from meeting_api.pipeline.asr import (
+    AsrSegment,
+    FakeAsrBackend,
+    Qwen3AsrMlxBackend,
+    get_asr_backend,
+)
 from meeting_api.pipeline.diarization import (
     FakeDiarizationBackend,
     SherpaOnnxDiarizationBackend,
@@ -135,7 +140,12 @@ def _install_fake_mlx(monkeypatch, events):
 
     mlx_audio = ModuleType("mlx_audio")
     stt = ModuleType("mlx_audio.stt")
-    model = SimpleNamespace(generate=lambda *_args, **_kwargs: None)
+
+    def generate(*args, **kwargs):
+        events.append(("mlx:generate", args, kwargs))
+        return SimpleNamespace(segments=[], text="你好")
+
+    model = SimpleNamespace(generate=generate)
 
     def load(path):
         events.append(("mlx:load", Path(path)))
@@ -210,15 +220,45 @@ def test_real_backends_load_and_unload_mocked_runtime(monkeypatch, tmp_path):
     assert "embedding:close" in events
 
 
+def test_qwen3_transcribe_forwards_hotword_snapshot(monkeypatch, tmp_path):
+    # M9 固定的词库快照必须传给 mlx-audio 的官方 hotwords 参数，不能丢弃。
+    monkeypatch.setattr(sys, "platform", "darwin")
+    models_dir = tmp_path / "models"
+    qwen_dir = models_dir / "qwen3-asr-mlx"
+    qwen_dir.mkdir(parents=True)
+    (qwen_dir / "config.json").write_text("{}", encoding="utf-8")
+    events = []
+    _install_fake_mlx(monkeypatch, events)
+
+    backend = Qwen3AsrMlxBackend(models_dir)
+    backend.load()
+    segments = backend.transcribe(Path("/tmp/audio.wav"), hotwords=("锐评", "周会"))
+
+    call = next(item for item in events if item[0] == "mlx:generate")
+    assert call[1] == ("/tmp/audio.wav",)
+    assert call[2]["language"] == "Chinese"
+    assert call[2]["hotwords"] == ["锐评", "周会"]
+    assert segments == [AsrSegment(0.0, 1.0, "你好")]
+
+    # 空快照传 None，让 mlx-audio 不注入 hotword 提示。
+    backend.transcribe(Path("/tmp/audio.wav"))
+    assert [item for item in events if item[0] == "mlx:generate"][-1][2]["hotwords"] is None
+
+
 @pytest.mark.parametrize(
     "backend_type",
     [Qwen3AsrMlxBackend, SherpaOnnxDiarizationBackend, SherpaOnnxEmbeddingBackend],
 )
 def test_missing_model_files_give_actionable_path(monkeypatch, tmp_path, backend_type):
     monkeypatch.setattr(sys, "platform", "darwin")
+    models_dir = tmp_path / "custom-data" / "models"
 
-    with pytest.raises(FileNotFoundError, match=r"把模型放到 data/models/"):
-        backend_type(tmp_path / "data" / "models").load()
+    with pytest.raises(FileNotFoundError, match=r"把模型放到 ") as excinfo:
+        backend_type(models_dir).load()
+
+    # 指引必须给出实际配置的 models_dir（MW_DATA_DIR 可能不是默认 ./data）。
+    assert str(models_dir) in str(excinfo.value)
+    assert "download_models.md" in str(excinfo.value)
 
 
 @pytest.mark.parametrize(

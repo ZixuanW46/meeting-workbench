@@ -70,8 +70,8 @@ class Qwen3AsrMlxBackend:
         _require_darwin(self.name)
         if not (self.model_dir / "config.json").is_file():
             raise FileNotFoundError(
-                "Qwen3-ASR 模型文件不完整；请把模型放到 "
-                "data/models/qwen3-asr-mlx/（至少包含 config.json）"
+                f"Qwen3-ASR 模型文件不完整；请按 scripts/download_models.md 把模型放到 "
+                f"{self.model_dir}/（至少包含 config.json）"
             )
         # macOS 专属依赖只能在真正加载时导入，Linux/CI 默认 fake 不触碰它们。
         import mlx.core as mx
@@ -93,10 +93,13 @@ class Qwen3AsrMlxBackend:
     def transcribe(self, audio_path: Path, hotwords: Sequence[str] = ()) -> list[AsrSegment]:
         if self._model is None:
             raise RuntimeError("ASR 后端未加载（先 load()）")
-        # mlx-audio 当前没有独立 hotwords 参数；快照仍由 worker 固定并传入，
-        # 后端升级支持提示词时可在这里接入，不能把数据发往云端。
-        del hotwords
-        result = self._model.generate(str(audio_path), language="Chinese")
+        # mlx-audio 的 Qwen3-ASR 提供官方 hotwords 参数（折进 system_prompt 做偏置）；
+        # 快照由 worker 固定并传入，全程只在本机推理，不把数据发往云端。
+        result = self._model.generate(
+            str(audio_path),
+            language="Chinese",
+            hotwords=list(hotwords) or None,
+        )
         segments = getattr(result, "segments", None) or []
         if segments:
             return [

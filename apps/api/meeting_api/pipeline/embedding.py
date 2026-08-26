@@ -67,14 +67,14 @@ class SherpaOnnxEmbeddingBackend:
         _require_darwin(self.name)
         if not self.model_path.is_file():
             raise FileNotFoundError(
-                "sherpa-onnx 声纹模型文件不存在；请把模型放到 "
-                "data/models/sherpa-onnx/embedding.onnx"
+                f"sherpa-onnx 声纹模型文件不存在；请按 scripts/download_models.md 把模型放到 "
+                f"{self.model_path}"
             )
         import sherpa_onnx
 
         config = sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(self.model_path))
         if not config.validate():
-            raise RuntimeError("sherpa-onnx 声纹模型配置无效，请检查 data/models/sherpa-onnx/")
+            raise RuntimeError(f"sherpa-onnx 声纹模型配置无效，请检查 {self.model_path.parent}/")
         self._model = sherpa_onnx.SpeakerEmbeddingExtractor(config)
 
     def unload(self) -> None:

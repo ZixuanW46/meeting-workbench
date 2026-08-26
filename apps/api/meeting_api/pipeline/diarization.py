@@ -66,9 +66,9 @@ class SherpaOnnxDiarizationBackend:
     model_subdir = Path("sherpa-onnx")
 
     def __init__(self, models_dir: Path = Path("data/models")) -> None:
-        model_dir = models_dir / self.model_subdir
-        self.segmentation_path = model_dir / "segmentation.onnx"
-        self.embedding_path = model_dir / "embedding.onnx"
+        self.model_dir = models_dir / self.model_subdir
+        self.segmentation_path = self.model_dir / "segmentation.onnx"
+        self.embedding_path = self.model_dir / "embedding.onnx"
         self._model = None
 
     def load(self) -> None:
@@ -80,8 +80,8 @@ class SherpaOnnxDiarizationBackend:
         ]
         if missing:
             raise FileNotFoundError(
-                "sherpa-onnx 切分模型文件不完整；请把模型放到 "
-                "data/models/sherpa-onnx/（需要 segmentation.onnx 和 embedding.onnx）"
+                f"sherpa-onnx 切分模型文件不完整；请按 scripts/download_models.md 把模型放到 "
+                f"{self.model_dir}/（需要 segmentation.onnx 和 embedding.onnx）"
             )
         import sherpa_onnx
 
@@ -101,7 +101,7 @@ class SherpaOnnxDiarizationBackend:
             min_duration_off=0.5,
         )
         if not config.validate():
-            raise RuntimeError("sherpa-onnx 切分模型配置无效，请检查 data/models/sherpa-onnx/")
+            raise RuntimeError(f"sherpa-onnx 切分模型配置无效，请检查 {self.model_dir}/")
         self._model = sherpa_onnx.OfflineSpeakerDiarization(config)
 
     def unload(self) -> None:

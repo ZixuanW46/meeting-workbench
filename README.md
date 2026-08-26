@@ -42,6 +42,7 @@ make dev-web   # 前端     → http://localhost:5173（/api 自动代理到 800
 
 ```bash
 make setup   # venv + npm install
+make migrate # 真实运行前用 Alembic 建库或升级数据库
 make test    # 后端 pytest + 前端 vitest（验收命令）
 make lint    # ruff + tsc --noEmit
 ```

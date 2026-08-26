@@ -16,7 +16,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         engine = make_engine(settings.resolved_database_url())
-        # M0 简化：启动时直接建表。M1 起改为要求先跑 Alembic 迁移。
+        # 测试依赖 lifespan 自动建临时库；真实运行按 README 先执行 Alembic 迁移。
         init_db(engine)
         app.state.engine = engine
         app.state.session_factory = make_session_factory(engine)

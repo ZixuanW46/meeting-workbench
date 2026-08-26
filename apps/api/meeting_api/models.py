@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import String
+from sqlalchemy import String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from meeting_api.db import Base
@@ -26,4 +26,5 @@ class Meeting(Base):
     state: Mapped[str] = mapped_column(String(32), default=MeetingState.DRAFT.value)
     # 预计人数是先验，不是硬约束；None = 不确定
     expected_speakers: Mapped[int | None] = mapped_column(default=None)
+    hotwords_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]")
     created_at: Mapped[datetime] = mapped_column(default=_now)

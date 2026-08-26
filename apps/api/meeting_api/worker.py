@@ -12,7 +12,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from meeting_api.config import Settings
 from meeting_api.events import EventStore
-from meeting_api.minutes.adapter import FakeMinutesAdapter, MinutesAdapter, MinutesCliError
+from meeting_api.minutes.adapter import (
+    MinutesAdapter,
+    MinutesCliError,
+    resolve_minutes_adapter,
+)
 from meeting_api.models import Meeting, Person, SpeakerCluster, TranscriptSegment
 from meeting_api.pipeline.asr import AsrBackend, AsrSegment, get_asr_backend
 from meeting_api.pipeline.diarization import (
@@ -52,7 +56,9 @@ class Worker:
         self.diarization_backend = diarization_backend or get_diarization_backend("fake")
         self.model_slot = model_slot or SingleModelSlot()
         self.events = event_store or EventStore()
-        self.minutes_adapter = minutes_adapter or FakeMinutesAdapter()
+        self.minutes_adapter = minutes_adapter or resolve_minutes_adapter(
+            settings.minutes_backend
+        )
         self._process_lock = threading.Lock()
 
     def process_next(self) -> str | None:

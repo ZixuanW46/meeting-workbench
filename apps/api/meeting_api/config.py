@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -17,6 +18,9 @@ class Settings(BaseSettings):
     database_url: str = ""  # 留空则用 data_dir/meeting-workbench.sqlite3
     worker_disabled: bool = False
     worker_poll_seconds: float = 1.0
+    # auto：按本机 PATH 选 claude/codex，都没有则纪要失败进 PARTIAL_READY；
+    # 测试固定用 fake，绝不真调 CLI。
+    minutes_backend: Literal["auto", "claude", "codex", "fake"] = "auto"
 
     def resolved_database_url(self) -> str:
         if self.database_url:

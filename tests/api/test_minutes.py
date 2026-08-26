@@ -2,12 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from meeting_api.config import Settings
 from meeting_api.minutes.adapter import (
+    AutoMinutesAdapter,
     ClaudeCliAdapter,
     CodexCliAdapter,
     FakeMinutesAdapter,
     MinutesCliError,
+    resolve_minutes_adapter,
 )
+from meeting_api.worker import Worker
 
 NOTE = "纪要文本会发送到 Claude/OpenAI 云端，音频不会上传"
 
@@ -106,9 +112,9 @@ def test_cli_error_makes_partial_ready_then_retry_can_succeed(client):
 
 
 def test_claude_command_uses_print_json_and_disables_file_tools():
-    command = ClaudeCliAdapter().build_command("逐字稿正文")
+    command = ClaudeCliAdapter().build_command()
 
-    assert command[:3] == ["claude", "-p", "逐字稿正文"]
+    assert command[:2] == ["claude", "-p"]
     assert command[command.index("--output-format") + 1] == "json"
     disabled = command[command.index("--disallowedTools") + 1]
     assert {"Read", "Write", "Edit", "Glob", "Grep", "Bash"} <= set(
@@ -118,11 +124,94 @@ def test_claude_command_uses_print_json_and_disables_file_tools():
 
 
 def test_codex_command_uses_exec_without_bare():
-    command = CodexCliAdapter().build_command("逐字稿正文")
+    command = CodexCliAdapter().build_command()
 
-    assert command[:3] == ["codex", "exec", "逐字稿正文"]
+    assert command[:2] == ["codex", "exec"]
     assert command[command.index("--sandbox") + 1] == "read-only"
+    # 提示词经 stdin（"-"）传入，不进 argv。
+    assert command[-1] == "-"
     assert "--bare" not in command
+
+
+def _write_script(path: Path, body: str) -> Path:
+    path.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def test_claude_adapter_sends_transcript_via_stdin_not_argv(tmp_path):
+    # 逐字稿走 stdin，避免长会议撞 argv 单参数上限（ARG_MAX）。
+    fake_claude = _write_script(
+        tmp_path / "claude",
+        'input=$(cat)\nprintf \'{"result": "收到:%s"}\' "$input"',
+    )
+
+    adapter = ClaudeCliAdapter(executable=str(fake_claude))
+
+    assert "逐字稿正文" not in adapter.build_command()
+    assert adapter.generate("逐字稿正文") == "收到:逐字稿正文"
+
+
+def test_codex_adapter_sends_transcript_via_stdin_not_argv(tmp_path):
+    fake_codex = _write_script(tmp_path / "codex", "cat")
+
+    adapter = CodexCliAdapter(executable=str(fake_codex))
+
+    assert "逐字稿正文" not in adapter.build_command()
+    assert adapter.generate("逐字稿正文") == "逐字稿正文"
+
+
+def test_nonzero_exit_and_timeout_raise_minutes_cli_error(tmp_path):
+    failing = _write_script(tmp_path / "claude", "echo '配额不足' >&2\nexit 3")
+    hanging = _write_script(tmp_path / "codex", "exec sleep 30")
+
+    with pytest.raises(MinutesCliError, match="配额不足"):
+        ClaudeCliAdapter(executable=str(failing)).generate("逐字稿正文")
+    with pytest.raises(MinutesCliError, match="超时"):
+        CodexCliAdapter(executable=str(hanging), timeout_seconds=0.2).generate("逐字稿正文")
+
+
+def test_auto_adapter_prefers_claude_then_codex_then_fails(tmp_path):
+    both = tmp_path / "both"
+    both.mkdir()
+    _write_script(both / "claude", "")
+    _write_script(both / "codex", "")
+    codex_only = tmp_path / "codex-only"
+    codex_only.mkdir()
+    _write_script(codex_only / "codex", "")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+
+    assert isinstance(AutoMinutesAdapter(path=str(both)).resolve(), ClaudeCliAdapter)
+    assert isinstance(AutoMinutesAdapter(path=str(codex_only)).resolve(), CodexCliAdapter)
+    with pytest.raises(MinutesCliError, match="未找到"):
+        AutoMinutesAdapter(path=str(empty)).resolve()
+
+
+def test_worker_default_adapter_follows_settings_backend(tmp_path):
+    def make_worker(backend: str) -> Worker:
+        return Worker(
+            session_factory=None,
+            settings=Settings(data_dir=tmp_path, minutes_backend=backend),
+        )
+
+    # 真实运行默认 auto：按本机 CLI 选择，绝不默默产出 fake 纪要。
+    assert isinstance(make_worker("auto").minutes_adapter, AutoMinutesAdapter)
+    assert isinstance(make_worker("fake").minutes_adapter, FakeMinutesAdapter)
+    assert isinstance(resolve_minutes_adapter("claude"), ClaudeCliAdapter)
+    assert isinstance(resolve_minutes_adapter("codex"), CodexCliAdapter)
+
+
+def test_auto_without_any_cli_makes_meeting_partial_ready(client, tmp_path):
+    meeting_id = _prepare_generating_minutes(client)
+    empty = tmp_path / "empty-bin"
+    empty.mkdir()
+    client.app.state.worker.minutes_adapter = AutoMinutesAdapter(path=str(empty))
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    detail = client.get(f"/api/meetings/{meeting_id}").json()
+    assert detail["state"] == "PARTIAL_READY"
 
 
 def test_minutes_cli_settings_probes_executables_on_path(client, tmp_path, monkeypatch):

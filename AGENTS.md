@@ -2,6 +2,12 @@
 
 本仓库按 `ROADMAP.md` 的 milestone 顺序开发。一次只做一个 milestone，做完必须全绿再停。
 
+## 谁写哪一层（2026-08-27 锁定）
+
+- **后端 / 领域 / 迁移 / API 测试**：Codex 实现，Box 审，Fable 5 再审。
+- **产品前端 `apps/web/`**：只由 **Claude Fable 5** 写。Codex **禁止**改 `apps/web/`（含页面、样式、组件、前端测试）。
+- 前端视觉参考 [Linear](https://linear.app)：克制、紧凑、浅色安静表面、细边框、列表优先，不要 Ant Design 默认企业后台（大蓝顶栏、厚阴影、宽留白）。Fable 5 可以换掉 AntD 默认壳；业务判断仍以后端为准。
+
 ## 工作流（每个 milestone 固定四步）
 
 1. **先写失败测试**：按 ROADMAP 该节「先写失败测试」列的用例写测试，跑一遍确认它们**因缺实现而失败**（不是因语法错误失败）。
@@ -27,7 +33,7 @@ make dev-web    # vite :5173（/api 代理到 :8000）
 - `packages/domain/meeting_domain/`：**纯领域逻辑**。禁止 import FastAPI、SQLAlchemy、任何模型运行时。状态机、说话人确认规则、词库快照、声纹入库条件都在这里，且必须有单测。
 - `apps/api/meeting_api/`：FastAPI + SQLAlchemy。所有状态迁移必须调 `meeting_domain.transition()`，禁止直接给 `meeting.state` 赋新值绕过校验。
 - `apps/api/meeting_api/pipeline/`：模型后端接口。任何模型只能通过 `SingleModelSlot` 使用（16GB 内存串行硬约束）。
-- `apps/web/`：Vite + React + TS + AntD。业务判断（如「每卡必须有决定」）以后端为准，前端只做体验层拦截。
+- `apps/web/`：Vite + React + TS。视觉跟 Linear，不跟 AntD 默认主题。业务判断（如「每卡必须有决定」）以后端为准，前端只做体验层拦截。**只许 Fable 5 改这个目录。**
 - `tests/`：后端与领域测试都在根 `tests/`（pytest 从 `pyproject.toml` 读 `pythonpath`，无需安装即可跑）。前端测试放组件旁边 `*.test.tsx`。
 
 ## 数据库

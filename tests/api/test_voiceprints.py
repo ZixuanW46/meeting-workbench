@@ -128,9 +128,12 @@ def test_list_voiceprints_exposes_only_identity_metadata(client):
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body) == 1
-    assert set(body[0]) == {"id", "person_id", "display_name"}
-    assert body[0]["display_name"] == "王芳"
+    # 与热词 API 保持一致的 {items: []} 包装。
+    assert set(body) == {"items"}
+    items = body["items"]
+    assert len(items) == 1
+    assert set(items[0]) == {"id", "person_id", "display_name"}
+    assert items[0]["display_name"] == "王芳"
 
     flattened = list(_walk(body))
     forbidden_keys = {"embedding", "vector", "path", "file_path", "audio_path"}
@@ -148,7 +151,7 @@ def test_delete_voiceprint_removes_it_and_future_worker_no_longer_suggests_perso
     _submit_new_person_and_unknown(client, enrolled_meeting_id)
     listed = client.get("/api/voiceprints")
     assert listed.status_code == 200
-    voiceprint = listed.json()[0]
+    voiceprint = listed.json()["items"][0]
 
     matched_meeting_id = _prepare_review(client, title="删除前应能匹配")
     cards_before = client.get(f"/api/meetings/{matched_meeting_id}/review").json()["cards"]
@@ -159,7 +162,7 @@ def test_delete_voiceprint_removes_it_and_future_worker_no_longer_suggests_perso
 
     assert deleted.status_code == 204
     assert deleted.content == b""
-    assert client.get("/api/voiceprints").json() == []
+    assert client.get("/api/voiceprints").json() == {"items": []}
 
     unmatched_meeting_id = _prepare_review(client, title="删除后不再匹配")
     cards_after = client.get(f"/api/meetings/{unmatched_meeting_id}/review").json()["cards"]

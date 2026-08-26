@@ -17,8 +17,14 @@ class VoiceprintResponse(BaseModel):
     display_name: str
 
 
-@router.get("", response_model=list[VoiceprintResponse])
-def list_voiceprints(request: Request) -> list[VoiceprintResponse]:
+class VoiceprintListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[VoiceprintResponse]
+
+
+@router.get("", response_model=VoiceprintListResponse)
+def list_voiceprints(request: Request) -> VoiceprintListResponse:
     session_factory = request.app.state.session_factory
     with session_factory() as session:
         rows = session.execute(
@@ -26,14 +32,16 @@ def list_voiceprints(request: Request) -> list[VoiceprintResponse]:
             .join(Person, Person.id == Voiceprint.person_id)
             .order_by(Person.display_name, Voiceprint.id)
         ).all()
-        return [
-            VoiceprintResponse(
-                id=voiceprint.id,
-                person_id=voiceprint.person_id,
-                display_name=display_name,
-            )
-            for voiceprint, display_name in rows
-        ]
+        return VoiceprintListResponse(
+            items=[
+                VoiceprintResponse(
+                    id=voiceprint.id,
+                    person_id=voiceprint.person_id,
+                    display_name=display_name,
+                )
+                for voiceprint, display_name in rows
+            ]
+        )
 
 
 @router.delete("/{voiceprint_id}", status_code=status.HTTP_204_NO_CONTENT)

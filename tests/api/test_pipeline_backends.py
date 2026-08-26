@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 import pytest
@@ -36,6 +37,43 @@ def test_real_backends_not_wired_yet():
         get_asr_backend("qwen3-asr-mlx")
     with pytest.raises(NotImplementedError):
         get_diarization_backend("sherpa-onnx")
+
+
+def test_single_model_slot_blocks_other_thread_until_released():
+    # M10 起 HTTP 线程也会占槽（提交决定时入库声纹）；
+    # worker 正在转写时必须排队等待，而不是 500，也不允许两个模型同时驻留。
+    slot = SingleModelSlot()
+    asr = FakeAsrBackend()
+    diar = FakeDiarizationBackend()
+    asr_holding = threading.Event()
+    release_asr = threading.Event()
+    events: list[str] = []
+
+    def worker_thread() -> None:
+        with slot.use(asr):
+            events.append("asr:enter")
+            asr_holding.set()
+            assert release_asr.wait(timeout=5)
+            events.append("asr:exit")
+
+    def http_thread() -> None:
+        assert asr_holding.wait(timeout=5)
+        with slot.use(diar):
+            assert not asr.loaded
+            events.append("diar:enter")
+
+    first = threading.Thread(target=worker_thread)
+    second = threading.Thread(target=http_thread)
+    first.start()
+    second.start()
+    asr_holding.wait(timeout=5)
+    release_asr.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert events == ["asr:enter", "asr:exit", "diar:enter"]
+    assert not asr.loaded
+    assert not diar.loaded
 
 
 def test_single_model_slot_enforces_serial_loading():

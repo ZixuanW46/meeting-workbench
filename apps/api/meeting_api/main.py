@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,6 +9,18 @@ from fastapi import FastAPI
 from meeting_api.config import Settings
 from meeting_api.db import init_db, make_engine, make_session_factory
 from meeting_api.routes import health, meetings, upload
+from meeting_api.worker import Worker
+
+logger = logging.getLogger(__name__)
+
+
+def _run_worker_loop(worker: Worker, stop_event: threading.Event, poll_seconds: float) -> None:
+    while not stop_event.is_set():
+        try:
+            worker.process_next()
+        except Exception:
+            logger.exception("worker 轮询失败")
+        stop_event.wait(poll_seconds)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -20,8 +34,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         init_db(engine)
         app.state.engine = engine
         app.state.session_factory = make_session_factory(engine)
-        yield
-        engine.dispose()
+        app.state.worker = Worker(app.state.session_factory, settings)
+        stop_event = threading.Event()
+        worker_thread: threading.Thread | None = None
+        if not settings.worker_disabled:
+            worker_thread = threading.Thread(
+                target=_run_worker_loop,
+                args=(app.state.worker, stop_event, settings.worker_poll_seconds),
+                name="meeting-worker",
+                daemon=True,
+            )
+            worker_thread.start()
+        try:
+            yield
+        finally:
+            stop_event.set()
+            if worker_thread is not None:
+                worker_thread.join(timeout=5)
+            engine.dispose()
 
     app = FastAPI(title="meeting-workbench", lifespan=lifespan)
     app.state.settings = settings

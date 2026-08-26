@@ -15,6 +15,8 @@ class Settings(BaseSettings):
 
     data_dir: Path = Path("data")
     database_url: str = ""  # 留空则用 data_dir/meeting-workbench.sqlite3
+    worker_disabled: bool = False
+    worker_poll_seconds: float = 1.0
 
     def resolved_database_url(self) -> str:
         if self.database_url:

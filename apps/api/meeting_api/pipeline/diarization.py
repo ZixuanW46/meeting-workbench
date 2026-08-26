@@ -51,9 +51,10 @@ class FakeDiarizationBackend:
         if not self._loaded:
             raise RuntimeError("diarization 后端未加载（先 load()）")
         n = expected_speakers or 2
+        # 每簇至少留 2 段，确认停点才凑得齐 2–3 个试听片段。
         return [
             SpeakerSegment(float(i * 5), float(i * 5 + 5), f"S{i % n + 1}")
-            for i in range(4)
+            for i in range(max(4, 2 * n))
         ]
 
 

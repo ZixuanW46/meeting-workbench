@@ -41,7 +41,9 @@ def create_meeting(payload: MeetingCreate, request: Request) -> MeetingResponse:
 def list_meetings(request: Request) -> MeetingListResponse:
     session_factory = request.app.state.session_factory
     with session_factory() as session:
-        rows = session.scalars(select(Meeting).order_by(Meeting.created_at.desc())).all()
+        rows = session.scalars(
+            select(Meeting).order_by(Meeting.created_at.desc(), Meeting.id.desc())
+        ).all()
         return MeetingListResponse(items=[_to_response(meeting) for meeting in rows])
 
 

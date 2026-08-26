@@ -66,3 +66,19 @@ def test_list_meetings_in_reverse_creation_order(client):
     items = response.json()["items"]
     assert [item["id"] for item in items] == [second["id"], first["id"]]
     assert items == [second, first]
+
+def test_create_meeting_rejects_blank_title(client):
+    response = client.post(
+        "/api/meetings",
+        json={"title": "   ", "expected_speakers": 4, "hotwords": []},
+    )
+    assert response.status_code == 422
+
+
+def test_create_meeting_rejects_zero_expected_speakers(client):
+    response = client.post(
+        "/api/meetings",
+        json={"title": "周会", "expected_speakers": 0, "hotwords": []},
+    )
+    assert response.status_code == 422
+

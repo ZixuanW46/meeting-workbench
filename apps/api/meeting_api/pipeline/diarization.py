@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -58,10 +59,98 @@ class FakeDiarizationBackend:
         ]
 
 
-def get_diarization_backend(name: str = "fake") -> DiarizationBackend:
+class SherpaOnnxDiarizationBackend:
+    """从本地 ONNX 文件加载 sherpa-onnx 离线说话人切分。"""
+
+    name = "sherpa-onnx-diarization"
+    model_subdir = Path("sherpa-onnx")
+
+    def __init__(self, models_dir: Path = Path("data/models")) -> None:
+        model_dir = models_dir / self.model_subdir
+        self.segmentation_path = model_dir / "segmentation.onnx"
+        self.embedding_path = model_dir / "embedding.onnx"
+        self._model = None
+
+    def load(self) -> None:
+        _require_darwin(self.name)
+        missing = [
+            path.name
+            for path in (self.segmentation_path, self.embedding_path)
+            if not path.is_file()
+        ]
+        if missing:
+            raise FileNotFoundError(
+                "sherpa-onnx 切分模型文件不完整；请把模型放到 "
+                "data/models/sherpa-onnx/（需要 segmentation.onnx 和 embedding.onnx）"
+            )
+        import sherpa_onnx
+
+        config = sherpa_onnx.OfflineSpeakerDiarizationConfig(
+            segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
+                pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(
+                    model=str(self.segmentation_path), window_shift_ratio=0.1
+                )
+            ),
+            embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(
+                model=str(self.embedding_path)
+            ),
+            clustering=sherpa_onnx.FastClusteringConfig(
+                num_clusters=-1, threshold=0.5
+            ),
+            min_duration_on=0.3,
+            min_duration_off=0.5,
+        )
+        if not config.validate():
+            raise RuntimeError("sherpa-onnx 切分模型配置无效，请检查 data/models/sherpa-onnx/")
+        self._model = sherpa_onnx.OfflineSpeakerDiarization(config)
+
+    def unload(self) -> None:
+        if self._model is not None and hasattr(self._model, "close"):
+            self._model.close()
+        self._model = None
+
+    @property
+    def loaded(self) -> bool:
+        return self._model is not None
+
+    def diarize(
+        self, audio_path: Path, expected_speakers: int | None = None
+    ) -> list[SpeakerSegment]:
+        if self._model is None:
+            raise RuntimeError("diarization 后端未加载（先 load()）")
+        import numpy as np
+        import soundfile as sf
+
+        audio, sample_rate = sf.read(audio_path, dtype="float32", always_2d=True)
+        samples = np.ascontiguousarray(audio[:, 0])
+        target_rate = self._model.sample_rate
+        if sample_rate != target_rate:
+            sample_count = round(len(samples) * target_rate / sample_rate)
+            samples = np.interp(
+                np.linspace(0, len(samples), sample_count, endpoint=False),
+                np.arange(len(samples)),
+                samples,
+            ).astype("float32")
+        # expected_speakers 是提示而不是硬凑；模型加载配置默认自动聚类。
+        del expected_speakers
+        result = self._model.process(samples).sort_by_start_time()
+        return [
+            SpeakerSegment(float(item.start), float(item.end), f"S{int(item.speaker) + 1}")
+            for item in result
+        ]
+
+
+def _require_darwin(backend_name: str) -> None:
+    if sys.platform != "darwin":
+        raise RuntimeError(f"真实后端 {backend_name} 仅支持 macOS；当前平台请使用 fake")
+
+
+def get_diarization_backend(
+    name: str = "fake", models_dir: Path = Path("data/models")
+) -> DiarizationBackend:
     if name == "fake":
         return FakeDiarizationBackend()
     if name == "sherpa-onnx":
-        # M11：接 sherpa-onnx 切分 + 声纹。此前一律 fake。
-        raise NotImplementedError("sherpa-onnx 在 M11 接入，当前请用 fake")
+        _require_darwin(name)
+        return SherpaOnnxDiarizationBackend(models_dir)
     raise ValueError(f"未知 diarization 后端: {name}")

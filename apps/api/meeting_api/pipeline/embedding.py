@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import struct
+import sys
 from pathlib import Path
 from typing import Protocol
 
@@ -52,7 +53,67 @@ def embedding_to_bytes(vector: EmbeddingVector) -> bytes:
     return struct.pack(f">{len(vector)}f", *vector)
 
 
-def get_embedding_backend(name: str = "fake") -> EmbeddingBackend:
+class SherpaOnnxEmbeddingBackend:
+    """从本地 ONNX 文件加载 sherpa-onnx 声纹提取器。"""
+
+    name = "sherpa-onnx-embedding"
+    model_subdir = Path("sherpa-onnx")
+
+    def __init__(self, models_dir: Path = Path("data/models")) -> None:
+        self.model_path = models_dir / self.model_subdir / "embedding.onnx"
+        self._model = None
+
+    def load(self) -> None:
+        _require_darwin(self.name)
+        if not self.model_path.is_file():
+            raise FileNotFoundError(
+                "sherpa-onnx 声纹模型文件不存在；请把模型放到 "
+                "data/models/sherpa-onnx/embedding.onnx"
+            )
+        import sherpa_onnx
+
+        config = sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(self.model_path))
+        if not config.validate():
+            raise RuntimeError("sherpa-onnx 声纹模型配置无效，请检查 data/models/sherpa-onnx/")
+        self._model = sherpa_onnx.SpeakerEmbeddingExtractor(config)
+
+    def unload(self) -> None:
+        if self._model is not None and hasattr(self._model, "close"):
+            self._model.close()
+        self._model = None
+
+    @property
+    def loaded(self) -> bool:
+        return self._model is not None
+
+    def embed(self, audio_path: Path, cluster_id: str) -> EmbeddingVector:
+        if self._model is None:
+            raise RuntimeError("声纹后端未加载（先 load()）")
+        import numpy as np
+        import soundfile as sf
+
+        del cluster_id
+        audio, sample_rate = sf.read(audio_path, dtype="float32", always_2d=True)
+        samples = np.ascontiguousarray(audio[:, 0])
+        stream = self._model.create_stream()
+        stream.accept_waveform(sample_rate=sample_rate, waveform=samples)
+        stream.input_finished()
+        if not self._model.is_ready(stream):
+            raise RuntimeError("音频太短，无法提取声纹")
+        return tuple(float(value) for value in self._model.compute(stream))
+
+
+def _require_darwin(backend_name: str) -> None:
+    if sys.platform != "darwin":
+        raise RuntimeError(f"真实后端 {backend_name} 仅支持 macOS；当前平台请使用 fake")
+
+
+def get_embedding_backend(
+    name: str = "fake", models_dir: Path = Path("data/models")
+) -> EmbeddingBackend:
     if name == "fake":
         return FakeEmbeddingBackend()
+    if name == "sherpa-onnx":
+        _require_darwin(name)
+        return SherpaOnnxEmbeddingBackend(models_dir)
     raise ValueError(f"未知声纹后端: {name}")

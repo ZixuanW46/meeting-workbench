@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from meeting_api.pipeline.asr import FakeAsrBackend, get_asr_backend
-from meeting_api.pipeline.diarization import FakeDiarizationBackend, get_diarization_backend
+from meeting_api.pipeline.asr import FakeAsrBackend
+from meeting_api.pipeline.diarization import FakeDiarizationBackend
 from meeting_api.pipeline.serial import ModelSlotBusy, SingleModelSlot
 
 AUDIO = Path("/tmp/fake-meeting.wav")
@@ -30,13 +30,6 @@ def test_fake_diarization_uses_expected_speakers_as_prior():
     diar.load()
     clusters = {s.cluster_id for s in diar.diarize(AUDIO, expected_speakers=2)}
     assert clusters == {"S1", "S2"}
-
-
-def test_real_backends_not_wired_yet():
-    with pytest.raises(NotImplementedError):
-        get_asr_backend("qwen3-asr-mlx")
-    with pytest.raises(NotImplementedError):
-        get_diarization_backend("sherpa-onnx")
 
 
 def test_single_model_slot_blocks_other_thread_until_released():

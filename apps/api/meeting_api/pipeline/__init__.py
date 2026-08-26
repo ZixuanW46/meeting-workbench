@@ -5,5 +5,5 @@
 - 同一时刻只允许一个模型驻留内存：一律通过 SingleModelSlot 使用后端，
   禁止 ASR + diarization + 声纹同时常驻。
 - Linux 开发机 / CI 只有 fake 后端；真实后端（Qwen3-ASR MLX、sherpa-onnx）
-  在 M11 于 macOS 上接入，并且永远不在 CI 下载权重。
+  在 M12 于 macOS 上接入，并且永远不在 CI 下载权重。
 """

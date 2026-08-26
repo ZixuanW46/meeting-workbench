@@ -12,6 +12,9 @@ def client(tmp_path, monkeypatch):
         data_dir=tmp_path / "data",
         database_url=f"sqlite:///{tmp_path}/test.sqlite3",
         minutes_backend="fake",
+        asr_backend="fake",
+        diarization_backend="fake",
+        embedding_backend="fake",
     )
     app = create_app(settings)
     with TestClient(app) as c:

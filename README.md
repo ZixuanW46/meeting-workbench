@@ -2,7 +2,7 @@
 
 本地会议工作台：上传录音 → 本地转写 + 认人 → **人工确认说话人**（唯一必经停点）→ 用本机已登录的 Claude Code / Codex CLI 生成纪要。音频永不上云；只有纪要文本会经本机 CLI 发给 Claude/OpenAI。
 
-v1 目标机：**M4 Mac Mini（16GB 统一内存），原生 macOS，无 Docker**。当前阶段模型全部是 fake 后端（接口已留好），真实模型（Qwen3-ASR MLX、sherpa-onnx）按 `ROADMAP.md` M12 接入。
+v1 目标机：**M4 Mac Mini（16GB 统一内存），原生 macOS，无 Docker**。默认使用 fake 后端；M12 起可在 Mac 上按 `scripts/download_models.md` 手动准备 Qwen3-ASR MLX 与 sherpa-onnx 模型后，通过环境变量启用真实后端。
 
 ## 在 Mac Mini（macOS，Apple Silicon）上启动
 
@@ -17,7 +17,7 @@ git clone <本仓库> && cd meeting-workbench
 python3.12 -m venv .venv
 .venv/bin/pip install -U pip
 .venv/bin/pip install -e ".[dev]"
-# 以后接真实模型时（M12）再加：.venv/bin/pip install -e ".[mac]"
+# Mac 上启用真实模型时再安装：.venv/bin/pip install -e ".[mac]"
 
 # 前端依赖
 cd apps/web && npm install && cd ../..

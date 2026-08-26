@@ -71,9 +71,16 @@ class Worker:
     ) -> None:
         self.session_factory = session_factory
         self.settings = settings
-        self.asr_backend = asr_backend or get_asr_backend("fake")
-        self.diarization_backend = diarization_backend or get_diarization_backend("fake")
-        self.embedding_backend = embedding_backend or get_embedding_backend("fake")
+        models_dir = settings.data_dir / "models"
+        self.asr_backend = asr_backend or get_asr_backend(
+            settings.asr_backend, models_dir
+        )
+        self.diarization_backend = diarization_backend or get_diarization_backend(
+            settings.diarization_backend, models_dir
+        )
+        self.embedding_backend = embedding_backend or get_embedding_backend(
+            settings.embedding_backend, models_dir
+        )
         self.model_slot = model_slot or SingleModelSlot()
         self.events = event_store or EventStore()
         self.minutes_adapter = minutes_adapter or resolve_minutes_adapter(

@@ -31,7 +31,11 @@ def _submit_speaker_decisions(client, meeting_id: str) -> None:
         f"/api/meetings/{meeting_id}/review/decisions",
         json={
             "decisions": [
-                {"cluster_id": "S1", "kind": "CONFIRM"},
+                {
+                    "cluster_id": "S1",
+                    "kind": "NEW_PERSON",
+                    "display_name": "已知用户 1",
+                },
                 {"cluster_id": "S2", "kind": "KEEP_UNKNOWN"},
             ]
         },

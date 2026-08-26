@@ -3,7 +3,16 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import BigInteger, Boolean, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Float,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from meeting_api.db import Base
@@ -55,6 +64,16 @@ class Person(Base):
     display_name: Mapped[str] = mapped_column(String(200))
 
 
+class Voiceprint(Base):
+    __tablename__ = "voiceprints"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    person_id: Mapped[str] = mapped_column(
+        ForeignKey("persons.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    embedding: Mapped[bytes] = mapped_column(LargeBinary)
+
+
 class TranscriptSegment(Base):
     __tablename__ = "transcript_segments"
 
@@ -78,6 +97,8 @@ class SpeakerCluster(Base):
     cluster_id: Mapped[str] = mapped_column(String(32))
     suggested_person_id: Mapped[str | None] = mapped_column(String(32), default=None)
     sample_clips_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]")
+    # M10 fake 质量：默认合格；测试可显式降分，不引入真实 VAD。
+    quality_score: Mapped[float] = mapped_column(Float, default=1.0, server_default="1.0")
     person_id: Mapped[str | None] = mapped_column(
         ForeignKey("persons.id"), default=None
     )

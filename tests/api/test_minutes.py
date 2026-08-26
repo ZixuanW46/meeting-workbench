@@ -49,7 +49,11 @@ def _prepare_generating_minutes(client, *, keep_unknown: bool = False) -> str:
         f"/api/meetings/{meeting_id}/review/decisions",
         json={
             "decisions": [
-                {"cluster_id": "S1", "kind": "CONFIRM"},
+                {
+                    "cluster_id": "S1",
+                    "kind": "NEW_PERSON",
+                    "display_name": "王芳",
+                },
                 second_decision,
             ]
         },

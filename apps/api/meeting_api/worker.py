@@ -23,6 +23,7 @@ from meeting_api.models import (
     Person,
     SpeakerCluster,
     TranscriptSegment,
+    Voiceprint,
 )
 from meeting_api.pipeline.asr import AsrBackend, AsrSegment, get_asr_backend
 from meeting_api.pipeline.diarization import (
@@ -30,9 +31,20 @@ from meeting_api.pipeline.diarization import (
     SpeakerSegment,
     get_diarization_backend,
 )
+from meeting_api.pipeline.embedding import (
+    EmbeddingBackend,
+    embedding_to_bytes,
+    get_embedding_backend,
+)
 from meeting_api.pipeline.serial import SingleModelSlot
 from meeting_api.storage import meeting_dir
-from meeting_domain import MeetingState, snapshot, transition
+from meeting_domain import (
+    MeetingState,
+    SpeakerDecision,
+    eligible_for_enrollment,
+    snapshot,
+    transition,
+)
 
 STEP_VALIDATING = "VALIDATING"
 STEP_ASR = "ASR"
@@ -52,6 +64,7 @@ class Worker:
         *,
         asr_backend: AsrBackend | None = None,
         diarization_backend: DiarizationBackend | None = None,
+        embedding_backend: EmbeddingBackend | None = None,
         model_slot: SingleModelSlot | None = None,
         event_store: EventStore | None = None,
         minutes_adapter: MinutesAdapter | None = None,
@@ -60,6 +73,7 @@ class Worker:
         self.settings = settings
         self.asr_backend = asr_backend or get_asr_backend("fake")
         self.diarization_backend = diarization_backend or get_diarization_backend("fake")
+        self.embedding_backend = embedding_backend or get_embedding_backend("fake")
         self.model_slot = model_slot or SingleModelSlot()
         self.events = event_store or EventStore()
         self.minutes_adapter = minutes_adapter or resolve_minutes_adapter(
@@ -129,7 +143,7 @@ class Worker:
                 self._persist_segments(session, meeting_id, asr_segments, speaker_segments)
 
                 self._set_step(session, meeting, STEP_VOICEPRINT_MATCHING)
-                self._apply_fake_suggestions(session, meeting_id)
+                self._apply_voiceprint_suggestions(session, meeting_id, audio_path)
 
                 self._set_step(session, meeting, STEP_PREPARING_REVIEW)
                 self._prepare_review_samples(session, meeting_id, speaker_segments)
@@ -272,21 +286,83 @@ class Worker:
         )
         session.commit()
 
-    @staticmethod
-    def _apply_fake_suggestions(session: Session, meeting_id: str) -> None:
+    def _apply_voiceprint_suggestions(
+        self,
+        session: Session,
+        meeting_id: str,
+        audio_path: Path,
+    ) -> None:
         clusters = session.scalars(
-            select(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
+            select(SpeakerCluster)
+            .where(SpeakerCluster.meeting_id == meeting_id)
+            .order_by(SpeakerCluster.cluster_id)
         ).all()
-        if any(cluster.cluster_id == "S1" for cluster in clusters):
-            known_person = session.get(Person, "fake-person-1")
-            if known_person is None:
-                session.add(Person(id="fake-person-1", display_name="已知用户 1"))
         for cluster in clusters:
-            # 只是建议，不落最终身份；人工确认仍是唯一停点。
-            cluster.suggested_person_id = (
-                "fake-person-1" if cluster.cluster_id == "S1" else None
-            )
+            cluster.suggested_person_id = None
+
+        voiceprints = session.scalars(
+            select(Voiceprint)
+            .join(Person, Person.id == Voiceprint.person_id)
+            .order_by(Voiceprint.id)
+        ).all()
+        if voiceprints:
+            person_by_embedding = {
+                voiceprint.embedding: voiceprint.person_id for voiceprint in voiceprints
+            }
+            with self.model_slot.use(self.embedding_backend) as embedding_backend:
+                for cluster in clusters:
+                    candidate = embedding_to_bytes(
+                        embedding_backend.embed(audio_path, cluster.cluster_id)
+                    )
+                    # 这里只给建议；人工决定仍是唯一落名入口。
+                    cluster.suggested_person_id = person_by_embedding.get(candidate)
         session.commit()
+
+    def enroll_voiceprints(
+        self,
+        session: Session,
+        meeting: Meeting,
+        clusters: Sequence[SpeakerCluster],
+        decisions: Sequence[SpeakerDecision],
+    ) -> None:
+        """在 M5 决定应用后，为符合领域规则的簇生成或更新声纹。"""
+        decision_by_cluster = {decision.cluster_id: decision for decision in decisions}
+        eligible_clusters = [
+            cluster
+            for cluster in clusters
+            if cluster.person_id is not None
+            and eligible_for_enrollment(
+                decision_by_cluster[cluster.cluster_id],
+                cluster.quality_score,
+            )
+        ]
+        if not eligible_clusters:
+            return
+
+        audio_path = self._validate_audio(meeting)
+        person_ids = {cluster.person_id for cluster in eligible_clusters}
+        existing_by_person = {
+            voiceprint.person_id: voiceprint
+            for voiceprint in session.scalars(
+                select(Voiceprint).where(Voiceprint.person_id.in_(person_ids))
+            )
+        }
+        with self.model_slot.use(self.embedding_backend) as embedding_backend:
+            for cluster in eligible_clusters:
+                person_id = cluster.person_id
+                if person_id is None:  # 已由筛选排除，仅用于类型收窄。
+                    continue
+                blob = embedding_to_bytes(
+                    embedding_backend.embed(audio_path, cluster.cluster_id)
+                )
+                voiceprint = existing_by_person.get(person_id)
+                if voiceprint is None:
+                    voiceprint = Voiceprint(person_id=person_id, embedding=blob)
+                    session.add(voiceprint)
+                    existing_by_person[person_id] = voiceprint
+                else:
+                    voiceprint.embedding = blob
+        session.flush()
 
     @staticmethod
     def _prepare_review_samples(

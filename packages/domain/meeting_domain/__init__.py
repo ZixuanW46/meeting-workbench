@@ -25,12 +25,17 @@ from meeting_domain.state import (
     can_transition,
     transition,
 )
+from meeting_domain.voiceprint import (
+    VOICEPRINT_QUALITY_THRESHOLD,
+    eligible_for_enrollment,
+)
 
 __all__ = [
     "ACTIVE_STATES",
     "RETRANSCRIBABLE_STATES",
     "TERMINAL_STATES",
     "TRANSITIONS",
+    "VOICEPRINT_QUALITY_THRESHOLD",
     "DecisionKind",
     "FakeMeetingPipeline",
     "InvalidTransition",
@@ -40,6 +45,7 @@ __all__ = [
     "SpeakerDecision",
     "can_transition",
     "decision_field_error",
+    "eligible_for_enrollment",
     "has_unconfirmed_speakers",
     "review_complete",
     "snapshot",

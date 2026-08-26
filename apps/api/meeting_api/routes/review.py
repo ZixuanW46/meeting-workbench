@@ -245,6 +245,12 @@ def submit_decisions(
             cluster.person_id = person_id
             cluster.is_unknown = person_id is None
         meeting.has_unconfirmed_speakers = has_unconfirmed_speakers(domain_decisions)
+        request.app.state.worker.enroll_voiceprints(
+            session,
+            meeting,
+            clusters,
+            domain_decisions,
+        )
         generating = transition(applying, MeetingState.GENERATING_MINUTES)
         meeting.state = generating.value
         session.commit()

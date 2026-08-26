@@ -1,16 +1,30 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select, text
 
-from meeting_api.models import Meeting, SpeakerCluster
+from meeting_api.models import Meeting, Person, SpeakerCluster, Voiceprint
+from meeting_api.pipeline.embedding import FakeEmbeddingBackend, embedding_to_bytes
+from meeting_api.pipeline.serial import SingleModelSlot
+
+
+def _seed_s1_voiceprint(client) -> None:
+    backend = FakeEmbeddingBackend()
+    with SingleModelSlot().use(backend) as loaded:
+        embedding = embedding_to_bytes(loaded.embed(Path("unused.wav"), "S1"))
+    with client.app.state.session_factory() as session:
+        session.add(Person(id="fake-person-1", display_name="已知用户 1"))
+        session.add(Voiceprint(person_id="fake-person-1", embedding=embedding))
+        session.commit()
 
 
 def _prepare_review(
     client, *, title: str = "说话人确认测试", expected_speakers: int = 2
 ) -> str:
+    _seed_s1_voiceprint(client)
     created = client.post(
         "/api/meetings",
         json={"title": title, "expected_speakers": expected_speakers},

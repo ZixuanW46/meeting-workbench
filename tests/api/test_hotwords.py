@@ -50,7 +50,11 @@ def _submit_decisions(client, meeting_id: str) -> None:
         f"/api/meetings/{meeting_id}/review/decisions",
         json={
             "decisions": [
-                {"cluster_id": "S1", "kind": "CONFIRM"},
+                {
+                    "cluster_id": "S1",
+                    "kind": "NEW_PERSON",
+                    "display_name": "已知用户 1",
+                },
                 {"cluster_id": "S2", "kind": "KEEP_UNKNOWN"},
             ]
         },
@@ -141,6 +145,11 @@ def _prepare_state_with_artifacts(client, target_state: str) -> str:
             )
         assert client.app.state.worker.process_next() == meeting_id
         assert client.get(f"/api/meetings/{meeting_id}").json()["state"] == target_state
+    else:
+        # 本用例验证重转写不删除跨会议人员资产；停在审核态时显式造一位人员。
+        with client.app.state.session_factory() as session:
+            session.add(Person(display_name="跨会议人员"))
+            session.commit()
 
     target_dir = meeting_dir(client.app.state.settings, meeting_id)
     target_dir.mkdir(parents=True, exist_ok=True)

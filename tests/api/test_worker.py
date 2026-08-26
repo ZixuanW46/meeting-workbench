@@ -6,9 +6,10 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from meeting_api.models import Meeting, SpeakerCluster, TranscriptSegment
+from meeting_api.models import Meeting, Person, SpeakerCluster, TranscriptSegment, Voiceprint
 from meeting_api.pipeline.asr import AsrSegment, FakeAsrBackend
 from meeting_api.pipeline.diarization import FakeDiarizationBackend, SpeakerSegment
+from meeting_api.pipeline.embedding import FakeEmbeddingBackend, embedding_to_bytes
 from meeting_api.pipeline.serial import SingleModelSlot
 from meeting_api.worker import Worker
 
@@ -35,6 +36,16 @@ def _worker(client, **overrides) -> Worker:
     }
     options.update(overrides)
     return Worker(**options)
+
+
+def _seed_s1_voiceprint(client) -> None:
+    backend = FakeEmbeddingBackend()
+    with SingleModelSlot().use(backend) as loaded:
+        embedding = embedding_to_bytes(loaded.embed(Path("unused.wav"), "S1"))
+    with client.app.state.session_factory() as session:
+        session.add(Person(id="fake-person-1", display_name="已知用户 1"))
+        session.add(Voiceprint(person_id="fake-person-1", embedding=embedding))
+        session.commit()
 
 
 def test_process_next_synchronously_advances_uploaded_meeting_to_review(client):
@@ -74,7 +85,8 @@ def test_process_next_persists_transcript_and_speaker_review_artifacts(client):
         samples = json.loads(cluster.sample_clips_json)
         assert 2 <= len(samples) <= 3
         assert all(sample["start_seconds"] < sample["end_seconds"] for sample in samples)
-    assert clusters[0].suggested_person_id == "fake-person-1"
+    # M10：声纹库为空时不得再凭簇 id 硬编码建议身份。
+    assert clusters[0].suggested_person_id is None
     assert clusters[1].suggested_person_id is None
 
 
@@ -156,6 +168,7 @@ class ProbeDiarization(FakeDiarizationBackend):
 
 def test_models_use_single_slot_and_are_never_loaded_together(client):
     _queue_meeting(client)
+    _seed_s1_voiceprint(client)
     events: list[str] = []
     asr = ProbeAsr(events)
     diarization = ProbeDiarization(events)
@@ -170,7 +183,7 @@ def test_models_use_single_slot_and_are_never_loaded_together(client):
         model_slot=slot,
     ).process_next()
 
-    assert slot.used_backends == ["fake-asr", "fake-diarization"]
+    assert slot.used_backends == ["fake-asr", "fake-diarization", "fake-embedding"]
     assert events == ["asr:load", "asr:unload", "diarization:load", "diarization:unload"]
     assert not asr.loaded
     assert not diarization.loaded

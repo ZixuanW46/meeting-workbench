@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import subprocess
 import tarfile
@@ -57,6 +58,13 @@ def test_mac_install_dry_run_is_safe_on_linux():
 def test_launchd_files_exist_and_install_dry_run_does_not_execute_launchctl(tmp_path):
     plist = SCRIPTS / "launchd" / "com.will.meeting-workbench.plist"
     assert plist.is_file()
+    plist_text = plist.read_text(encoding="utf-8")
+    assert "<string>127.0.0.1</string>" in plist_text
+    assert "<string>8000</string>" in plist_text
+    # plist 里的占位符必须都被 install_launchd.sh 的 sed 替换掉。
+    install_text = (SCRIPTS / "launchd" / "install_launchd.sh").read_text(encoding="utf-8")
+    for placeholder in set(re.findall(r"__[A-Z_]+__", plist_text)):
+        assert placeholder in install_text, f"install_launchd.sh 未替换 {placeholder}"
     marker = tmp_path / "launchctl-called"
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()

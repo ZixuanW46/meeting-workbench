@@ -21,7 +21,7 @@ if [[ ! -x "$REPO_ROOT/.venv/bin/python" ]]; then
 fi
 
 mkdir -p "$HOME/Library/LaunchAgents" "$REPO_ROOT/data/logs"
-sed "s|__REPO_ROOT__|$REPO_ROOT|g" "$SOURCE_PLIST" > "$TARGET_PLIST"
+sed -e "s|__REPO_ROOT__|$REPO_ROOT|g" -e "s|__HOME__|$HOME|g" "$SOURCE_PLIST" > "$TARGET_PLIST"
 launchctl bootout "gui/$UID/com.will.meeting-workbench" >/dev/null 2>&1 || true
 launchctl bootstrap "gui/$UID" "$TARGET_PLIST"
 echo "launchd 已安装；服务监听 http://127.0.0.1:8000。"

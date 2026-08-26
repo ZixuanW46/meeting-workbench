@@ -39,6 +39,8 @@ def test_multipart_upload_rejects_low_disk_with_human_readable_free_space(
     assert "磁盘空间不足" in response.json()["detail"]
     assert "还剩 0.50 GB" in response.json()["detail"]
     assert client.get(f"/api/meetings/{meeting_id}").json()["state"] == "DRAFT"
+
+
 def test_tus_creation_rejects_low_disk_before_creating_upload(client, monkeypatch):
     meeting_id = _create_meeting(client)
     _low_disk(monkeypatch, free_bytes=768 * 1024**2)

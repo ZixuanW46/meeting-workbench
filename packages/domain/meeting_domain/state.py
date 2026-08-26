@@ -85,6 +85,16 @@ TERMINAL_STATES: frozenset[MeetingState] = frozenset(
     {MeetingState.FAILED, MeetingState.CANCELED}
 )
 
+# 显式重转写只允许从这些状态发起：UPLOADING → QUEUED 虽然也是合法边，
+# 但那是上传完成边，不是重转写；不能只靠 transition() 区分两者。
+RETRANSCRIBABLE_STATES: frozenset[MeetingState] = frozenset(
+    {
+        MeetingState.AWAITING_SPEAKER_REVIEW,
+        MeetingState.READY,
+        MeetingState.PARTIAL_READY,
+    }
+)
+
 ACTIVE_STATES: frozenset[MeetingState] = frozenset(MeetingState) - TERMINAL_STATES
 
 

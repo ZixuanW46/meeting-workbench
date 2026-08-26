@@ -17,6 +17,7 @@ from meeting_domain.speaker_review import (
 )
 from meeting_domain.state import (
     ACTIVE_STATES,
+    RETRANSCRIBABLE_STATES,
     TERMINAL_STATES,
     TRANSITIONS,
     InvalidTransition,
@@ -27,6 +28,7 @@ from meeting_domain.state import (
 
 __all__ = [
     "ACTIVE_STATES",
+    "RETRANSCRIBABLE_STATES",
     "TERMINAL_STATES",
     "TRANSITIONS",
     "DecisionKind",

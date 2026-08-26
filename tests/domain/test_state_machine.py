@@ -2,6 +2,7 @@ import pytest
 
 from meeting_domain import (
     ACTIVE_STATES,
+    RETRANSCRIBABLE_STATES,
     TERMINAL_STATES,
     TRANSITIONS,
     InvalidTransition,
@@ -71,6 +72,19 @@ def test_explicit_retranscription_can_requeue_completed_transcription_states(sta
 @pytest.mark.parametrize("state", [MeetingState.FAILED, MeetingState.CANCELED])
 def test_terminal_states_cannot_be_retranscribed(state):
     assert not can_transition(state, MeetingState.QUEUED)
+
+
+def test_retranscribable_states_are_exactly_the_completed_transcription_states():
+    assert RETRANSCRIBABLE_STATES == frozenset(
+        {
+            MeetingState.AWAITING_SPEAKER_REVIEW,
+            MeetingState.READY,
+            MeetingState.PARTIAL_READY,
+        }
+    )
+    # UPLOADING → QUEUED 是上传完成边，仍然合法，但不属于可重转写状态。
+    assert can_transition(MeetingState.UPLOADING, MeetingState.QUEUED)
+    assert MeetingState.UPLOADING not in RETRANSCRIBABLE_STATES
 
 
 def test_partial_ready_is_retryable_not_terminal():

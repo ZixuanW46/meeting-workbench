@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import func, select
 
 from meeting_api.minutes.adapter import FakeMinutesAdapter, MinutesCliError
-from meeting_api.models import Meeting, SpeakerCluster, TranscriptSegment
+from meeting_api.models import Meeting, Person, SpeakerCluster, TranscriptSegment
 from meeting_api.pipeline.asr import AsrSegment, FakeAsrBackend
 from meeting_api.storage import meeting_dir
 
@@ -167,6 +167,7 @@ def test_retranscribe_allowed_states_resnapshot_clear_artifacts_and_requeue(
     old_snapshot: str
     with client.app.state.session_factory() as session:
         old_snapshot = session.get(Meeting, meeting_id).hotword_snapshot_json
+        person_count_before = session.scalar(select(func.count()).select_from(Person))
 
     entries = client.get("/api/hotwords").json()["items"]
     for entry in entries:
@@ -189,7 +190,11 @@ def test_retranscribe_allowed_states_resnapshot_clear_artifacts_and_requeue(
             .select_from(SpeakerCluster)
             .where(SpeakerCluster.meeting_id == meeting_id)
         )
+        person_count_after = session.scalar(select(func.count()).select_from(Person))
     assert meeting.state == "QUEUED"
+    # 人员是跨会议资产：清本场产物不得动 persons 表。
+    assert person_count_before > 0
+    assert person_count_after == person_count_before
     assert meeting.hotword_snapshot_json != old_snapshot
     assert json.loads(meeting.hotword_snapshot_json) == ["新全局词", "本场词"]
     assert segment_count == 0
@@ -207,6 +212,8 @@ def test_retranscribe_allowed_states_resnapshot_clear_artifacts_and_requeue(
     "meeting_state",
     [
         "DRAFT",
+        # UPLOADING → QUEUED 是合法的上传完成边，但不是重转写；必须 409。
+        "UPLOADING",
         "QUEUED",
         "PROCESSING",
         "APPLYING_DECISIONS",
@@ -226,6 +233,30 @@ def test_retranscribe_rejects_other_states(client, meeting_state):
 
     assert response.status_code == 409
     assert client.get(f"/api/meetings/{meeting_id}").json()["state"] == meeting_state
+
+
+def test_retranscribe_asr_uses_snapshot_taken_at_worker_run_start(client):
+    """重转写请求会预写一次快照，但 ASR 语义钉在 worker 开跑那一刻：
+
+    POST /retranscribe 之后、worker 开跑之前的全局词库改动会生效；
+    开跑之后的改动不生效。快照锁定的时点是「开跑」，不是「请求」。
+    """
+    meeting_id = _prepare_review(client, hotwords=["本场词"])
+    assert client.post(f"/api/meetings/{meeting_id}/retranscribe").status_code == 200
+    assert client.post("/api/hotwords", json={"word": "排队期间新增"}).status_code == 201
+
+    probe = SnapshotProbeAsr(client.app.state.session_factory)
+    client.app.state.worker.asr_backend = probe
+    assert client.app.state.worker.process_next() == meeting_id
+
+    with client.app.state.session_factory() as session:
+        persisted = tuple(
+            json.loads(session.get(Meeting, meeting_id).hotword_snapshot_json)
+        )
+    assert persisted == tuple(sorted({"排队期间新增", "本场词"}))
+    assert probe.received_hotwords == persisted
+    # probe 在转写过程中往全局词库插入的「事后新增」不得回流进本次快照。
+    assert "事后新增" not in persisted
 
 
 def test_retranscribe_missing_meeting_returns_404(client):

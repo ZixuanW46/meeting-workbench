@@ -8,7 +8,7 @@ from sqlalchemy import delete, select
 from meeting_api.models import HotwordEntry, Meeting, SpeakerCluster, TranscriptSegment
 from meeting_api.schemas import MeetingCreate, MeetingListResponse, MeetingResponse
 from meeting_api.storage import meeting_dir
-from meeting_domain import InvalidTransition, MeetingState, snapshot, transition
+from meeting_domain import RETRANSCRIBABLE_STATES, MeetingState, snapshot, transition
 
 router = APIRouter(prefix="/api/meetings")
 
@@ -67,13 +67,15 @@ def retranscribe_meeting(meeting_id: str, request: Request) -> MeetingResponse:
         if meeting is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会议不存在")
 
-        try:
-            queued = transition(MeetingState(meeting.state), MeetingState.QUEUED)
-        except (InvalidTransition, ValueError) as exc:
+        # 不能只靠 transition() 判断：UPLOADING → QUEUED 也是合法边（上传完成），
+        # 但重转写只允许从「转写已完成」的状态发起。
+        current = MeetingState(meeting.state) if meeting.state in MeetingState else None
+        if current not in RETRANSCRIBABLE_STATES:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="会议当前状态不允许重转写",
-            ) from exc
+            )
+        queued = transition(current, MeetingState.QUEUED)
 
         global_words = session.scalars(
             select(HotwordEntry.word).order_by(HotwordEntry.word, HotwordEntry.id)

@@ -34,7 +34,10 @@ def save_stream(
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     # 浏览器文件名不可信，同时兼容 POSIX 与 Windows 风格的路径。
-    safe_filename = Path((filename or "").replace("\\", "/")).name or "audio"
+    # Path("a/..").name == ".."，会把目标指到 raw/ 上层，必须一并兜底。
+    safe_filename = Path((filename or "").replace("\\", "/")).name
+    if safe_filename in {"", ".", ".."} or "\x00" in safe_filename:
+        safe_filename = "audio"
     target = raw_dir / safe_filename
     digest = hashlib.sha256()
     size = 0

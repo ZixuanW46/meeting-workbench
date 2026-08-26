@@ -90,6 +90,39 @@ def test_upload_response_does_not_expose_server_path(client):
     assert "data/meetings" not in response_text
     assert "\\" not in response_text
 
+def test_upload_traversal_filename_saved_inside_raw_dir(client):
+    meeting = _create_meeting(client)
+    content = b"evil-but-harmless"
+
+    response = client.post(
+        f"/api/meetings/{meeting['id']}/upload",
+        files={"file": ("../../../etc/evil.wav", content, "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    raw_dir = client.app.state.settings.data_dir / "meetings" / meeting["id"] / "raw"
+    assert [p.name for p in raw_dir.iterdir()] == ["evil.wav"]
+    # 会议目录里只有 raw/，没有被写到上层
+    meeting_dir = raw_dir.parent
+    assert [p.name for p in meeting_dir.iterdir()] == ["raw"]
+
+
+def test_upload_dot_dot_filename_falls_back_to_default_name(client):
+    # Path("a/..").name == ".."，不处理会把目标指到 raw/ 上层并 500
+    meeting = _create_meeting(client)
+    content = b"dot-dot-content"
+
+    response = client.post(
+        f"/api/meetings/{meeting['id']}/upload",
+        files={"file": ("a/..", content, "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    raw_dir = client.app.state.settings.data_dir / "meetings" / meeting["id"] / "raw"
+    assert [p.name for p in raw_dir.iterdir()] == ["audio"]
+    assert (raw_dir / "audio").read_bytes() == content
+
+
 def test_empty_upload_leaves_meeting_in_draft(client):
     meeting = _create_meeting(client)
     response = client.post(

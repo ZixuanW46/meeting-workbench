@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -15,6 +16,15 @@ class SavedUpload:
     sha256: str
 
 
+@dataclass(frozen=True)
+class PendingUpload:
+    """尚未完成的 tus 上传；路径只供服务端内部使用。"""
+
+    path: Path
+    length: int
+    offset: int
+
+
 class EmptyUploadError(ValueError):
     pass
 
@@ -22,6 +32,54 @@ class EmptyUploadError(ValueError):
 def meeting_dir(settings: Settings, meeting_id: str) -> Path:
     """返回会议的本地目录；调用方不得把该路径放进 API 响应。"""
     return settings.data_dir / "meetings" / meeting_id
+
+
+def create_pending_upload(
+    settings: Settings,
+    meeting_id: str,
+    upload_id: str,
+    length: int,
+) -> PendingUpload:
+    upload_dir = meeting_dir(settings, meeting_id) / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    path = upload_dir / f"{upload_id}.part"
+    metadata_path = upload_dir / f"{upload_id}.json"
+    path.touch(exist_ok=False)
+    metadata_path.write_text(json.dumps({"length": length}), encoding="utf-8")
+    return PendingUpload(path=path, length=length, offset=0)
+
+
+def get_pending_upload(
+    settings: Settings,
+    meeting_id: str,
+    upload_id: str,
+) -> PendingUpload | None:
+    upload_dir = meeting_dir(settings, meeting_id) / "uploads"
+    path = upload_dir / f"{upload_id}.part"
+    metadata_path = upload_dir / f"{upload_id}.json"
+    if not path.is_file() or not metadata_path.is_file():
+        return None
+    try:
+        length = json.loads(metadata_path.read_text(encoding="utf-8"))["length"]
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not isinstance(length, int) or length <= 0:
+        return None
+    return PendingUpload(path=path, length=length, offset=path.stat().st_size)
+
+
+def remove_pending_upload(
+    settings: Settings,
+    meeting_id: str,
+    upload_id: str,
+) -> None:
+    upload_dir = meeting_dir(settings, meeting_id) / "uploads"
+    (upload_dir / f"{upload_id}.part").unlink(missing_ok=True)
+    (upload_dir / f"{upload_id}.json").unlink(missing_ok=True)
+    try:
+        upload_dir.rmdir()
+    except OSError:
+        pass
 
 
 def save_stream(

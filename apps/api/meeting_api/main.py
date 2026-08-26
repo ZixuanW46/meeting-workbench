@@ -5,6 +5,7 @@ import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from meeting_api.config import Settings
 from meeting_api.db import init_db, make_engine, make_session_factory
@@ -73,6 +74,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="meeting-workbench", lifespan=lifespan)
     app.state.settings = settings
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_methods=["GET", "HEAD", "POST", "PATCH", "OPTIONS"],
+        allow_headers=[
+            "Content-Type",
+            "Tus-Resumable",
+            "Upload-Length",
+            "Upload-Offset",
+            "Upload-Metadata",
+        ],
+        expose_headers=[
+            "Location",
+            "Upload-Offset",
+            "Tus-Resumable",
+            "Tus-Version",
+        ],
+    )
     app.include_router(health.router)
     app.include_router(hotwords.router)
     app.include_router(voiceprints.router)

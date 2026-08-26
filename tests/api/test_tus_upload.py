@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 from urllib.parse import urlsplit
 
@@ -183,6 +184,112 @@ def test_tus_empty_patch_does_not_queue_positive_length_upload(client):
     assert response.status_code == 204
     assert response.headers["Upload-Offset"] == "0"
     assert client.get(f"/api/meetings/{meeting['id']}").json()["state"] != "QUEUED"
+
+
+def test_tus_patch_beyond_declared_length_returns_413_and_keeps_offset(client):
+    meeting = _create_meeting(client)
+    created = _create_upload(client, meeting["id"], 8)
+    assert created.status_code == 201
+    path = _upload_path(created)
+    assert _patch(client, path, 0, b"abcd").status_code == 204
+
+    oversize = _patch(client, path, 4, b"toolongtail")
+
+    assert oversize.status_code == 413
+    head = client.head(path, headers={"Tus-Resumable": TUS_VERSION})
+    assert head.status_code == 200
+    assert head.headers["Upload-Offset"] == "4"
+    # offset 没被推过头，还能按正确 offset 续传到完成
+    assert _patch(client, path, 4, b"efgh").status_code == 204
+    assert client.get(f"/api/meetings/{meeting['id']}").json()["state"] == "QUEUED"
+
+
+def test_tus_creation_while_uploading_restarts_abandoned_upload(client):
+    meeting = _create_meeting(client)
+    first = _create_upload(client, meeting["id"], 10)
+    assert first.status_code == 201
+    old_path = _upload_path(first)
+    assert _patch(client, old_path, 0, b"abc").status_code == 204
+    assert client.get(f"/api/meetings/{meeting['id']}").json()["state"] == "UPLOADING"
+
+    # 用户放弃后重新发起上传：不许卡死在 UPLOADING
+    second = _create_upload(client, meeting["id"], 5)
+
+    assert second.status_code == 201
+    new_path = _upload_path(second)
+    assert new_path != old_path
+    # 旧的未完成上传作废
+    old_head = client.head(old_path, headers={"Tus-Resumable": TUS_VERSION})
+    assert old_head.status_code == 404
+    # 新上传可以完整走完
+    content = b"fresh"
+    assert _patch(client, new_path, 0, content).status_code == 204
+    assert client.get(f"/api/meetings/{meeting['id']}").json()["state"] == "QUEUED"
+    with client.app.state.session_factory() as session:
+        stored = session.get(Meeting, meeting["id"])
+        assert stored.audio_sha256 == hashlib.sha256(content).hexdigest()
+
+
+def test_tus_upload_metadata_filename_is_used_for_final_file(client):
+    meeting = _create_meeting(client)
+    content = b"named-audio"
+    filename = "会议录音.wav"
+    encoded = base64.b64encode(filename.encode("utf-8")).decode("ascii")
+    created = client.post(
+        f"/api/meetings/{meeting['id']}/files/",
+        headers={
+            "Tus-Resumable": TUS_VERSION,
+            "Upload-Length": str(len(content)),
+            "Upload-Metadata": f"filetype YXVkaW8vd2F2,filename {encoded}",
+        },
+    )
+    assert created.status_code == 201
+    path = _upload_path(created)
+
+    assert _patch(client, path, 0, content).status_code == 204
+
+    with client.app.state.session_factory() as session:
+        stored = session.get(Meeting, meeting["id"])
+        assert stored.audio_filename == filename
+    raw_file = (
+        client.app.state.settings.data_dir
+        / "meetings"
+        / meeting["id"]
+        / "raw"
+        / filename
+    )
+    assert raw_file.read_bytes() == content
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        "filename !!!not-base64!!!",
+        f"filename {base64.b64encode(b'../../evil').decode('ascii')}",
+    ],
+)
+def test_tus_upload_metadata_bad_filename_falls_back_to_safe_name(client, metadata):
+    meeting = _create_meeting(client)
+    content = b"bad-name"
+    created = client.post(
+        f"/api/meetings/{meeting['id']}/files/",
+        headers={
+            "Tus-Resumable": TUS_VERSION,
+            "Upload-Length": str(len(content)),
+            "Upload-Metadata": metadata,
+        },
+    )
+    assert created.status_code == 201
+    path = _upload_path(created)
+
+    assert _patch(client, path, 0, content).status_code == 204
+
+    with client.app.state.session_factory() as session:
+        stored = session.get(Meeting, meeting["id"])
+        assert stored.audio_filename in {"audio", "evil"}
+        assert "/" not in stored.audio_filename
+        assert ".." not in stored.audio_filename
+    assert client.get(f"/api/meetings/{meeting['id']}").json()["state"] == "QUEUED"
 
 
 def test_tus_cors_exposes_protocol_headers_for_browser_client(client):

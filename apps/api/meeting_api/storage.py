@@ -23,6 +23,7 @@ class PendingUpload:
     path: Path
     length: int
     offset: int
+    filename: str | None = None
 
 
 class EmptyUploadError(ValueError):
@@ -39,14 +40,17 @@ def create_pending_upload(
     meeting_id: str,
     upload_id: str,
     length: int,
+    filename: str | None = None,
 ) -> PendingUpload:
     upload_dir = meeting_dir(settings, meeting_id) / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
     path = upload_dir / f"{upload_id}.part"
     metadata_path = upload_dir / f"{upload_id}.json"
     path.touch(exist_ok=False)
-    metadata_path.write_text(json.dumps({"length": length}), encoding="utf-8")
-    return PendingUpload(path=path, length=length, offset=0)
+    metadata_path.write_text(
+        json.dumps({"length": length, "filename": filename}), encoding="utf-8"
+    )
+    return PendingUpload(path=path, length=length, offset=0, filename=filename)
 
 
 def get_pending_upload(
@@ -60,12 +64,32 @@ def get_pending_upload(
     if not path.is_file() or not metadata_path.is_file():
         return None
     try:
-        length = json.loads(metadata_path.read_text(encoding="utf-8"))["length"]
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        length = metadata["length"]
     except (KeyError, TypeError, ValueError):
         return None
     if not isinstance(length, int) or length <= 0:
         return None
-    return PendingUpload(path=path, length=length, offset=path.stat().st_size)
+    filename = metadata.get("filename")
+    if not isinstance(filename, str):
+        filename = None
+    return PendingUpload(
+        path=path, length=length, offset=path.stat().st_size, filename=filename
+    )
+
+
+def clear_pending_uploads(settings: Settings, meeting_id: str) -> None:
+    """作废该会议的全部未完成上传（用户放弃后重新发起时调用）。"""
+    upload_dir = meeting_dir(settings, meeting_id) / "uploads"
+    if not upload_dir.is_dir():
+        return
+    for entry in upload_dir.iterdir():
+        if entry.is_file():
+            entry.unlink(missing_ok=True)
+    try:
+        upload_dir.rmdir()
+    except OSError:
+        pass
 
 
 def remove_pending_upload(

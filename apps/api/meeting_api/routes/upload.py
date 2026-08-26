@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 import uuid
 from typing import Annotated
@@ -13,6 +15,7 @@ from meeting_api.models import Meeting
 from meeting_api.schemas import UploadResponse
 from meeting_api.storage import (
     EmptyUploadError,
+    clear_pending_uploads,
     create_pending_upload,
     get_pending_upload,
     remove_pending_upload,
@@ -72,6 +75,25 @@ def _parse_offset(request: Request) -> int:
             headers=TUS_HEADERS,
         )
     return value
+
+
+def _parse_metadata_filename(request: Request) -> str | None:
+    """从 tus Upload-Metadata 里解出 filename；解不出就返回 None（落盘时兜底为 audio）。
+
+    tus 元数据格式：逗号分隔的「键 空格 base64 值」对，值可省略。
+    """
+    raw = request.headers.get("Upload-Metadata")
+    if not raw:
+        return None
+    for pair in raw.split(","):
+        parts = pair.strip().split(" ")
+        if parts[0] != "filename" or len(parts) != 2:
+            continue
+        try:
+            return base64.b64decode(parts[1], validate=True).decode("utf-8")
+        except (binascii.Error, UnicodeDecodeError, ValueError):
+            return None
+    return None
 
 
 def _pending_or_404(request: Request, meeting_id: str, upload_id: str):
@@ -147,14 +169,20 @@ def create_tus_upload(meeting_id: str, request: Request) -> Response:
                 detail="会议不存在",
                 headers=TUS_HEADERS,
             )
-        try:
-            uploading = transition(MeetingState(meeting.state), MeetingState.UPLOADING)
-        except (InvalidTransition, ValueError) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="当前会议状态不允许上传音频",
-                headers=TUS_HEADERS,
-            ) from exc
+        current = MeetingState(meeting.state)
+        if current is MeetingState.UPLOADING:
+            # 上一次上传被放弃：作废旧分片、原地重新发起，不做状态迁移
+            # （状态本来就是 UPLOADING），避免会议永远卡死。
+            clear_pending_uploads(request.app.state.settings, meeting.id)
+        else:
+            try:
+                meeting.state = transition(current, MeetingState.UPLOADING).value
+            except InvalidTransition as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="当前会议状态不允许上传音频",
+                    headers=TUS_HEADERS,
+                ) from exc
 
         upload_id = uuid.uuid4().hex
         create_pending_upload(
@@ -162,8 +190,8 @@ def create_tus_upload(meeting_id: str, request: Request) -> Response:
             meeting.id,
             upload_id,
             length,
+            filename=_parse_metadata_filename(request),
         )
-        meeting.state = uploading.value
         session.commit()
 
     location = request.url_for(
@@ -246,7 +274,7 @@ async def patch_tus_upload(
                 saved = save_stream(
                     request.app.state.settings,
                     meeting.id,
-                    "audio",
+                    pending.filename,
                     stream,
                 )
             meeting.audio_filename = saved.filename

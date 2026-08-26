@@ -9,6 +9,7 @@ description = "本地会议纪要工作台（v1 目标机：M4 Mac Mini 16GB，�
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
+    "python-multipart>=0.0.9",
     "uvicorn>=0.30",
     "sqlalchemy>=2.0",
     "alembic>=1.13",

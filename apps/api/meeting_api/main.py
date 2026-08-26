@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from meeting_api.config import Settings
 from meeting_api.db import init_db, make_engine, make_session_factory
-from meeting_api.routes import health, meetings
+from meeting_api.routes import health, meetings, upload
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -27,6 +27,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.include_router(health.router)
     app.include_router(meetings.router)
+    app.include_router(upload.router)
     return app
 
 

@@ -41,3 +41,8 @@ class MeetingResponse(BaseModel):
 
 class MeetingListResponse(BaseModel):
     items: list[MeetingResponse]
+
+
+class UploadResponse(BaseModel):
+    size: int
+    sha256: str

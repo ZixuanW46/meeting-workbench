@@ -3,7 +3,6 @@ import {
   exportUrls,
   formatApiError,
   getMeeting,
-  uploadAudio,
   type Meeting,
 } from '../api/client'
 import { MinutesView } from '../components/MinutesView'
@@ -11,9 +10,10 @@ import { Progress } from '../components/Progress'
 import { SpeakerReview } from '../components/SpeakerReview'
 import { StateBadge } from '../components/StateBadge'
 import { TranscriptView } from '../components/TranscriptView'
+import { UploadPanel } from '../components/UploadPanel'
 
+// UPLOADING 的进度由 tus 上传面板自己展示，不走 SSE 进度条
 const PROGRESS_STATES = new Set([
-  'UPLOADING',
   'QUEUED',
   'PROCESSING',
   'APPLYING_DECISIONS',
@@ -91,8 +91,12 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
         </div>
       )}
 
-      {meeting.state === 'DRAFT' && (
-        <UploadPanel meetingId={meetingId} onUploaded={refresh} />
+      {(meeting.state === 'DRAFT' || meeting.state === 'UPLOADING') && (
+        <UploadPanel
+          meetingId={meetingId}
+          resuming={meeting.state === 'UPLOADING'}
+          onUploaded={refresh}
+        />
       )}
 
       {PROGRESS_STATES.has(meeting.state) && (
@@ -132,61 +136,6 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
       {meeting.state === 'CANCELED' && (
         <div className="notice">这场会议已取消。</div>
       )}
-    </div>
-  )
-}
-
-function UploadPanel({
-  meetingId,
-  onUploaded,
-}: {
-  meetingId: string
-  onUploaded: () => void
-}) {
-  const [file, setFile] = useState<File | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const handleUpload = async () => {
-    if (file === null) {
-      return
-    }
-    setUploading(true)
-    setError(null)
-    try {
-      await uploadAudio(meetingId, file)
-      onUploaded()
-    } catch (e: unknown) {
-      setError(formatApiError(e))
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  return (
-    <div className="upload-panel">
-      <div>
-        <div className="section-title">上传会议录音</div>
-        <div className="section-desc">音频只在本机处理，不会上传到云端</div>
-      </div>
-      <input
-        type="file"
-        accept="audio/*"
-        aria-label="选择音频文件"
-        onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-      />
-      {file !== null && <span className="upload-filename">{file.name}</span>}
-      {error !== null && <div className="notice notice-error">{error}</div>}
-      <button
-        type="button"
-        className="btn btn-primary"
-        disabled={file === null || uploading}
-        onClick={() => {
-          void handleUpload()
-        }}
-      >
-        {uploading ? '上传中…' : '上传音频'}
-      </button>
     </div>
   )
 }

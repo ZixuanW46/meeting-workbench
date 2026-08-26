@@ -14,6 +14,7 @@ from meeting_domain import (
     ReviewIncomplete,
     SpeakerCard,
     SpeakerDecision,
+    decision_field_error,
     has_unconfirmed_speakers,
     review_complete,
     transition,
@@ -56,17 +57,22 @@ class DecisionPayload(BaseModel):
 
     @model_validator(mode="after")
     def validate_kind_fields(self) -> Self:
-        if self.kind in {DecisionKind.REASSIGN, DecisionKind.LINK_EXISTING}:
-            if self.person_id is None:
-                raise ValueError(f"{self.kind.value} 决定必须提供 person_id")
-        if self.kind == DecisionKind.NEW_PERSON:
-            if self.display_name is None or not self.display_name.strip():
-                raise ValueError("NEW_PERSON 决定必须提供 display_name")
+        # 字段级规则在领域层，API 只翻译成 422。
+        error = decision_field_error(self.to_domain())
+        if error is not None:
+            raise ValueError(error)
+        if self.display_name is not None:
             self.display_name = self.display_name.strip()
-        if self.kind == DecisionKind.MERGE_WITH_CLUSTER:
-            if self.merge_into_cluster_id is None:
-                raise ValueError("MERGE_WITH_CLUSTER 决定必须提供 merge_into_cluster_id")
         return self
+
+    def to_domain(self) -> SpeakerDecision:
+        return SpeakerDecision(
+            cluster_id=self.cluster_id,
+            kind=self.kind,
+            person_id=self.person_id,
+            merge_into_cluster_id=self.merge_into_cluster_id,
+            display_name=self.display_name,
+        )
 
 
 class ReviewDecisionsRequest(BaseModel):
@@ -153,15 +159,7 @@ def submit_decisions(
             SpeakerCard(cluster.cluster_id, cluster.suggested_person_id)
             for cluster in clusters
         ]
-        domain_decisions = [
-            SpeakerDecision(
-                cluster_id=decision.cluster_id,
-                kind=decision.kind,
-                person_id=decision.person_id,
-                merge_into_cluster_id=decision.merge_into_cluster_id,
-            )
-            for decision in payload.decisions
-        ]
+        domain_decisions = [decision.to_domain() for decision in payload.decisions]
 
         try:
             if not review_complete(cards, domain_decisions):
@@ -186,6 +184,12 @@ def submit_decisions(
                     raise HTTPException(
                         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                         detail=f"说话人簇 {cluster.cluster_id} 没有可确认的建议身份",
+                    )
+                # SQLite 未开外键强制，这里必须自己保证建议身份真实存在。
+                if session.get(Person, cluster.suggested_person_id) is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail=f"建议身份不存在于人员表: {cluster.suggested_person_id}",
                     )
                 final_person_ids[cluster.cluster_id] = cluster.suggested_person_id
             elif decision.kind in {

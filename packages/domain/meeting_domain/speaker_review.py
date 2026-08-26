@@ -42,6 +42,26 @@ class SpeakerDecision:
     kind: DecisionKind
     person_id: str | None = None  # REASSIGN / LINK_EXISTING 时指向人
     merge_into_cluster_id: str | None = None  # MERGE_WITH_CLUSTER 时指向另一簇
+    display_name: str | None = None  # NEW_PERSON 时的新人显示名
+
+
+def decision_field_error(decision: SpeakerDecision) -> str | None:
+    """决定的字段级规则：返回错误文案，None 表示合法。
+
+    规则集中在领域层；API 层只负责把它翻译成 422，不得自己再写一套。
+    """
+    if decision.kind in {DecisionKind.REASSIGN, DecisionKind.LINK_EXISTING}:
+        if decision.person_id is None:
+            return f"{decision.kind.value} 决定必须提供 person_id"
+    if decision.kind == DecisionKind.NEW_PERSON:
+        if not (decision.display_name or "").strip():
+            return "NEW_PERSON 决定必须提供 display_name"
+    if decision.kind == DecisionKind.MERGE_WITH_CLUSTER:
+        if decision.merge_into_cluster_id is None:
+            return "MERGE_WITH_CLUSTER 决定必须提供 merge_into_cluster_id"
+        if decision.merge_into_cluster_id == decision.cluster_id:
+            return "MERGE_WITH_CLUSTER 不能把簇合并进自己"
+    return None
 
 
 class ReviewIncomplete(Exception):

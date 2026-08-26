@@ -2,6 +2,7 @@ from meeting_domain import (
     DecisionKind,
     SpeakerCard,
     SpeakerDecision,
+    decision_field_error,
     has_unconfirmed_speakers,
     review_complete,
 )
@@ -57,3 +58,40 @@ def test_duplicate_or_stray_decisions_are_incomplete():
         SpeakerDecision("S99", DecisionKind.NEW_PERSON),
     ]
     assert not review_complete(CARDS, stray)
+
+
+def test_decision_field_rules_live_in_domain():
+    # 缺必填字段 → 报错文案
+    assert decision_field_error(SpeakerDecision("S1", DecisionKind.REASSIGN))
+    assert decision_field_error(SpeakerDecision("S1", DecisionKind.LINK_EXISTING))
+    assert decision_field_error(SpeakerDecision("S2", DecisionKind.NEW_PERSON))
+    assert decision_field_error(
+        SpeakerDecision("S2", DecisionKind.NEW_PERSON, display_name="   ")
+    )
+    assert decision_field_error(SpeakerDecision("S2", DecisionKind.MERGE_WITH_CLUSTER))
+    # 自合并非法
+    assert decision_field_error(
+        SpeakerDecision("S2", DecisionKind.MERGE_WITH_CLUSTER, merge_into_cluster_id="S2")
+    )
+    # 合法组合 → None
+    assert decision_field_error(SpeakerDecision("S1", DecisionKind.CONFIRM)) is None
+    assert decision_field_error(SpeakerDecision("S1", DecisionKind.KEEP_UNKNOWN)) is None
+    assert decision_field_error(SpeakerDecision("S2", DecisionKind.UNDECIDED_UNKNOWN)) is None
+    assert (
+        decision_field_error(
+            SpeakerDecision("S1", DecisionKind.REASSIGN, person_id="p-li")
+        )
+        is None
+    )
+    assert (
+        decision_field_error(
+            SpeakerDecision("S2", DecisionKind.NEW_PERSON, display_name="李雷")
+        )
+        is None
+    )
+    assert (
+        decision_field_error(
+            SpeakerDecision("S2", DecisionKind.MERGE_WITH_CLUSTER, merge_into_cluster_id="S1")
+        )
+        is None
+    )

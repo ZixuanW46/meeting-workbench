@@ -8,10 +8,12 @@ from sqlalchemy import select, text
 from meeting_api.models import Meeting, SpeakerCluster
 
 
-def _prepare_review(client, *, title: str = "说话人确认测试") -> str:
+def _prepare_review(
+    client, *, title: str = "说话人确认测试", expected_speakers: int = 2
+) -> str:
     created = client.post(
         "/api/meetings",
-        json={"title": title, "expected_speakers": 2},
+        json={"title": title, "expected_speakers": expected_speakers},
     )
     assert created.status_code == 201
     meeting_id = created.json()["id"]
@@ -158,6 +160,93 @@ def test_existing_person_decisions_require_person_id(client, kind):
             "decisions": [
                 {"cluster_id": "S1", "kind": kind},
                 {"cluster_id": "S2", "kind": "UNDECIDED_UNKNOWN"},
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    with client.app.state.session_factory() as session:
+        meeting = session.get(Meeting, meeting_id)
+    assert meeting.state == "AWAITING_SPEAKER_REVIEW"
+
+
+def test_merge_chain_resolves_transitively_to_final_person(client):
+    meeting_id = _prepare_review(client, title="链式合并", expected_speakers=3)
+
+    response = client.post(
+        f"/api/meetings/{meeting_id}/review/decisions",
+        json={
+            "decisions": [
+                {"cluster_id": "S1", "kind": "CONFIRM"},
+                {
+                    "cluster_id": "S2",
+                    "kind": "MERGE_WITH_CLUSTER",
+                    "merge_into_cluster_id": "S1",
+                },
+                {
+                    "cluster_id": "S3",
+                    "kind": "MERGE_WITH_CLUSTER",
+                    "merge_into_cluster_id": "S2",
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert not response.json()["has_unconfirmed_speakers"]
+    with client.app.state.session_factory() as session:
+        clusters = session.scalars(
+            select(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
+        ).all()
+    assert all(cluster.person_id == "fake-person-1" for cluster in clusters)
+    assert all(not cluster.is_unknown for cluster in clusters)
+
+
+def test_merge_cycle_is_rejected_and_state_unchanged(client):
+    meeting_id = _prepare_review(client, title="合并成环")
+
+    response = client.post(
+        f"/api/meetings/{meeting_id}/review/decisions",
+        json={
+            "decisions": [
+                {
+                    "cluster_id": "S1",
+                    "kind": "MERGE_WITH_CLUSTER",
+                    "merge_into_cluster_id": "S2",
+                },
+                {
+                    "cluster_id": "S2",
+                    "kind": "MERGE_WITH_CLUSTER",
+                    "merge_into_cluster_id": "S1",
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    with client.app.state.session_factory() as session:
+        meeting = session.get(Meeting, meeting_id)
+        clusters = session.scalars(
+            select(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
+        ).all()
+    assert meeting.state == "AWAITING_SPEAKER_REVIEW"
+    assert all(cluster.person_id is None for cluster in clusters)
+
+
+def test_confirm_requires_suggested_person_to_exist_in_persons(client):
+    meeting_id = _prepare_review(client, title="建议身份已失效")
+
+    # SQLite 未开外键强制：人为删掉建议指向的人，CONFIRM 不得落一个悬空 id。
+    with client.app.state.session_factory() as session:
+        session.execute(text("DELETE FROM persons WHERE id = 'fake-person-1'"))
+        session.commit()
+
+    response = client.post(
+        f"/api/meetings/{meeting_id}/review/decisions",
+        json={
+            "decisions": [
+                {"cluster_id": "S1", "kind": "CONFIRM"},
+                {"cluster_id": "S2", "kind": "KEEP_UNKNOWN"},
             ]
         },
     )

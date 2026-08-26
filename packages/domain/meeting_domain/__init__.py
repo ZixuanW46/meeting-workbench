@@ -10,6 +10,7 @@ from meeting_domain.speaker_review import (
     ReviewIncomplete,
     SpeakerCard,
     SpeakerDecision,
+    decision_field_error,
     has_unconfirmed_speakers,
     review_complete,
 )
@@ -35,6 +36,7 @@ __all__ = [
     "SpeakerCard",
     "SpeakerDecision",
     "can_transition",
+    "decision_field_error",
     "has_unconfirmed_speakers",
     "review_complete",
     "transition",

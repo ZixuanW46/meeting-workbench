@@ -10,7 +10,7 @@ from meeting_api.config import Settings
 from meeting_api.db import init_db, make_engine, make_session_factory
 from meeting_api.events import EventStore
 from meeting_api.events import router as events_router
-from meeting_api.routes import health, meetings, upload
+from meeting_api.routes import health, meetings, review, upload
 from meeting_api.worker import Worker
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(meetings.router)
     app.include_router(upload.router)
+    app.include_router(review.router)
     app.include_router(events_router)
     return app
 

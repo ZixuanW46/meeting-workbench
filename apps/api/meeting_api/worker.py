@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from meeting_api.config import Settings
 from meeting_api.events import EventStore
-from meeting_api.models import Meeting, SpeakerCluster, TranscriptSegment
+from meeting_api.models import Meeting, Person, SpeakerCluster, TranscriptSegment
 from meeting_api.pipeline.asr import AsrBackend, AsrSegment, get_asr_backend
 from meeting_api.pipeline.diarization import (
     DiarizationBackend,
@@ -173,6 +173,10 @@ class Worker:
         clusters = session.scalars(
             select(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
         ).all()
+        if any(cluster.cluster_id == "S1" for cluster in clusters):
+            known_person = session.get(Person, "fake-person-1")
+            if known_person is None:
+                session.add(Person(id="fake-person-1", display_name="已知用户 1"))
         for cluster in clusters:
             # 只是建议，不落最终身份；人工确认仍是唯一停点。
             cluster.suggested_person_id = (

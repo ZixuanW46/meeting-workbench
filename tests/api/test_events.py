@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from collections.abc import Callable
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
+
+from meeting_api.events import EventStore
 
 
 def _create_meeting(client) -> str:
@@ -210,3 +213,44 @@ def test_events_and_progress_return_404_for_missing_meeting(client):
 
     events = client.get("/api/meetings/not-found/events")
     assert events.status_code == 404
+
+
+def _next_chunk(stream, timeout: float = 2.0) -> str:
+    """在子线程里取下一个 chunk；超时未返回视为生成器永久阻塞。"""
+    result: list[str] = []
+    thread = threading.Thread(target=lambda: result.append(next(stream)), daemon=True)
+    thread.start()
+    thread.join(timeout)
+    assert not thread.is_alive(), "SSE 生成器阻塞未在超时内返回"
+    return result[0]
+
+
+def test_sse_stream_yields_keepalive_when_idle_instead_of_blocking_forever():
+    # 客户端断开后，卡在 condition.wait() 的线程池线程必须能在
+    # 一个心跳间隔内返回，否则每个断开的连接都会永久占用一个线程。
+    store = EventStore(heartbeat_seconds=0.05)
+    store.publish("m1", "AWAITING_SPEAKER_REVIEW", "PREPARING_REVIEW")
+    stream = store.iter_events(
+        "m1",
+        after_seq=0,
+        state="AWAITING_SPEAKER_REVIEW",
+        processing_step="PREPARING_REVIEW",
+    )
+
+    first_id, _ = _parse_event(_next_chunk(stream))
+    assert first_id == 1
+
+    assert _next_chunk(stream) == ": keep-alive\n\n"
+
+
+def test_sse_reconnect_with_stale_last_event_id_after_restart_gets_fresh_snapshot():
+    # 模拟进程重启：seq 从 1 重新开始，而客户端还带着重启前的 Last-Event-ID: 7。
+    # 必须把 seq 抬过断点补一条快照，否则该客户端会把后续事件全部过滤掉。
+    store = EventStore(heartbeat_seconds=0.05)
+    store.publish("m1", "PROCESSING", "ASR")
+
+    stream = store.iter_events("m1", after_seq=7, state="PROCESSING", processing_step="ASR")
+
+    event_id, data = _parse_event(_next_chunk(stream))
+    assert event_id == 8
+    assert data == {"state": "PROCESSING", "processing_step": "ASR", "seq": 8}

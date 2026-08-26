@@ -82,3 +82,35 @@ def test_create_meeting_rejects_zero_expected_speakers(client):
     )
     assert response.status_code == 422
 
+
+def test_create_meeting_defaults_hotwords_to_empty_list(client):
+    response = client.post("/api/meetings", json={"title": "无热词会议"})
+
+    assert response.status_code == 201
+    assert response.json()["hotwords"] == []
+
+
+def test_create_meeting_strips_title(client):
+    response = client.post("/api/meetings", json={"title": "  周会  "})
+
+    assert response.status_code == 201
+    created = response.json()
+    assert created["title"] == "周会"
+    # 详情返回的也是清洗后的标题
+    detail = client.get(f"/api/meetings/{created['id']}").json()
+    assert detail["title"] == "周会"
+
+
+def test_create_meeting_normalizes_hotwords(client):
+    response = client.post(
+        "/api/meetings",
+        json={"title": "周会", "hotwords": ["  声纹 ", "", "MLX", "声纹", "   "]},
+    )
+
+    assert response.status_code == 201
+    created = response.json()
+    # 去首尾空白、去空项、去重且保序
+    assert created["hotwords"] == ["声纹", "MLX"]
+    detail = client.get(f"/api/meetings/{created['id']}").json()
+    assert detail["hotwords"] == ["声纹", "MLX"]
+

@@ -18,6 +18,17 @@ class MeetingCreate(BaseModel):
             raise ValueError("标题不能为空")
         return stripped
 
+    @field_validator("hotwords")
+    @classmethod
+    def hotwords_clean(cls, value: list[str]) -> list[str]:
+        # 去首尾空白、去空项、去重且保序；空列表合法
+        cleaned: list[str] = []
+        for word in value:
+            stripped = word.strip()
+            if stripped and stripped not in cleaned:
+                cleaned.append(stripped)
+        return cleaned
+
 
 class MeetingResponse(BaseModel):
     id: str

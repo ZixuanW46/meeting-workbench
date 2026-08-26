@@ -16,5 +16,19 @@ describe('App 壳', () => {
       'href',
       '#/new',
     )
+    expect(screen.getByRole('link', { name: '声纹库' })).toHaveAttribute(
+      'href',
+      '#/voiceprints',
+    )
+  })
+
+  it('#/voiceprints 渲染声纹库页', async () => {
+    window.location.hash = '#/voiceprints'
+    server.use(http.get('/api/voiceprints', () => HttpResponse.json({ items: [] })))
+
+    render(<App />)
+
+    expect(await screen.findByText('声纹库是空的')).toBeInTheDocument()
+    window.location.hash = ''
   })
 })

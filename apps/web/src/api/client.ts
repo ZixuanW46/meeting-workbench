@@ -61,6 +61,12 @@ export interface MinutesResult {
   note: string
 }
 
+export interface Voiceprint {
+  id: string
+  person_id: string
+  display_name: string
+}
+
 export class ApiError extends Error {
   status: number
   detail: unknown
@@ -194,6 +200,15 @@ export function retryMinutes(meetingId: string): Promise<{ state: string }> {
 
 export function getTranscriptMarkdown(meetingId: string): Promise<string> {
   return apiFetchText(`/api/meetings/${meetingId}/export/transcript.md`)
+}
+
+export async function listVoiceprints(): Promise<Voiceprint[]> {
+  const data = await apiFetch<{ items: Voiceprint[] }>('/api/voiceprints')
+  return data.items
+}
+
+export function deleteVoiceprint(voiceprintId: string): Promise<void> {
+  return apiFetch<void>(`/api/voiceprints/${voiceprintId}`, { method: 'DELETE' })
 }
 
 export function audioUrl(meetingId: string): string {

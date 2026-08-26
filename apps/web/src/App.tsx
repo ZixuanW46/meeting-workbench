@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { MeetingListPage } from './pages/MeetingListPage'
 import { NewMeetingPage } from './pages/NewMeetingPage'
+import { VoiceprintsPage } from './pages/VoiceprintsPage'
 import { WorkbenchPage } from './pages/WorkbenchPage'
 
-// 极简 hash 路由：#/ 列表、#/new 新建、#/meetings/{id} 工作台
+// 极简 hash 路由：#/ 列表、#/new 新建、#/meetings/{id} 工作台、#/voiceprints 声纹库
 function useHashRoute(): string {
   const [hash, setHash] = useState(window.location.hash)
   useEffect(() => {
@@ -21,6 +22,8 @@ export default function App() {
   let page = <MeetingListPage />
   if (route === '/new') {
     page = <NewMeetingPage />
+  } else if (route === '/voiceprints') {
+    page = <VoiceprintsPage />
   } else if (meetingMatch !== null) {
     page = <WorkbenchPage key={meetingMatch[1]} meetingId={meetingMatch[1]} />
   }
@@ -30,8 +33,18 @@ export default function App() {
       <aside className="sidebar">
         <div className="sidebar-brand">会议工作台</div>
         <nav className="sidebar-nav">
-          <a href="#/" className={meetingMatch === null && route !== '/new' ? 'active' : ''}>
+          <a
+            href="#/"
+            className={
+              meetingMatch === null && route !== '/new' && route !== '/voiceprints'
+                ? 'active'
+                : ''
+            }
+          >
             会议
+          </a>
+          <a href="#/voiceprints" className={route === '/voiceprints' ? 'active' : ''}>
+            声纹库
           </a>
         </nav>
         <div className="sidebar-foot">

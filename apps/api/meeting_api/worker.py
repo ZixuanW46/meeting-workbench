@@ -17,7 +17,13 @@ from meeting_api.minutes.adapter import (
     MinutesCliError,
     resolve_minutes_adapter,
 )
-from meeting_api.models import Meeting, Person, SpeakerCluster, TranscriptSegment
+from meeting_api.models import (
+    HotwordEntry,
+    Meeting,
+    Person,
+    SpeakerCluster,
+    TranscriptSegment,
+)
 from meeting_api.pipeline.asr import AsrBackend, AsrSegment, get_asr_backend
 from meeting_api.pipeline.diarization import (
     DiarizationBackend,
@@ -26,7 +32,7 @@ from meeting_api.pipeline.diarization import (
 )
 from meeting_api.pipeline.serial import SingleModelSlot
 from meeting_api.storage import meeting_dir
-from meeting_domain import MeetingState, transition
+from meeting_domain import MeetingState, snapshot, transition
 
 STEP_VALIDATING = "VALIDATING"
 STEP_ASR = "ASR"
@@ -92,6 +98,11 @@ class Worker:
                 return self._generate_minutes(session, meeting)
 
             meeting_id = meeting.id
+            global_words = session.scalars(
+                select(HotwordEntry.word).order_by(HotwordEntry.word, HotwordEntry.id)
+            ).all()
+            hotwords = snapshot(global_words, json.loads(meeting.hotwords_json))
+            meeting.hotword_snapshot_json = json.dumps(hotwords, ensure_ascii=False)
             meeting.state = transition(
                 MeetingState(meeting.state), MeetingState.PROCESSING
             ).value
@@ -104,7 +115,7 @@ class Worker:
                 audio_path = self._validate_audio(meeting)
 
                 self._set_step(session, meeting, STEP_ASR)
-                hotwords = tuple(json.loads(meeting.hotwords_json))
+                hotwords = tuple(json.loads(meeting.hotword_snapshot_json))
                 with self.model_slot.use(self.asr_backend) as asr:
                     asr_segments = asr.transcribe(audio_path, hotwords=hotwords)
 

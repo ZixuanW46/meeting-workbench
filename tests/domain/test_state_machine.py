@@ -36,7 +36,13 @@ def test_cannot_skip_speaker_review():
 
 def test_awaiting_review_cannot_fail_only_confirm_or_cancel():
     allowed = TRANSITIONS[MeetingState.AWAITING_SPEAKER_REVIEW]
-    assert allowed == frozenset({MeetingState.APPLYING_DECISIONS, MeetingState.CANCELED})
+    assert allowed == frozenset(
+        {
+            MeetingState.APPLYING_DECISIONS,
+            MeetingState.QUEUED,
+            MeetingState.CANCELED,
+        }
+    )
 
 
 def test_invalid_transition_raises():
@@ -44,9 +50,27 @@ def test_invalid_transition_raises():
         transition(MeetingState.DRAFT, MeetingState.READY)
 
 
-def test_terminal_states_have_no_outgoing():
+def test_failed_and_canceled_are_the_only_terminal_states_and_have_no_outgoing():
+    assert TERMINAL_STATES == frozenset({MeetingState.FAILED, MeetingState.CANCELED})
     for state in TERMINAL_STATES:
         assert TRANSITIONS[state] == frozenset()
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        MeetingState.AWAITING_SPEAKER_REVIEW,
+        MeetingState.READY,
+        MeetingState.PARTIAL_READY,
+    ],
+)
+def test_explicit_retranscription_can_requeue_completed_transcription_states(state):
+    assert transition(state, MeetingState.QUEUED) == MeetingState.QUEUED
+
+
+@pytest.mark.parametrize("state", [MeetingState.FAILED, MeetingState.CANCELED])
+def test_terminal_states_cannot_be_retranscribed(state):
+    assert not can_transition(state, MeetingState.QUEUED)
 
 
 def test_partial_ready_is_retryable_not_terminal():
@@ -55,7 +79,8 @@ def test_partial_ready_is_retryable_not_terminal():
 
 
 def test_every_active_state_can_be_canceled():
-    for state in ACTIVE_STATES:
+    # READY 可由用户显式重转写，但不再属于可取消的处理中会议。
+    for state in ACTIVE_STATES - {MeetingState.READY}:
         assert can_transition(state, MeetingState.CANCELED), state
 
 

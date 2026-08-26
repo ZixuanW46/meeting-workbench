@@ -6,8 +6,9 @@ DRAFT → UPLOADING → QUEUED → PROCESSING → AWAITING_SPEAKER_REVIEW
 
 旁路：
 - FAILED：处理链路上的失败（人工停点本身不会失败，只能取消）。
-- CANCELED：用户主动取消，任何非终态都可以。
+- CANCELED：用户主动取消处理中会议。
 - PARTIAL_READY：转写已好、纪要 CLI 失败；不是终态，可重试回 GENERATING_MINUTES。
+- AWAITING_SPEAKER_REVIEW / READY / PARTIAL_READY：用户可显式重转写回 QUEUED。
 """
 
 from __future__ import annotations
@@ -47,9 +48,13 @@ TRANSITIONS: dict[MeetingState, frozenset[MeetingState]] = {
     MeetingState.PROCESSING: frozenset(
         {MeetingState.AWAITING_SPEAKER_REVIEW, MeetingState.FAILED, MeetingState.CANCELED}
     ),
-    # 唯一人工停点：只能被确认推进或取消，不存在自动失败。
+    # 唯一人工停点：可被确认推进、显式重转写或取消，不存在自动失败。
     MeetingState.AWAITING_SPEAKER_REVIEW: frozenset(
-        {MeetingState.APPLYING_DECISIONS, MeetingState.CANCELED}
+        {
+            MeetingState.APPLYING_DECISIONS,
+            MeetingState.QUEUED,
+            MeetingState.CANCELED,
+        }
     ),
     MeetingState.APPLYING_DECISIONS: frozenset(
         {MeetingState.GENERATING_MINUTES, MeetingState.FAILED, MeetingState.CANCELED}
@@ -64,15 +69,20 @@ TRANSITIONS: dict[MeetingState, frozenset[MeetingState]] = {
     ),
     # 纪要 CLI 失败（如配额）可重试；转写结果仍在，随时可导出。
     MeetingState.PARTIAL_READY: frozenset(
-        {MeetingState.GENERATING_MINUTES, MeetingState.CANCELED}
+        {
+            MeetingState.GENERATING_MINUTES,
+            MeetingState.QUEUED,
+            MeetingState.CANCELED,
+        }
     ),
-    MeetingState.READY: frozenset(),
+    # QUEUED 边只供用户显式重转写；不是自动失败或自动重试。
+    MeetingState.READY: frozenset({MeetingState.QUEUED}),
     MeetingState.FAILED: frozenset(),
     MeetingState.CANCELED: frozenset(),
 }
 
 TERMINAL_STATES: frozenset[MeetingState] = frozenset(
-    {MeetingState.READY, MeetingState.FAILED, MeetingState.CANCELED}
+    {MeetingState.FAILED, MeetingState.CANCELED}
 )
 
 ACTIVE_STATES: frozenset[MeetingState] = frozenset(MeetingState) - TERMINAL_STATES

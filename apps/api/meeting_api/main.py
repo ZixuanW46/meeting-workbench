@@ -10,7 +10,7 @@ from meeting_api.config import Settings
 from meeting_api.db import init_db, make_engine, make_session_factory
 from meeting_api.events import EventStore
 from meeting_api.events import router as events_router
-from meeting_api.routes import audio, export, health, meetings, minutes, review, upload
+from meeting_api.routes import audio, export, health, hotwords, meetings, minutes, review, upload
 from meeting_api.routes import settings as settings_routes
 from meeting_api.worker import Worker
 
@@ -64,6 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="meeting-workbench", lifespan=lifespan)
     app.state.settings = settings
     app.include_router(health.router)
+    app.include_router(hotwords.router)
     app.include_router(meetings.router)
     app.include_router(upload.router)
     app.include_router(audio.router)

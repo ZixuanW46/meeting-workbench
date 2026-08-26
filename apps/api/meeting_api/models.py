@@ -27,6 +27,9 @@ class Meeting(Base):
     # 预计人数是先验，不是硬约束；None = 不确定
     expected_speakers: Mapped[int | None] = mapped_column(default=None)
     hotwords_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]")
+    hotword_snapshot_json: Mapped[str] = mapped_column(
+        Text, default="[]", server_default="[]"
+    )
     audio_filename: Mapped[str | None] = mapped_column(String(255), default=None)
     audio_sha256: Mapped[str | None] = mapped_column(String(64), default=None)
     audio_size: Mapped[int | None] = mapped_column(BigInteger, default=None)
@@ -36,6 +39,13 @@ class Meeting(Base):
         Boolean, default=False, server_default="0"
     )
     created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class HotwordEntry(Base):
+    __tablename__ = "hotword_entries"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    word: Mapped[str] = mapped_column(String(200), unique=True)
 
 
 class Person(Base):

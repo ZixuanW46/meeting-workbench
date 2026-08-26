@@ -5,6 +5,7 @@
 """
 
 from meeting_domain.fake_pipeline import FakeMeetingPipeline
+from meeting_domain.hotwords import snapshot
 from meeting_domain.speaker_review import (
     DecisionKind,
     ReviewIncomplete,
@@ -39,5 +40,6 @@ __all__ = [
     "decision_field_error",
     "has_unconfirmed_speakers",
     "review_complete",
+    "snapshot",
     "transition",
 ]

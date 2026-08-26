@@ -1,31 +1,83 @@
-import { Empty, Table, Typography } from 'antd'
+import { useEffect, useState } from 'react'
+import { formatApiError, listMeetings, type Meeting } from '../api/client'
+import { StateBadge } from '../components/StateBadge'
 
-// M0 占位：静态空列表。M1 改为从 GET /api/meetings 拉真实数据。
-export interface MeetingRow {
-  id: string
-  title: string
-  state: string
-  created_at: string
+function formatCreatedAt(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return date.toLocaleString('zh-CN', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
-const columns = [
-  { title: '标题', dataIndex: 'title', key: 'title' },
-  { title: '状态', dataIndex: 'state', key: 'state' },
-  { title: '创建时间', dataIndex: 'created_at', key: 'created_at' },
-]
-
 export function MeetingListPage() {
-  const meetings: MeetingRow[] = []
+  const [meetings, setMeetings] = useState<Meeting[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let stale = false
+    listMeetings()
+      .then((items) => {
+        if (!stale) {
+          setMeetings(items)
+        }
+      })
+      .catch((e: unknown) => {
+        if (!stale) {
+          setError(formatApiError(e))
+        }
+      })
+    return () => {
+      stale = true
+    }
+  }, [])
+
   return (
-    <div>
-      <Typography.Title level={5}>会议列表</Typography.Title>
-      <Table<MeetingRow>
-        rowKey="id"
-        columns={columns}
-        dataSource={meetings}
-        locale={{ emptyText: <Empty description="还没有会议" /> }}
-        pagination={false}
-      />
+    <div className="page">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">会议</h1>
+          <p className="page-subtitle">上传录音，确认说话人，得到转写与纪要</p>
+        </div>
+        <a className="btn btn-primary" href="#/new">
+          新建会议
+        </a>
+      </div>
+
+      {error !== null && <div className="notice notice-error">{error}</div>}
+
+      {meetings !== null && (
+        <div className="list-card">
+          {meetings.length === 0 ? (
+            <div className="empty">
+              <div className="empty-title">还没有会议</div>
+              <div>新建一场会议并上传录音，开始第一次转写</div>
+              <a className="btn" href="#/new">
+                新建第一场会议
+              </a>
+            </div>
+          ) : (
+            meetings.map((meeting) => (
+              <a
+                key={meeting.id}
+                className="list-row"
+                href={`#/meetings/${meeting.id}`}
+              >
+                <span className="list-row-title">{meeting.title}</span>
+                <StateBadge state={meeting.state} />
+                <span className="list-row-meta">
+                  {formatCreatedAt(meeting.created_at)}
+                </span>
+              </a>
+            ))
+          )}
+        </div>
+      )}
     </div>
   )
 }

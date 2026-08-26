@@ -15,7 +15,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="MW_")
 
     data_dir: Path = Path("data")
+    static_dir: Path = Path("apps/web/dist")
     database_url: str = ""  # 留空则用 data_dir/meeting-workbench.sqlite3
+    # 上传完成后至少仍保留 1 GiB，避免 SQLite 和处理产物把系统盘彻底写满。
+    upload_disk_reserve_bytes: int = 1024**3
     worker_disabled: bool = False
     worker_poll_seconds: float = 1.0
     asr_backend: Literal["fake", "qwen3-asr-mlx"] = "fake"

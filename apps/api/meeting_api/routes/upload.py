@@ -5,7 +5,9 @@ from __future__ import annotations
 import base64
 import binascii
 import re
+import shutil
 import uuid
+from collections.abc import Mapping
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
@@ -28,6 +30,24 @@ router = APIRouter(prefix="/api/meetings")
 TUS_VERSION = "1.0.0"
 TUS_HEADERS = {"Tus-Resumable": TUS_VERSION, "Tus-Version": TUS_VERSION}
 UPLOAD_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _ensure_disk_space(
+    request: Request,
+    upload_size: int,
+    *,
+    headers: Mapping[str, str] | None = None,
+) -> None:
+    settings = request.app.state.settings
+    free_bytes = shutil.disk_usage(settings.data_dir).free
+    required_bytes = upload_size + settings.upload_disk_reserve_bytes
+    if free_bytes < required_bytes:
+        free_gib = free_bytes / 1024**3
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"磁盘空间不足，还剩 {free_gib:.2f} GB",
+            headers=headers,
+        )
 
 
 def _require_tus_version(request: Request) -> None:
@@ -125,6 +145,8 @@ def upload_audio(
         if meeting is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会议不存在")
 
+        _ensure_disk_space(request, file.size or 0)
+
         try:
             uploading = transition(MeetingState(meeting.state), MeetingState.UPLOADING)
         except (InvalidTransition, ValueError) as exc:
@@ -169,6 +191,7 @@ def create_tus_upload(meeting_id: str, request: Request) -> Response:
                 detail="会议不存在",
                 headers=TUS_HEADERS,
             )
+        _ensure_disk_space(request, length, headers=TUS_HEADERS)
         current = MeetingState(meeting.state)
         if current is MeetingState.UPLOADING:
             # 上一次上传被放弃：作废旧分片、原地重新发起，不做状态迁移

@@ -54,6 +54,22 @@ STEP_PREPARING_REVIEW = "PREPARING_REVIEW"
 STEP_GENERATING_MINUTES = "GENERATING_MINUTES"
 
 
+def recover_interrupted_meetings(session_factory: sessionmaker[Session]) -> int:
+    """进程退出时留在 PROCESSING 的任务无法续跑，启动时明确标记失败。"""
+    with session_factory() as session:
+        meetings = session.scalars(
+            select(Meeting).where(Meeting.state == MeetingState.PROCESSING.value)
+        ).all()
+        for meeting in meetings:
+            meeting.state = transition(
+                MeetingState(meeting.state), MeetingState.FAILED
+            ).value
+            meeting.processing_error = "上次处理中断，已在本次启动时标记为失败"
+        if meetings:
+            session.commit()
+        return len(meetings)
+
+
 class Worker:
     """一次只拉取一场待处理会议；调用方可同步执行一轮。"""
 

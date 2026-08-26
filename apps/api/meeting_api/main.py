@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from meeting_api.config import Settings
 from meeting_api.db import init_db, make_engine, make_session_factory
@@ -23,7 +24,7 @@ from meeting_api.routes import (
     voiceprints,
 )
 from meeting_api.routes import settings as settings_routes
-from meeting_api.worker import Worker
+from meeting_api.worker import Worker, recover_interrupted_meetings
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         init_db(engine)
         app.state.engine = engine
         app.state.session_factory = make_session_factory(engine)
+        recovered_count = recover_interrupted_meetings(app.state.session_factory)
+        if recovered_count:
+            logger.warning("已将 %d 场上次中断的会议标记为失败", recovered_count)
         app.state.events = EventStore()
         app.state.worker = Worker(
             app.state.session_factory,
@@ -103,6 +107,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(export.router)
     app.include_router(settings_routes.router)
     app.include_router(events_router)
+    # catch-all 静态路由必须最后挂载，避免覆盖 /api 与 /healthz。
+    if settings.static_dir.is_dir():
+        app.mount("/", StaticFiles(directory=settings.static_dir, html=True), name="web")
     return app
 
 

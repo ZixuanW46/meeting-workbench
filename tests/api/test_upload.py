@@ -89,3 +89,14 @@ def test_upload_response_does_not_expose_server_path(client):
     assert "/workspace" not in response_text
     assert "data/meetings" not in response_text
     assert "\\" not in response_text
+
+def test_empty_upload_leaves_meeting_in_draft(client):
+    meeting = _create_meeting(client)
+    response = client.post(
+        f"/api/meetings/{meeting['id']}/upload",
+        files={"file": ("empty.wav", b"", "audio/wav")},
+    )
+    assert response.status_code == 422
+    detail = client.get(f"/api/meetings/{meeting['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["state"] == "DRAFT"

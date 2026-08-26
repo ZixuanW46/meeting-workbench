@@ -36,7 +36,6 @@ def upload_audio(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="当前会议状态不允许上传音频",
             ) from exc
-        meeting.state = uploading.value
 
         try:
             saved = save_stream(
@@ -54,6 +53,7 @@ def upload_audio(
         meeting.audio_filename = saved.filename
         meeting.audio_sha256 = saved.sha256
         meeting.audio_size = saved.size
+        meeting.state = uploading.value
         meeting.state = transition(uploading, MeetingState.QUEUED).value
         session.commit()
 

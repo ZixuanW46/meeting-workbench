@@ -152,7 +152,7 @@ def test_process_next_persists_transcript_and_speaker_review_artifacts(client):
     assert [cluster.cluster_id for cluster in clusters] == ["S1", "S2"]
     for cluster in clusters:
         samples = json.loads(cluster.sample_clips_json)
-        assert 2 <= len(samples) <= 3
+        assert 2 <= len(samples) <= 5
         assert all(sample["start_seconds"] < sample["end_seconds"] for sample in samples)
     # M10：声纹库为空时不得再凭簇 id 硬编码建议身份。
     assert clusters[0].suggested_person_id is None
@@ -174,7 +174,7 @@ def test_process_next_reaches_review_with_more_expected_speakers(client):
         ).all()
     assert {cluster.cluster_id for cluster in clusters} == {"S1", "S2", "S3", "S4"}
     for cluster in clusters:
-        assert 2 <= len(json.loads(cluster.sample_clips_json)) <= 3
+        assert 2 <= len(json.loads(cluster.sample_clips_json)) <= 5
 
 
 def test_process_next_only_handles_one_of_two_queued_meetings(client):
@@ -290,6 +290,83 @@ def test_single_turn_cluster_reaches_review_with_one_clip(client):
     assert set(clusters) == {"S1", "S2"}
     assert len(clusters["S1"]) == 2
     assert len(clusters["S2"]) == 1
+
+
+class HeadHeavyDiarization(FakeDiarizationBackend):
+    """真实录音的常态：某簇发言大量堆在开头，只在结尾又说了一次。"""
+
+    def diarize(self, audio_path: Path, expected_speakers=None):
+        del expected_speakers
+        if not self.loaded:
+            raise RuntimeError("diarization 后端未加载（先 load()）")
+        # S1 的 8 段发言彼此隔 2s（不会被并成轮次），最后一段远在 60s；
+        # S2 占中段，保证是合法的双人会议。
+        head = [
+            SpeakerSegment(float(i * 4), float(i * 4 + 2), "S1") for i in range(7)
+        ]
+        return [
+            *head,
+            SpeakerSegment(30.0, 35.0, "S2"),
+            SpeakerSegment(60.0, 62.0, "S1"),
+        ]
+
+
+def test_review_samples_spread_across_meeting_not_only_the_head(client):
+    # 用户要能判断「后半场还是不是这个人」：试听片段必须分散取样，
+    # 上限 5 条，且不能全部来自开头。
+    meeting_id = _queue_meeting(client)
+
+    _worker(client, diarization_backend=HeadHeavyDiarization()).process_next()
+
+    with client.app.state.session_factory() as session:
+        cluster = session.scalars(
+            select(SpeakerCluster).where(
+                SpeakerCluster.meeting_id == meeting_id,
+                SpeakerCluster.cluster_id == "S1",
+            )
+        ).one()
+    samples = json.loads(cluster.sample_clips_json)
+    assert len(samples) == 5
+    # 结尾那次发言必须入选，而不是被开头的连续片段挤掉。
+    assert {"start_seconds": 60.0, "end_seconds": 62.0} in samples
+    starts = [sample["start_seconds"] for sample in samples]
+    assert starts == sorted(starts)
+
+
+class AdjacentFragmentDiarization(FakeDiarizationBackend):
+    """同一轮发言被切成首尾相接的亚秒碎段：试听时它们该是一条，不是三条。"""
+
+    def diarize(self, audio_path: Path, expected_speakers=None):
+        del expected_speakers
+        if not self.loaded:
+            raise RuntimeError("diarization 后端未加载（先 load()）")
+        return [
+            SpeakerSegment(0.0, 5.0, "S1"),
+            SpeakerSegment(5.3, 7.0, "S1"),
+            SpeakerSegment(7.0, 8.0, "S1"),
+            SpeakerSegment(10.0, 15.0, "S2"),
+            SpeakerSegment(20.0, 24.0, "S1"),
+        ]
+
+
+def test_adjacent_fragments_merge_into_single_review_clip(client):
+    meeting_id = _queue_meeting(client)
+
+    _worker(client, diarization_backend=AdjacentFragmentDiarization()).process_next()
+
+    with client.app.state.session_factory() as session:
+        cluster = session.scalars(
+            select(SpeakerCluster).where(
+                SpeakerCluster.meeting_id == meeting_id,
+                SpeakerCluster.cluster_id == "S1",
+            )
+        ).one()
+    samples = json.loads(cluster.sample_clips_json)
+    # 0–5 / 5.3–7 / 7–8 是同一轮（间隔 ≤1s），合并成 0–8 一条；20–24 独立成条。
+    assert samples == [
+        {"start_seconds": 0.0, "end_seconds": 8.0},
+        {"start_seconds": 20.0, "end_seconds": 24.0},
+    ]
 
 
 class FragmentDiarization(FakeDiarizationBackend):

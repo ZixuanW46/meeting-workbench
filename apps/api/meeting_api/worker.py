@@ -53,6 +53,7 @@ from meeting_domain import (
     eligible_for_enrollment,
     match_voiceprint,
     plan_enrollment,
+    select_spread_windows,
     snapshot,
     transition,
 )
@@ -80,19 +81,17 @@ def _best_clip_window(cluster: SpeakerCluster) -> TimeWindow | None:
     return (start, min(end, start + VOICEPRINT_CLIP_MAX_SECONDS))
 
 
-# 每簇最多取前 3 段：既是确认停点的试听片段，也是声纹提取的时间窗。
-REVIEW_CLIP_LIMIT = 3
-
-
 def _cluster_windows(
-    speaker_segments: Sequence[SpeakerSegment], cluster_id: str
+    turns: Sequence[SpeakerSegment], cluster_id: str
 ) -> list[TimeWindow]:
-    """匹配、入库、试听共用同一批簇内时间窗，三个口径必须一致。"""
-    return [
-        (segment.start, segment.end)
-        for segment in speaker_segments
-        if segment.cluster_id == cluster_id
-    ][:REVIEW_CLIP_LIMIT]
+    """匹配、入库、试听共用同一批簇内时间窗，三个口径必须一致。
+
+    窗来自合并后的发言轮次（相邻亚秒碎段不再各占一条）并做分散取样：
+    至多 5 段、覆盖会议不同时段，而不是只有开头的连续几段。
+    """
+    return select_spread_windows(
+        [(turn.start, turn.end) for turn in turns if turn.cluster_id == cluster_id]
+    )
 
 
 def recover_interrupted_meetings(session_factory: sessionmaker[Session]) -> int:
@@ -207,18 +206,20 @@ class Worker:
                 # 真实音频的自动聚类几乎必产亚秒碎簇；并入最近主簇后再落库，
                 # 否则确认包准备会因「凑不齐试听片段」整场失败。
                 speaker_segments = consolidate_fragment_clusters(speaker_segments)
+                # 发言轮次是逐轮重转写与试听/声纹时间窗的共同粒度。
+                turns = merge_adjacent_turns(speaker_segments)
                 asr_segments = self._retranscribe_blob_per_turn(
-                    audio_path, asr_segments, speaker_segments, hotwords
+                    audio_path, asr_segments, turns, hotwords
                 )
                 self._persist_segments(session, meeting_id, asr_segments, speaker_segments)
 
                 self._set_step(session, meeting, STEP_VOICEPRINT_MATCHING)
                 self._apply_voiceprint_suggestions(
-                    session, meeting_id, audio_path, speaker_segments
+                    session, meeting_id, audio_path, turns
                 )
 
                 self._set_step(session, meeting, STEP_PREPARING_REVIEW)
-                self._prepare_review_samples(session, meeting_id, speaker_segments)
+                self._prepare_review_samples(session, meeting_id, turns)
 
                 meeting.state = transition(
                     MeetingState(meeting.state),
@@ -331,7 +332,7 @@ class Worker:
         self,
         audio_path: Path,
         asr_segments: Sequence[AsrSegment],
-        speaker_segments: Sequence[SpeakerSegment],
+        turns: Sequence[SpeakerSegment],
         hotwords: Sequence[str],
     ) -> Sequence[AsrSegment]:
         """粗粒度转写按发言轮次切音频重转写。
@@ -342,7 +343,6 @@ class Worker:
         不是可解析的 PCM wav（转码前的损坏文件等）时保留整段结果，
         不让会议失败。
         """
-        turns = merge_adjacent_turns(speaker_segments)
         if len(turns) <= 1 or len(asr_segments) * 3 > len(turns):
             return asr_segments
         with tempfile.TemporaryDirectory(prefix="mw-turns-") as scratch:
@@ -426,7 +426,7 @@ class Worker:
         session: Session,
         meeting_id: str,
         audio_path: Path,
-        speaker_segments: Sequence[SpeakerSegment],
+        turns: Sequence[SpeakerSegment],
     ) -> None:
         clusters = session.scalars(
             select(SpeakerCluster)
@@ -452,7 +452,7 @@ class Worker:
         # 应用时直接复用，不必再加载声纹模型。
         with self.model_slot.use(self.embedding_backend) as embedding_backend:
             for cluster in clusters:
-                windows = _cluster_windows(speaker_segments, cluster.cluster_id)
+                windows = _cluster_windows(turns, cluster.cluster_id)
                 if not windows:
                     continue
                 candidate = embedding_backend.embed(audio_path, windows)
@@ -612,7 +612,7 @@ class Worker:
     def _prepare_review_samples(
         session: Session,
         meeting_id: str,
-        speaker_segments: Sequence[SpeakerSegment],
+        turns: Sequence[SpeakerSegment],
     ) -> None:
         clusters = session.scalars(
             select(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
@@ -620,9 +620,7 @@ class Worker:
         for cluster in clusters:
             samples = [
                 {"start_seconds": start, "end_seconds": end}
-                for start, end in _cluster_windows(
-                    speaker_segments, cluster.cluster_id
-                )
+                for start, end in _cluster_windows(turns, cluster.cluster_id)
             ]
             # 单次发言者只有 1 个片段也合法；0 片段说明簇与片段已不一致，属数据错误。
             if len(samples) < 1:

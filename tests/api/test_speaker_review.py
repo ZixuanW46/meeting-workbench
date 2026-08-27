@@ -81,7 +81,7 @@ def test_get_review_returns_cards_with_samples_and_text_without_fake_precision(c
     assert cards["S2"]["suggested_person_id"] is None
     for card in cards.values():
         assert card["text"]
-        assert 2 <= len(card["sample_clips"]) <= 3
+        assert 2 <= len(card["sample_clips"]) <= 5
         assert all(
             clip["start_seconds"] < clip["end_seconds"]
             for clip in card["sample_clips"]

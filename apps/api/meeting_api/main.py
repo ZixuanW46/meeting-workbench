@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from meeting_api.config import Settings
 from meeting_api.db import init_db, make_engine, make_session_factory
+from meeting_api.doctor import router as doctor_router
 from meeting_api.events import EventStore
 from meeting_api.events import router as events_router
 from meeting_api.routes import (
@@ -97,6 +98,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ],
     )
     app.include_router(health.router)
+    app.include_router(doctor_router)
     app.include_router(hotwords.router)
     app.include_router(voiceprints.router)
     app.include_router(meetings.router)

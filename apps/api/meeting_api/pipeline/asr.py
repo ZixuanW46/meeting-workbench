@@ -122,6 +122,12 @@ def _require_darwin(backend_name: str) -> None:
 def get_asr_backend(
     name: str = "fake", models_dir: Path = Path("data/models")
 ) -> AsrBackend:
+    if name == "auto":
+        if sys.platform == "darwin" and (
+            models_dir / Qwen3AsrMlxBackend.model_subdir / "config.json"
+        ).is_file():
+            return Qwen3AsrMlxBackend(models_dir)
+        return FakeAsrBackend()
     if name == "fake":
         return FakeAsrBackend()
     if name == "qwen3-asr-mlx":

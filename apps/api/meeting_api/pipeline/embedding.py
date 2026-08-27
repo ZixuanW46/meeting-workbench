@@ -111,6 +111,13 @@ def _require_darwin(backend_name: str) -> None:
 def get_embedding_backend(
     name: str = "fake", models_dir: Path = Path("data/models")
 ) -> EmbeddingBackend:
+    if name == "auto":
+        model_path = (
+            models_dir / SherpaOnnxEmbeddingBackend.model_subdir / "embedding.onnx"
+        )
+        if sys.platform == "darwin" and model_path.is_file():
+            return SherpaOnnxEmbeddingBackend(models_dir)
+        return FakeEmbeddingBackend()
     if name == "fake":
         return FakeEmbeddingBackend()
     if name == "sherpa-onnx":

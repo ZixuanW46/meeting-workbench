@@ -21,9 +21,10 @@ class Settings(BaseSettings):
     upload_disk_reserve_bytes: int = 1024**3
     worker_disabled: bool = False
     worker_poll_seconds: float = 1.0
-    asr_backend: Literal["fake", "qwen3-asr-mlx"] = "fake"
-    diarization_backend: Literal["fake", "sherpa-onnx"] = "fake"
-    embedding_backend: Literal["fake", "sherpa-onnx"] = "fake"
+    # auto：仅 Darwin 且对应模型文件完整时选真实后端，其余情况安全回退 fake。
+    asr_backend: Literal["auto", "fake", "qwen3-asr-mlx"] = "auto"
+    diarization_backend: Literal["auto", "fake", "sherpa-onnx"] = "auto"
+    embedding_backend: Literal["auto", "fake", "sherpa-onnx"] = "auto"
     # auto：按本机 PATH 选 claude/codex，都没有则纪要失败进 PARTIAL_READY；
     # 测试固定用 fake，绝不真调 CLI。
     minutes_backend: Literal["auto", "claude", "codex", "fake"] = "auto"

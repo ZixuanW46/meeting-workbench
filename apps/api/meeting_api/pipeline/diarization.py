@@ -148,6 +148,14 @@ def _require_darwin(backend_name: str) -> None:
 def get_diarization_backend(
     name: str = "fake", models_dir: Path = Path("data/models")
 ) -> DiarizationBackend:
+    if name == "auto":
+        model_dir = models_dir / SherpaOnnxDiarizationBackend.model_subdir
+        if sys.platform == "darwin" and all(
+            (model_dir / filename).is_file()
+            for filename in ("segmentation.onnx", "embedding.onnx")
+        ):
+            return SherpaOnnxDiarizationBackend(models_dir)
+        return FakeDiarizationBackend()
     if name == "fake":
         return FakeDiarizationBackend()
     if name == "sherpa-onnx":

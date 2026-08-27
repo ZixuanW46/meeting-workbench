@@ -30,15 +30,15 @@ from meeting_api.pipeline.serial import LoadableModel
 from meeting_api.worker import Worker
 
 
-def test_backend_settings_default_to_fake(monkeypatch):
+def test_backend_settings_default_to_auto(monkeypatch):
     for name in ("MW_ASR_BACKEND", "MW_DIARIZATION_BACKEND", "MW_EMBEDDING_BACKEND"):
         monkeypatch.delenv(name, raising=False)
 
     settings = Settings()
 
-    assert settings.asr_backend == "fake"
-    assert settings.diarization_backend == "fake"
-    assert settings.embedding_backend == "fake"
+    assert settings.asr_backend == "auto"
+    assert settings.diarization_backend == "auto"
+    assert settings.embedding_backend == "auto"
 
 
 def test_backend_settings_read_environment(monkeypatch):

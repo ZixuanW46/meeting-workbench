@@ -88,7 +88,8 @@ def test_dry_run_prints_all_downloads_without_network_or_writes(tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert "/hf" in result.stdout
+    # venv 有可执行 hf 时 DRY_RUN 打 .../bin/hf；Linux CI 通常回退 PATH 上的 hf。
+    assert "hf download" in result.stdout
     assert "mlx-community/Qwen3-ASR-1.7B-8bit" in result.stdout
     assert SEGMENTATION_URL in result.stdout
     assert EMBEDDING_URL in result.stdout

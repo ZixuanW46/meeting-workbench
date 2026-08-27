@@ -484,19 +484,22 @@ def test_enrollment_replaces_redundant_template_with_fresh_provenance(client):
     assert "假转写第二段" in lei_rows[0].snippet_text
 
 
+def _orthogonal_vector() -> tuple[float, ...]:
+    """与 fake 切分 S1 窗向量近似正交的确定性向量，用来种子一条「不同环境」模板。"""
+    backend = FakeEmbeddingBackend()
+    with SingleModelSlot().use(backend) as loaded:
+        return loaded.embed(Path("unused.wav"), [(100.0, 105.0)])
+
+
 def test_enrollment_appends_template_when_voice_differs(client):
     # 换了环境（候选与既有模板近似正交）：追加为第二条模板而不是覆盖。
-    _seed_voiceprint = __import__(
-        "tests.api.test_worker", fromlist=["_seed_voiceprint", "_fake_vector"]
-    )
+    # 不用跨文件 import tests.*：pythonpath 只有 domain/api，CI 的 python -m pytest 找不到 tests 包。
     with client.app.state.session_factory() as session:
         session.add(Person(id="fake-person-1", display_name="已知用户 1"))
         session.add(
             Voiceprint(
                 person_id="fake-person-1",
-                embedding=embedding_to_bytes(
-                    _seed_voiceprint._fake_vector([(100.0, 105.0)])
-                ),
+                embedding=embedding_to_bytes(_orthogonal_vector()),
             )
         )
         session.commit()

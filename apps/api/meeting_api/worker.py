@@ -539,6 +539,9 @@ class Worker:
             plan = plan_enrollment(
                 [embedding_from_bytes(row.embedding) for row in rows], candidate
             )
+            if plan.action == "skip":
+                # 该人处于超限待裁决状态：暂停入库，等用户在声纹库页删到上限内。
+                continue
             window = _best_clip_window(cluster)
             snippet = self._clip_snippet(
                 session, meeting.id, cluster.cluster_id, window

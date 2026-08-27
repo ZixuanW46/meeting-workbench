@@ -112,7 +112,7 @@ export function VoiceprintsPage() {
         <div>
           <h1 className="page-title">声纹库</h1>
           <p className="page-subtitle">
-            确认说话人时自动入库，每人最多保留 4 条不同环境的声纹模板；试听核对，认错了就删掉那条
+            确认说话人时自动入库，每人最多保留 5 条不同环境的声纹模板；出现第 6 条时不自动淘汰，请试听后删掉最没代表性的一条
           </p>
         </div>
       </div>
@@ -134,6 +134,11 @@ export function VoiceprintsPage() {
                 <div className="voiceprint-group-head">
                   <span className="list-row-title">{group.displayName}</span>
                   <span className="list-row-meta">{group.templates.length} 条模板</span>
+                  {group.templates.length > 5 && (
+                    <span className="voiceprint-over-cap">
+                      超出上限：请试听后删掉一条（超限期间暂停自动入库）
+                    </span>
+                  )}
                 </div>
                 {group.templates.map((template) => (
                   <div key={template.id} className="list-row voiceprint-template">

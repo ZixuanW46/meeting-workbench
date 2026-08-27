@@ -69,9 +69,9 @@ def match_voiceprint(
     return VoiceprintMatch(person_id=best_person_id, tier=tier)
 
 
-# 每人模板上限：控住「取最高余弦」的误报面、把单次误挂污染限制在 1/K
-# 并可被淘汰、保持声纹库审核页在人工可核对的规模。
-TEMPLATE_CAP = 4
+# 每人模板上限：控住「取最高余弦」的误报面、把单次误挂污染限制在 1/K、
+# 保持声纹库审核页在人工可核对的规模。
+TEMPLATE_CAP = 5
 
 # 与现有模板余弦达到该值视为冗余：没有信息增益，只刷新录音条件。
 TEMPLATE_REDUNDANCY_THRESHOLD = 0.9
@@ -79,7 +79,7 @@ TEMPLATE_REDUNDANCY_THRESHOLD = 0.9
 
 @dataclass(frozen=True)
 class EnrollmentPlan:
-    action: str  # "append" | "replace"
+    action: str  # "append" | "replace" | "skip"
     replace_index: int | None = None
 
 
@@ -90,7 +90,9 @@ def plan_enrollment(
     """多模板入库策略；existing 按入库时间升序（最旧在前）。
 
     与某现有模板冗余（余弦 ≥0.9）→ 替换最相似那条（刷新录音条件而不是
-    堆重复）；未满上限 → 追加（保留环境多样性）；满了 → 替换最旧。
+    堆重复）；未超上限 → 追加（满 5 时允许出现第 6 条「待裁决」槽位，
+    淘汰哪条由用户在声纹库页试听后自己删，系统绝不自动淘汰）；
+    已在超限状态 → 跳过入库，等用户删回上限内。
     """
     best_index: int | None = None
     best_similarity = 0.0
@@ -101,9 +103,9 @@ def plan_enrollment(
             best_index = index
     if best_index is not None and best_similarity >= TEMPLATE_REDUNDANCY_THRESHOLD:
         return EnrollmentPlan(action="replace", replace_index=best_index)
-    if len(existing) < TEMPLATE_CAP:
+    if len(existing) <= TEMPLATE_CAP:
         return EnrollmentPlan(action="append")
-    return EnrollmentPlan(action="replace", replace_index=0)
+    return EnrollmentPlan(action="skip")
 
 ENROLLABLE_DECISION_KINDS: frozenset[DecisionKind] = frozenset(
     {

@@ -188,15 +188,43 @@ def test_plan_enrollment_replaces_redundant_template():
     assert plan.replace_index == 1
 
 
-def test_plan_enrollment_evicts_oldest_when_cap_full():
+def test_template_cap_is_five():
+    _, cap, _ = _template_rule()
+
+    assert cap == 5
+
+
+def test_plan_enrollment_appends_overflow_slot_at_cap():
+    # 满 5 条时第 6 条照常入库：淘汰哪条由用户在声纹库页试听后自己删，
+    # 系统不做自动淘汰。
     plan_enrollment, cap, _ = _template_rule()
-    # cap 条互不冗余的模板（二维下用互相远离的方向）
     existing = [(1.0, float(i * 4 + 1)) for i in range(cap)]
 
     plan = plan_enrollment(existing, (1.0, -20.0))
 
+    assert plan.action == "append"
+
+
+def test_plan_enrollment_skips_when_over_cap_until_user_prunes():
+    # 已在超限状态（6 条）：暂停继续入库，等用户删到 5 条以内。
+    plan_enrollment, cap, _ = _template_rule()
+    existing = [(1.0, float(i * 4 + 1)) for i in range(cap + 1)]
+
+    plan = plan_enrollment(existing, (1.0, -20.0))
+
+    assert plan.action == "skip"
+    assert plan.replace_index is None
+
+
+def test_plan_enrollment_redundant_replace_still_works_over_cap():
+    # 超限期间同环境重复确认仍然只是刷新那条，不新增行数。
+    plan_enrollment, cap, _ = _template_rule()
+    existing = [(1.0, float(i * 4 + 1)) for i in range(cap + 1)]
+
+    plan = plan_enrollment(existing, existing[2])
+
     assert plan.action == "replace"
-    assert plan.replace_index == 0
+    assert plan.replace_index == 2
 
 
 @pytest.mark.parametrize("quality", [0.0, 1.0])

@@ -551,6 +551,15 @@ a {
   background: var(--surface-2);
 }
 
+/* 超限待裁决：语义色只做微染，与提示条口径一致 */
+.voiceprint-over-cap {
+  font-size: 12px;
+  color: var(--warning);
+  border: 1px solid rgba(213, 162, 76, 0.35);
+  border-radius: var(--radius-pill);
+  padding: 1px 9px;
+}
+
 .voiceprint-template .list-row-meta {
   font-variant-numeric: tabular-nums;
 }

@@ -35,6 +35,10 @@ class AudioTranscodeError(RuntimeError):
     pass
 
 
+# ffmpeg 卡死不能拖垮上传请求：超时按转码失败处理，测试里会调小这个值。
+TRANSCODE_TIMEOUT_SECONDS = 120.0
+
+
 def _describe_file(path: Path) -> SavedUpload:
     digest = hashlib.sha256()
     size = 0
@@ -186,10 +190,15 @@ def transcode_audio_if_needed(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             check=False,
+            timeout=TRANSCODE_TIMEOUT_SECONDS,
         )
     except FileNotFoundError as exc:
         source.unlink(missing_ok=True)
         raise AudioTranscodeError("未找到 ffmpeg，无法完成音频转码") from exc
+    except subprocess.TimeoutExpired as exc:
+        source.unlink(missing_ok=True)
+        target.unlink(missing_ok=True)
+        raise AudioTranscodeError("音频转码超时，请检查音频文件是否损坏") from exc
 
     if completed.returncode != 0 or not target.is_file() or target.stat().st_size == 0:
         source.unlink(missing_ok=True)

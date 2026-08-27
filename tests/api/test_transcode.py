@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import shutil
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -165,6 +166,33 @@ def test_missing_ffmpeg_returns_422_and_multipart_can_retry(
         files={"file": ("retry.wav", b"RIFF-retry", "audio/wav")},
     )
     assert retried.status_code == 200
+
+
+def test_ffmpeg_timeout_returns_422_and_keeps_draft(client, tmp_path, monkeypatch):
+    from meeting_api import storage
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    sleep_bin = shutil.which("sleep")
+    assert sleep_bin is not None
+    stub = bin_dir / "ffmpeg"
+    stub.write_text(f"#!/bin/sh\nexec {sleep_bin} 30\n", encoding="utf-8")
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setattr(storage, "TRANSCODE_TIMEOUT_SECONDS", 0.2)
+    meeting = _create_meeting(client)
+
+    failed = client.post(
+        f"/api/meetings/{meeting['id']}/upload",
+        files={"file": ("recording.mp3", b"compressed", "audio/mpeg")},
+    )
+
+    assert failed.status_code == 422
+    assert "转码超时" in failed.json()["detail"]
+    stored = _stored_meeting(client, meeting["id"])
+    assert stored.state == "DRAFT"
+    assert stored.audio_filename is None
+    assert list(_raw_dir(client, meeting["id"]).iterdir()) == []
 
 
 def test_ffmpeg_failure_returns_422_and_tus_can_restart(client, tmp_path, monkeypatch):

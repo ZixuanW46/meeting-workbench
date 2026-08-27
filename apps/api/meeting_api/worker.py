@@ -285,16 +285,16 @@ class Worker:
         speaker_segments: Sequence[SpeakerSegment],
         hotwords: Sequence[str],
     ) -> Sequence[AsrSegment]:
-        """整段无时间戳转写按发言轮次切音频重转写。
+        """粗粒度转写按发言轮次切音频重转写。
 
-        Qwen3-ASR 只回整段文本，全部转写会被判给单一说话人；有多个发言
-        轮次时逐轮切片重转写，让每句话落在正确的簇上。音频不是可解析的
-        PCM wav（转码前的损坏文件等）时保留整段结果，不让会议失败。
+        Qwen3-ASR 只回整段文本（长音频会内部分块成少数巨型段），全部
+        转写会被判给单一说话人；当转写粒度远粗于轮次粒度（段数 ×3 仍
+        不及轮次数）时逐轮切片重转写，让每句话落在正确的簇上。音频
+        不是可解析的 PCM wav（转码前的损坏文件等）时保留整段结果，
+        不让会议失败。
         """
-        if len(asr_segments) != 1:
-            return asr_segments
         turns = merge_adjacent_turns(speaker_segments)
-        if len(turns) <= 1:
+        if len(turns) <= 1 or len(asr_segments) * 3 > len(turns):
             return asr_segments
         with tempfile.TemporaryDirectory(prefix="mw-turns-") as scratch:
             pieces: list[tuple[SpeakerSegment, Path]] = []

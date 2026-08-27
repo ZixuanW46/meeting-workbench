@@ -32,10 +32,13 @@ def _queue_meeting(client, title: str = "待处理会议", expected_speakers: in
 
 
 def _queue_meeting_with_real_wav(
-    client, seconds: float = 20.0, title: str = "真 wav 会议"
+    client,
+    seconds: float = 20.0,
+    title: str = "真 wav 会议",
+    expected_speakers: int = 2,
 ) -> str:
     created = client.post(
-        "/api/meetings", json={"title": title, "expected_speakers": 2}
+        "/api/meetings", json={"title": title, "expected_speakers": expected_speakers}
     )
     assert created.status_code == 201
     meeting_id = created.json()["id"]
@@ -345,6 +348,48 @@ def test_blob_transcript_is_retranscribed_per_turn(client):
     # 第 1 次是整段，后 4 次是切片；切片文件在临时目录、事后清理。
     assert len(asr.calls) == 5
     assert all(not path.exists() for path in asr.calls[1:])
+
+
+class CoarseBlobAsr(FakeAsrBackend):
+    """长音频场景：整段转写被 ASR 内部分块成少数粗段（仍远粗于轮次粒度）。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[Path] = []
+
+    def transcribe(self, audio_path: Path, hotwords=()) -> list[AsrSegment]:
+        if not self.loaded:
+            raise RuntimeError("ASR 后端未加载（先 load()）")
+        self.calls.append(Path(audio_path))
+        if len(self.calls) == 1:
+            return [
+                AsrSegment(0.0, 20.0, "粗段一"),
+                AsrSegment(20.0, 40.0, "粗段二"),
+            ]
+        return [AsrSegment(0.0, 1.0, f"轮次{len(self.calls) - 1}")]
+
+
+def test_coarse_multi_segment_transcript_is_retranscribed_per_turn(client):
+    # 真机踩过的坑：27 分钟录音 ASR 返回 2 个巨型段（不是 1 个），
+    # 逐轮重转写不能只认「恰好 1 段」，粒度远粗于轮次时也要触发。
+    meeting_id = _queue_meeting_with_real_wav(client, seconds=40.0, expected_speakers=4)
+    asr = CoarseBlobAsr()
+
+    _worker(client, asr_backend=asr).process_next()
+
+    detail = client.get(f"/api/meetings/{meeting_id}")
+    assert detail.json()["state"] == "AWAITING_SPEAKER_REVIEW"
+    with client.app.state.session_factory() as session:
+        segments = session.scalars(
+            select(TranscriptSegment)
+            .where(TranscriptSegment.meeting_id == meeting_id)
+            .order_by(TranscriptSegment.start_seconds)
+        ).all()
+    # fake 切分 4 人 8 段（5s 交替）→ 8 个轮次，各自重转写
+    assert [segment.text for segment in segments] == [
+        f"轮次{index}" for index in range(1, 9)
+    ]
+    assert len(asr.calls) == 9  # 1 次整段 + 8 次切片
 
 
 class SingleClusterDiarization(FakeDiarizationBackend):

@@ -197,3 +197,12 @@ def test_plan_enrollment_evicts_oldest_when_cap_full():
 
     assert plan.action == "replace"
     assert plan.replace_index == 0
+
+
+@pytest.mark.parametrize("quality", [0.0, 1.0])
+def test_nearest_confirmed_is_never_enrolled(quality):
+    # 就近归属的音频是声纹最弱的尾簇：不许进声纹库污染模板。
+    _, eligible_for_enrollment = _voiceprint_rule()
+    decision = SpeakerDecision(cluster_id="S9", kind=DecisionKind.NEAREST_CONFIRMED)
+
+    assert eligible_for_enrollment(decision, quality) is False

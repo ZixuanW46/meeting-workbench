@@ -576,3 +576,162 @@ def test_enrollment_writes_audition_clip_for_real_wav(client, tmp_path):
     )
     assert clip_path.is_file()
     assert clip_path.stat().st_size > 44  # 大于空 wav 头
+
+
+def _prepare_three_cluster_review(client) -> str:
+    # 3 人布局下 fake 切分给 S1 的窗是 (0,5)+(15,20)：种子声纹按同窗生成才有建议。
+    backend = FakeEmbeddingBackend()
+    with SingleModelSlot().use(backend) as loaded:
+        vector = loaded.embed(Path("unused.wav"), [(0.0, 5.0), (15.0, 20.0)])
+    with client.app.state.session_factory() as session:
+        session.add(Person(id="fake-person-1", display_name="已知用户 1"))
+        session.add(
+            Voiceprint(
+                person_id="fake-person-1", embedding=embedding_to_bytes(vector)
+            )
+        )
+        session.commit()
+    created = client.post(
+        "/api/meetings", json={"title": "尾簇就近", "expected_speakers": 3}
+    )
+    meeting_id = created.json()["id"]
+    uploaded = client.post(
+        f"/api/meetings/{meeting_id}/upload",
+        files={"file": ("meeting.wav", b"fake audio bytes", "audio/wav")},
+    )
+    assert uploaded.status_code == 200
+    assert client.app.state.worker.process_next() == meeting_id
+    return meeting_id
+
+
+def _copy_cluster_embedding(client, meeting_id, source_cluster, target_cluster):
+    with client.app.state.session_factory() as session:
+        rows = {
+            cluster.cluster_id: cluster
+            for cluster in session.scalars(
+                select(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
+            )
+        }
+        rows[target_cluster].embedding = rows[source_cluster].embedding
+        session.commit()
+
+
+def test_nearest_confirmed_assigns_tail_to_closest_anchor_without_enrollment(client):
+    meeting_id = _prepare_three_cluster_review(client)
+    # 让 S3 的簇声纹与 S1 完全一致：就近归属必然落到 S1 确认的人。
+    _copy_cluster_embedding(client, meeting_id, "S1", "S3")
+
+    response = client.post(
+        f"/api/meetings/{meeting_id}/review/decisions",
+        json={
+            "decisions": [
+                {"cluster_id": "S1", "kind": "CONFIRM"},
+                {"cluster_id": "S2", "kind": "NEW_PERSON", "display_name": "李雷"},
+                {"cluster_id": "S3", "kind": "NEAREST_CONFIRMED"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["has_unconfirmed_speakers"] is False
+    with client.app.state.session_factory() as session:
+        clusters = {
+            cluster.cluster_id: cluster
+            for cluster in session.scalars(
+                select(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
+            )
+        }
+        voiceprint_people = [
+            row.person_id
+            for row in session.execute(text("SELECT person_id FROM voiceprints"))
+        ]
+    assert clusters["S3"].person_id == "fake-person-1"
+    assert clusters["S3"].assigned_via == "voiceprint_nearest"
+    assert clusters["S1"].assigned_via is None
+    # 就近归属不入声纹库：库里只有 S1 确认与李雷新建的模板。
+    assert sorted(voiceprint_people).count("fake-person-1") == 1
+    assert len(voiceprint_people) == 2
+
+
+def test_nearest_confirmed_without_anchor_returns_422(client):
+    meeting_id = _prepare_review(client)
+
+    response = client.post(
+        f"/api/meetings/{meeting_id}/review/decisions",
+        json={
+            "decisions": [
+                {"cluster_id": "S1", "kind": "NEAREST_CONFIRMED"},
+                {"cluster_id": "S2", "kind": "NEAREST_CONFIRMED"},
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert "已确认" in str(response.json()["detail"])
+    assert (
+        client.get(f"/api/meetings/{meeting_id}").json()["state"]
+        == "AWAITING_SPEAKER_REVIEW"
+    )
+
+
+def test_nearest_confirmed_with_missing_embedding_returns_422(client):
+    meeting_id = _prepare_review(client)
+    with client.app.state.session_factory() as session:
+        for cluster in session.scalars(
+            select(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
+        ):
+            if cluster.cluster_id == "S2":
+                cluster.embedding = None
+        session.commit()
+
+    response = client.post(
+        f"/api/meetings/{meeting_id}/review/decisions",
+        json={
+            "decisions": [
+                {"cluster_id": "S1", "kind": "CONFIRM"},
+                {"cluster_id": "S2", "kind": "NEAREST_CONFIRMED"},
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert "重转写" in str(response.json()["detail"])
+
+
+def test_nearest_assignment_marks_minutes_and_transcript(client):
+    meeting_id = _prepare_three_cluster_review(client)
+    _copy_cluster_embedding(client, meeting_id, "S1", "S3")
+    response = client.post(
+        f"/api/meetings/{meeting_id}/review/decisions",
+        json={
+            "decisions": [
+                {"cluster_id": "S1", "kind": "CONFIRM"},
+                {"cluster_id": "S2", "kind": "NEW_PERSON", "display_name": "李雷"},
+                {"cluster_id": "S3", "kind": "NEAREST_CONFIRMED"},
+            ]
+        },
+    )
+    assert response.status_code == 200
+    # 给 S3 插一条转写行，验证逐字稿署名带「（就近归属）」标注。
+    from meeting_api.models import TranscriptSegment
+
+    with client.app.state.session_factory() as session:
+        session.add(
+            TranscriptSegment(
+                meeting_id=meeting_id,
+                start_seconds=90.0,
+                end_seconds=92.0,
+                text="补一句。",
+                cluster_id="S3",
+            )
+        )
+        session.commit()
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    minutes = client.get(f"/api/meetings/{meeting_id}/minutes")
+    assert minutes.status_code == 200
+    assert minutes.json()["markdown"].startswith("部分次要发言按声纹就近归属")
+    transcript = client.get(f"/api/meetings/{meeting_id}/export/transcript.md").text
+    assert "（就近归属）" in transcript
+    assert "已知用户 1（就近归属）：补一句。" in transcript

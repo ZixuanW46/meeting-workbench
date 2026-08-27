@@ -22,6 +22,7 @@ from meeting_api.minutes.adapter import (
 )
 from meeting_api.minutes.prompt import build_minutes_prompt, load_minutes_template
 from meeting_api.models import (
+    ASSIGNED_VIA_VOICEPRINT_NEAREST,
     HotwordEntry,
     Meeting,
     Person,
@@ -245,7 +246,7 @@ class Worker:
         self._publish(meeting)
 
         try:
-            transcript = self._build_transcript(session, meeting_id)
+            transcript, nearest_assigned = self._build_transcript(session, meeting_id)
             target_dir = meeting_dir(self.settings, meeting_id)
             target_dir.mkdir(parents=True, exist_ok=True)
             (target_dir / "transcript.txt").write_text(transcript, encoding="utf-8")
@@ -254,8 +255,11 @@ class Worker:
                 build_minutes_prompt(
                     transcript,
                     template=load_minutes_template(self.settings.data_dir),
+                    nearest_assigned=nearest_assigned,
                 )
             )
+            if nearest_assigned:
+                markdown = f"部分次要发言按声纹就近归属\n\n{markdown}"
             if meeting.has_unconfirmed_speakers:
                 markdown = f"含未确认说话人\n\n{markdown}"
             (target_dir / "minutes.md").write_text(markdown, encoding="utf-8")
@@ -287,7 +291,7 @@ class Worker:
         return meeting_id
 
     @staticmethod
-    def _build_transcript(session: Session, meeting_id: str) -> str:
+    def _build_transcript(session: Session, meeting_id: str) -> tuple[str, bool]:
         segments = session.scalars(
             select(TranscriptSegment)
             .where(TranscriptSegment.meeting_id == meeting_id)
@@ -304,16 +308,24 @@ class Worker:
             person.id: person.display_name
             for person in session.scalars(select(Person).where(Person.id.in_(person_ids)))
         }
-        labels = {
-            cluster.cluster_id: people.get(cluster.person_id)
-            or f"未知说话人（{cluster.cluster_id}）"
-            for cluster in clusters
-        }
-        return "\n".join(
+        labels: dict[str, str] = {}
+        nearest_assigned = False
+        for cluster in clusters:
+            label = people.get(cluster.person_id) or f"未知说话人（{cluster.cluster_id}）"
+            if (
+                cluster.assigned_via == ASSIGNED_VIA_VOICEPRINT_NEAREST
+                and cluster.person_id is not None
+            ):
+                # 就近归属的署名如实标注：逐字稿与纪要都能看出这不是人工确认。
+                label = f"{label}（就近归属）"
+                nearest_assigned = True
+            labels[cluster.cluster_id] = label
+        transcript = "\n".join(
             f"[{segment.start_seconds:.2f}-{segment.end_seconds:.2f}] "
             f"{labels.get(segment.cluster_id, segment.cluster_id)}: {segment.text}"
             for segment in segments
         )
+        return transcript, nearest_assigned
 
     def _retranscribe_blob_per_turn(
         self,

@@ -95,3 +95,12 @@ def test_decision_field_rules_live_in_domain():
         )
         is None
     )
+
+
+def test_nearest_confirmed_needs_no_extra_fields_and_is_not_unknown():
+    # 就近归属产生身份：不需要附加字段；不算「未确认」，但也不入声纹库
+    # （入库资格见 voiceprint 规则测试）。
+    decision = SpeakerDecision(cluster_id="S9", kind=DecisionKind.NEAREST_CONFIRMED)
+
+    assert decision_field_error(decision) is None
+    assert has_unconfirmed_speakers([decision]) is False

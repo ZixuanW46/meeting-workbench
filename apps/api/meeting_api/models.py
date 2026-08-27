@@ -92,6 +92,10 @@ class TranscriptSegment(Base):
     cluster_id: Mapped[str] = mapped_column(String(32))
 
 
+# 簇身份来源标记：写进 SpeakerCluster.assigned_via。
+ASSIGNED_VIA_VOICEPRINT_NEAREST = "voiceprint_nearest"
+
+
 class SpeakerCluster(Base):
     __tablename__ = "speaker_clusters"
 

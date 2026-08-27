@@ -7,7 +7,13 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from meeting_api.models import Meeting, Person, SpeakerCluster, TranscriptSegment
+from meeting_api.models import (
+    ASSIGNED_VIA_VOICEPRINT_NEAREST,
+    Meeting,
+    Person,
+    SpeakerCluster,
+    TranscriptSegment,
+)
 from meeting_api.storage import meeting_dir
 from meeting_domain import MeetingState
 
@@ -57,10 +63,16 @@ def _build_export_transcript(session: Session, meeting_id: str) -> str:
         if person_ids
         else {}
     )
-    labels = {
-        cluster.cluster_id: people.get(cluster.person_id) or f"说话人{cluster.cluster_id}（未确认）"
-        for cluster in clusters
-    }
+    labels: dict[str, str] = {}
+    for cluster in clusters:
+        label = people.get(cluster.person_id) or f"说话人{cluster.cluster_id}（未确认）"
+        if (
+            cluster.assigned_via == ASSIGNED_VIA_VOICEPRINT_NEAREST
+            and cluster.person_id is not None
+        ):
+            # 就近归属的署名如实标注，与纪要口径一致。
+            label = f"{label}（就近归属）"
+        labels[cluster.cluster_id] = label
     lines = ["# 会议转写", ""]
     lines.extend(
         f"[{segment.start_seconds:.2f}-{segment.end_seconds:.2f}] "

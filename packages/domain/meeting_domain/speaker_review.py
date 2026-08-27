@@ -22,6 +22,10 @@ class DecisionKind(StrEnum):
     LINK_EXISTING = "LINK_EXISTING"  # 关联已有人
     MERGE_WITH_CLUSTER = "MERGE_WITH_CLUSTER"  # 与本场另一簇是同一人
     UNDECIDED_UNKNOWN = "UNDECIDED_UNKNOWN"  # 暂时不知道（也是一种明确决定）
+    # 并入最近的已确认参会人：用户授权后在本场已确认者的封闭集内按声纹
+    # 就近归属（长录音尾簇批量处置用）。产生身份但不入声纹库，
+    # 纪要与逐字稿须标注「（就近归属）」。
+    NEAREST_CONFIRMED = "NEAREST_CONFIRMED"
 
 
 # 这些决定不产生确认身份 → 纪要须标记「含未确认说话人」，且不入声纹库。

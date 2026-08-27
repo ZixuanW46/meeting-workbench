@@ -7,7 +7,14 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 
-from meeting_api.models import Meeting, Person, SpeakerCluster, TranscriptSegment
+from meeting_api.models import (
+    ASSIGNED_VIA_VOICEPRINT_NEAREST,
+    Meeting,
+    Person,
+    SpeakerCluster,
+    TranscriptSegment,
+)
+from meeting_api.pipeline.embedding import embedding_from_bytes
 from meeting_domain import (
     REOPENABLE_REVIEW_STATES,
     DecisionKind,
@@ -16,6 +23,7 @@ from meeting_domain import (
     SpeakerCard,
     SpeakerDecision,
     SuggestionTier,
+    cosine_similarity,
     decision_field_error,
     has_unconfirmed_speakers,
     review_complete,
@@ -274,6 +282,7 @@ def submit_decisions(
         cluster_by_id = {cluster.cluster_id: cluster for cluster in clusters}
         request_by_id = {decision.cluster_id: decision for decision in payload.decisions}
         final_person_ids: dict[str, str | None] = {}
+        nearest_cluster_ids: list[str] = []
 
         for decision in payload.decisions:
             cluster = cluster_by_id[decision.cluster_id]
@@ -305,6 +314,9 @@ def submit_decisions(
                 session.add(person)
                 session.flush()
                 final_person_ids[cluster.cluster_id] = person.id
+            elif decision.kind == DecisionKind.NEAREST_CONFIRMED:
+                # 两阶段：先解析出全部已确认者，再做封闭集内的就近归属。
+                nearest_cluster_ids.append(cluster.cluster_id)
             elif decision.kind in {
                 DecisionKind.KEEP_UNKNOWN,
                 DecisionKind.UNDECIDED_UNKNOWN,
@@ -331,7 +343,41 @@ def submit_decisions(
             return resolved
 
         for cluster in clusters:
+            if cluster.cluster_id in nearest_cluster_ids:
+                continue
             resolve_person_id(cluster.cluster_id, frozenset())
+
+        if nearest_cluster_ids:
+            anchors = [
+                cluster
+                for cluster in clusters
+                if cluster.cluster_id not in nearest_cluster_ids
+                and final_person_ids.get(cluster.cluster_id) is not None
+                and cluster.embedding is not None
+            ]
+            if not anchors:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="就近归属需要本场至少一位已确认参会人",
+                )
+            for cluster_id in nearest_cluster_ids:
+                cluster = cluster_by_id[cluster_id]
+                if cluster.embedding is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail=(
+                            f"说话人簇 {cluster_id} 缺少簇声纹，"
+                            "请先重转写后再使用就近归属"
+                        ),
+                    )
+                candidate = embedding_from_bytes(cluster.embedding)
+                best = max(
+                    anchors,
+                    key=lambda anchor: cosine_similarity(
+                        candidate, embedding_from_bytes(anchor.embedding)
+                    ),
+                )
+                final_person_ids[cluster_id] = final_person_ids[best.cluster_id]
 
         applying = transition(
             MeetingState(meeting.state),
@@ -342,6 +388,11 @@ def submit_decisions(
             person_id = final_person_ids[cluster.cluster_id]
             cluster.person_id = person_id
             cluster.is_unknown = person_id is None
+            cluster.assigned_via = (
+                ASSIGNED_VIA_VOICEPRINT_NEAREST
+                if cluster.cluster_id in nearest_cluster_ids
+                else None
+            )
         meeting.has_unconfirmed_speakers = has_unconfirmed_speakers(domain_decisions)
         request.app.state.worker.enroll_voiceprints(
             session,

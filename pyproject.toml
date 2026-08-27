@@ -6,6 +6,8 @@ build-backend = "hatchling.build"
 name = "meeting-workbench"
 version = "0.1.0"
 description = "本地会议纪要工作台（v1 目标机：M4 Mac Mini 16GB，原生 macOS，无 Docker）"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

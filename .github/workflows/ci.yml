@@ -18,13 +18,18 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: pyproject.toml
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
       - name: 安装 Python 开发依赖
-        run: python -m pip install -e ".[dev]"
+        # Makefile 固定用 .venv/bin/python，CI 必须装进同一个 venv 才能跑 make test / make lint
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -U pip
+          .venv/bin/pip install -e ".[dev]"
       - name: 安装前端依赖
         run: npm ci --prefix apps/web
       - name: 运行测试

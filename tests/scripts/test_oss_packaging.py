@@ -13,6 +13,13 @@ def test_license_is_mit_and_names_copyright_holder():
     assert "Permission is hereby granted, free of charge" in license_text
 
 
+def test_pyproject_declares_mit_license():
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert 'license = "MIT"' in pyproject
+    assert 'license-files = ["LICENSE"]' in pyproject
+
+
 def test_readme_uses_mac_installer_as_primary_quickstart():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
@@ -66,6 +73,9 @@ def test_github_actions_runs_fake_tests_and_lint_without_model_downloads():
     assert "python-version: \"3.12\"" in workflow
     assert "node-version: \"22\"" in workflow
     assert 'pip install -e ".[dev]"' in workflow
+    # Makefile 用 .venv/bin/python，CI 必须先建同名 venv 并装进去，否则 make test 找不到解释器
+    assert "python -m venv .venv" in workflow
+    assert '.venv/bin/pip install -e ".[dev]"' in workflow
     assert ".[mac]" not in workflow
     assert "make test" in workflow
     assert "make lint" in workflow

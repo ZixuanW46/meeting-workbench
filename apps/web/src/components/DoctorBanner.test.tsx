@@ -47,10 +47,8 @@ describe('DoctorBanner', () => {
         HttpResponse.json(
           makeDoctorReport({
             cli: {
-              claude_available: true,
-              claude_logged_in: false,
+              claude_available: false,
               codex_available: false,
-              codex_logged_in: false,
             },
             minutes_ready: false,
           }),

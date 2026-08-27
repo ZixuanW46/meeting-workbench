@@ -5,9 +5,7 @@ export interface DoctorPayload {
   models: { asr: boolean; segmentation: boolean; embedding: boolean }
   cli: {
     claude_available: boolean
-    claude_logged_in: boolean
     codex_available: boolean
-    codex_logged_in: boolean
   }
   disk_gb_free: number
   transcription_ready: boolean
@@ -20,9 +18,7 @@ export function makeDoctorReport(overrides: Partial<DoctorPayload> = {}): Doctor
     models: { asr: true, segmentation: true, embedding: true },
     cli: {
       claude_available: true,
-      claude_logged_in: true,
       codex_available: true,
-      codex_logged_in: true,
     },
     disk_gb_free: 128.5,
     transcription_ready: true,

@@ -12,8 +12,8 @@ if [[ ${DRY:-0} == "1" || ${DRY_RUN:-0} == "1" ]]; then
   echo "- ASR 模型：$MODELS_DIR/qwen3-asr-mlx/config.json"
   echo "- 说话人切分模型：$MODELS_DIR/sherpa-onnx/segmentation.onnx"
   echo "- 声纹模型：$MODELS_DIR/sherpa-onnx/embedding.onnx"
-  echo "- Claude CLI 是否可用及 claude /doctor 登录状态"
-  echo "- Codex CLI 是否可用及 codex whoami 登录状态"
+  echo "- Claude CLI 是否在 PATH（登录状态以生成纪要时为准）"
+  echo "- Codex CLI 是否在 PATH（登录状态以生成纪要时为准）"
   echo "- 数据目录所在磁盘的剩余空间"
   exit 0
 fi
@@ -37,20 +37,17 @@ check_file() {
   return 1
 }
 
+# 只查 CLI 是否在 PATH：claude /doctor、codex whoami 需要交互终端，
+# 在脚本/launchd 环境必然误报未登录。登录问题由生成纪要时的真实调用暴露
+# （失败停在 PARTIAL_READY，可在界面重试），不在这里猜测。
 check_cli() {
   local label=$1
   local executable=$2
-  shift 2
-  local resolved
-  if ! resolved=$(command -v "$executable" 2>/dev/null); then
-    missing "$label 未在 PATH 中找到"
-    return 1
-  fi
-  if "$resolved" "$@" >/dev/null 2>&1; then
-    ok "$label 已安装且已登录"
+  if command -v "$executable" >/dev/null 2>&1; then
+    ok "$label 已安装（登录状态以生成纪要时为准）"
     return 0
   fi
-  missing "$label 已安装但登录检查未通过"
+  missing "$label 未在 PATH 中找到"
   return 1
 }
 
@@ -71,8 +68,8 @@ check_file "声纹模型" "$MODELS_DIR/sherpa-onnx/embedding.onnx" || transcript
 
 claude_ready=0
 codex_ready=0
-check_cli "Claude CLI" claude /doctor && claude_ready=1
-check_cli "Codex CLI" codex whoami && codex_ready=1
+check_cli "Claude CLI" claude && claude_ready=1
+check_cli "Codex CLI" codex && codex_ready=1
 if [[ $claude_ready == 0 && $codex_ready == 0 ]]; then
   minutes_ready=0
 fi
@@ -91,7 +88,7 @@ fi
 if [[ $minutes_ready == 1 ]]; then
   ok "纪要生成已就绪"
 else
-  missing "纪要生成未就绪，请安装并登录 Claude CLI 或 Codex CLI"
+  missing "纪要生成未就绪，请安装 Claude CLI 或 Codex CLI（并各自登录）"
 fi
 
 if [[ $transcription_ready == 1 && $minutes_ready == 1 ]]; then

@@ -68,11 +68,11 @@ export interface DoctorModels {
   embedding: boolean
 }
 
+// 只报告 CLI 是否在 PATH：登录检查需要交互终端，服务端在 launchd 下探测必然
+// 误报；登录问题由生成环节暴露（PARTIAL_READY + 重试）。
 export interface DoctorCli {
   claude_available: boolean
-  claude_logged_in: boolean
   codex_available: boolean
-  codex_logged_in: boolean
 }
 
 export interface DoctorReport {

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -14,7 +13,6 @@ from meeting_api.config import Settings
 router = APIRouter(prefix="/api")
 
 _GIB = 1024**3
-_CLI_TIMEOUT_SECONDS = 10.0
 
 
 class ModelsStatus(BaseModel):
@@ -25,9 +23,7 @@ class ModelsStatus(BaseModel):
 
 class CliStatus(BaseModel):
     claude_available: bool
-    claude_logged_in: bool
     codex_available: bool
-    codex_logged_in: bool
 
 
 class DoctorResponse(BaseModel):
@@ -39,22 +35,14 @@ class DoctorResponse(BaseModel):
     minutes_ready: bool
 
 
-def probe_cli(name: str, login_args: list[str]) -> tuple[bool, bool]:
-    """返回 CLI 是否在 PATH、官方登录检查是否成功。"""
-    executable = shutil.which(name)
-    if executable is None:
-        return False, False
-    try:
-        completed = subprocess.run(
-            [executable, *login_args],
-            capture_output=True,
-            text=True,
-            timeout=_CLI_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return True, False
-    return True, completed.returncode == 0
+def cli_available(name: str) -> bool:
+    """只探测 CLI 是否在 PATH，不再探测登录态。
+
+    claude /doctor、codex whoami 这类登录检查需要交互终端，在 launchd
+    与脚本环境必然报 "stdin is not a terminal"，曾让横幅在纪要实际可用时
+    仍长期误报未就绪。登录问题交给生成环节用真实调用暴露：失败会停在
+    PARTIAL_READY 并附具体错误，可在界面重试。"""
+    return shutil.which(name) is not None
 
 
 def probe_models(models_dir: Path) -> ModelsStatus:
@@ -66,13 +54,9 @@ def probe_models(models_dir: Path) -> ModelsStatus:
 
 
 def probe_cli_status() -> CliStatus:
-    claude_available, claude_logged_in = probe_cli("claude", ["/doctor"])
-    codex_available, codex_logged_in = probe_cli("codex", ["whoami"])
     return CliStatus(
-        claude_available=claude_available,
-        claude_logged_in=claude_logged_in,
-        codex_available=codex_available,
-        codex_logged_in=codex_logged_in,
+        claude_available=cli_available("claude"),
+        codex_available=cli_available("codex"),
     )
 
 
@@ -84,12 +68,7 @@ def build_doctor_report(settings: Settings) -> DoctorResponse:
     transcription_ready = ffmpeg and all(
         (models.asr, models.segmentation, models.embedding)
     )
-    minutes_ready = (
-        cli.claude_available
-        and cli.claude_logged_in
-        or cli.codex_available
-        and cli.codex_logged_in
-    )
+    minutes_ready = cli.claude_available or cli.codex_available
     return DoctorResponse(
         ffmpeg=ffmpeg,
         models=models,

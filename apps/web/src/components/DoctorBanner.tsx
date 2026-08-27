@@ -106,8 +106,8 @@ export function DoctorBanner() {
       {showMinutes && (
         <div className="notice notice-warn doctor-banner">
           <span>
-            纪要暂不可用：生成纪要需要本机安装并登录 claude 或 codex
-            CLI；转写不受影响，仍可正常使用。
+            纪要暂不可用：未检测到本机 claude 或 codex
+            CLI，安装并登录其一后即可生成纪要；转写不受影响，仍可正常使用。
           </span>
           <button
             type="button"

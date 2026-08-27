@@ -247,6 +247,100 @@ def test_qwen3_transcribe_forwards_hotword_snapshot(monkeypatch, tmp_path):
     assert [item for item in events if item[0] == "mlx:generate"][-1][2]["hotwords"] is None
 
 
+class _ScriptedStream:
+    def __init__(self, record):
+        self._record = record
+
+    def accept_waveform(self, sample_rate, waveform):
+        self._record.append((sample_rate, len(waveform)))
+
+    def input_finished(self):
+        pass
+
+
+class _ScriptedExtractor:
+    """按调用顺序吐出脚本化声纹向量，并记录收到的音频切片长度。"""
+
+    def __init__(self, vectors, received):
+        self._vectors = list(vectors)
+        self.received = received
+        self.closed = False
+
+    def create_stream(self):
+        return _ScriptedStream(self.received)
+
+    def is_ready(self, stream):
+        return True
+
+    def compute(self, stream):
+        return self._vectors.pop(0)
+
+    def close(self):
+        self.closed = True
+
+
+def test_sherpa_diarize_merges_same_voice_clusters(monkeypatch, tmp_path):
+    # 真机 27 分钟录音实测：sherpa 自动聚类把同一真人撕成多个主簇（块内
+    # 距离 ≤0.39、块间 ≥0.63）。diarize 必须用簇均值声纹做二次合并后再返回。
+    sf = pytest.importorskip("soundfile")
+    del sf
+    monkeypatch.setattr(sys, "platform", "darwin")
+    models_dir = tmp_path / "models"
+    sherpa_dir = models_dir / "sherpa-onnx"
+    sherpa_dir.mkdir(parents=True)
+    (sherpa_dir / "segmentation.onnx").touch()
+    (sherpa_dir / "embedding.onnx").touch()
+
+    import wave as wave_module
+
+    audio_path = tmp_path / "meeting.wav"
+    with wave_module.open(str(audio_path), "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(16000)
+        writer.writeframes(b"\x00\x00" * (16000 * 26))
+
+    items = [
+        SimpleNamespace(start=0.0, end=6.0, speaker=0),
+        SimpleNamespace(start=10.0, end=16.0, speaker=1),
+        SimpleNamespace(start=20.0, end=25.0, speaker=2),
+    ]
+    # S1 与 S3 同向（同一真人），S2 正交（另一真人）。
+    vectors = [(1.0, 0.0), (0.0, 1.0), (1.0, 0.01)]
+    received: list[tuple[int, int]] = []
+    extractor = _ScriptedExtractor(vectors, received)
+
+    sherpa = ModuleType("sherpa_onnx")
+    config = SimpleNamespace(validate=lambda: True)
+    sherpa.OfflineSpeakerSegmentationPyannoteModelConfig = lambda **kwargs: config
+    sherpa.OfflineSpeakerSegmentationModelConfig = lambda **kwargs: config
+    sherpa.SpeakerEmbeddingExtractorConfig = lambda **kwargs: config
+    sherpa.FastClusteringConfig = lambda **kwargs: config
+    sherpa.OfflineSpeakerDiarizationConfig = lambda **kwargs: config
+    sherpa.OfflineSpeakerDiarization = lambda _config: SimpleNamespace(
+        sample_rate=16000,
+        process=lambda samples: SimpleNamespace(sort_by_start_time=lambda: items),
+    )
+    sherpa.SpeakerEmbeddingExtractor = lambda _config: extractor
+    monkeypatch.setitem(sys.modules, "sherpa_onnx", sherpa)
+
+    backend = SherpaOnnxDiarizationBackend(models_dir)
+    backend.load()
+    segments = backend.diarize(audio_path)
+
+    # S3 并入 S1（S1 总时长更长做锚）；时间轴不动。
+    assert [(s.start, s.end, s.cluster_id) for s in segments] == [
+        (0.0, 6.0, "S1"),
+        (10.0, 16.0, "S2"),
+        (20.0, 25.0, "S1"),
+    ]
+    # 每簇各取到一段完整切片提声纹。
+    assert received == [(16000, 96000), (16000, 96000), (16000, 80000)]
+
+    backend.unload()
+    assert extractor.closed
+
+
 @pytest.mark.parametrize(
     "backend_type",
     [Qwen3AsrMlxBackend, SherpaOnnxDiarizationBackend, SherpaOnnxEmbeddingBackend],

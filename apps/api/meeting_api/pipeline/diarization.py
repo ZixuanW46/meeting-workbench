@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import math
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -16,6 +17,99 @@ class SpeakerSegment:
 
 # 总时长低于该值的簇撑不起人工试听判断，视为切分噪声（笑声、插话、拖尾）。
 FRAGMENT_CLUSTER_MAX_SECONDS = 3.0
+
+# 簇级声纹二次合并阈值（余弦距离，平均连接）。真机 27 分钟多人闲聊实测：
+# sherpa 自动聚类把同一真人撕成多个主簇，同人主簇的均值声纹距离 ≤0.39，
+# 不同真人 ≥0.63；取空隙的保守侧——停点误并不可拆，误拆还能手工合并。
+CLUSTER_MERGE_MAX_DISTANCE = 0.4
+
+# 每簇声纹取样：优先最长片段；有像样长段时 <0.5s 残段不取（质量差拉脏均值），
+# 全簇都是残段则保底取最长一段；总量至多 6 段 / 20 秒。
+EMBEDDING_SPAN_MIN_SECONDS = 0.5
+EMBEDDING_SPAN_MAX_COUNT = 6
+EMBEDDING_SPAN_MAX_TOTAL_SECONDS = 20.0
+
+
+def pick_embedding_spans(
+    segments: Sequence[SpeakerSegment],
+) -> list[tuple[float, float]]:
+    """从一个簇的片段里挑出用于提取簇声纹的时间窗。"""
+    picked: list[tuple[float, float]] = []
+    budget = EMBEDDING_SPAN_MAX_TOTAL_SECONDS
+    ordered = sorted(
+        segments, key=lambda segment: segment.end - segment.start, reverse=True
+    )
+    for segment in ordered:
+        duration = segment.end - segment.start
+        if duration < EMBEDDING_SPAN_MIN_SECONDS and picked:
+            break
+        picked.append((segment.start, segment.end))
+        budget -= duration
+        if budget <= 0 or len(picked) >= EMBEDDING_SPAN_MAX_COUNT:
+            break
+    return picked
+
+
+def merge_similar_clusters(
+    segments: Sequence[SpeakerSegment],
+    embeddings: Mapping[str, Sequence[float]],
+    *,
+    max_distance: float = CLUSTER_MERGE_MAX_DISTANCE,
+) -> list[SpeakerSegment]:
+    """把均值声纹足够近的簇并成一个（平均连接层次合并）。
+
+    只在有声纹证据时换簇标签：没提出声纹的簇原样保留，时间轴永远不动，
+    也不做任何身份判断——身份仍只能来自用户在确认停点的决定。
+    """
+    if not segments:
+        return []
+    normalized: dict[str, tuple[float, ...]] = {}
+    for cluster_id, vector in embeddings.items():
+        norm = math.sqrt(sum(value * value for value in vector))
+        if norm > 0:
+            normalized[cluster_id] = tuple(value / norm for value in vector)
+    if len(normalized) < 2:
+        return list(segments)
+
+    def distance(left: str, right: str) -> float:
+        paired = zip(normalized[left], normalized[right], strict=True)
+        return 1.0 - sum(a * b for a, b in paired)
+
+    groups = [[cluster_id] for cluster_id in sorted(normalized)]
+    while len(groups) > 1:
+        best: tuple[float, int, int] | None = None
+        for i in range(len(groups)):
+            for j in range(i + 1, len(groups)):
+                pairs = [(a, b) for a in groups[i] for b in groups[j]]
+                group_distance = sum(distance(a, b) for a, b in pairs) / len(pairs)
+                if best is None or group_distance < best[0]:
+                    best = (group_distance, i, j)
+        assert best is not None  # len(groups) > 1 时必有候选
+        if best[0] > max_distance:
+            break
+        _, i, j = best
+        groups[i] += groups[j]
+        del groups[j]
+
+    totals: dict[str, float] = {}
+    for segment in segments:
+        totals[segment.cluster_id] = (
+            totals.get(segment.cluster_id, 0.0) + segment.end - segment.start
+        )
+    relabel: dict[str, str] = {}
+    for group in groups:
+        anchor = min(group, key=lambda cid: (-totals.get(cid, 0.0), cid))
+        for member in group:
+            if member != anchor:
+                relabel[member] = anchor
+    if not relabel:
+        return list(segments)
+    return [
+        segment
+        if segment.cluster_id not in relabel
+        else SpeakerSegment(segment.start, segment.end, relabel[segment.cluster_id])
+        for segment in segments
+    ]
 
 
 def consolidate_fragment_clusters(
@@ -155,6 +249,9 @@ class SherpaOnnxDiarizationBackend:
         self.segmentation_path = self.model_dir / "segmentation.onnx"
         self.embedding_path = self.model_dir / "embedding.onnx"
         self._model = None
+        # 二次合并用的簇声纹提取器：与切分共用同一份 embedding.onnx，
+        # 同属切分槽的生命周期，不违反 16GB 单模型串行约束。
+        self._extractor = None
 
     def load(self) -> None:
         _require_darwin(self.name)
@@ -188,11 +285,17 @@ class SherpaOnnxDiarizationBackend:
         if not config.validate():
             raise RuntimeError(f"sherpa-onnx 切分模型配置无效，请检查 {self.model_dir}/")
         self._model = sherpa_onnx.OfflineSpeakerDiarization(config)
+        self._extractor = sherpa_onnx.SpeakerEmbeddingExtractor(
+            sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(self.embedding_path))
+        )
 
     def unload(self) -> None:
         if self._model is not None and hasattr(self._model, "close"):
             self._model.close()
         self._model = None
+        if self._extractor is not None and hasattr(self._extractor, "close"):
+            self._extractor.close()
+        self._extractor = None
 
     @property
     def loaded(self) -> bool:
@@ -219,10 +322,52 @@ class SherpaOnnxDiarizationBackend:
         # expected_speakers 是提示而不是硬凑；模型加载配置默认自动聚类。
         del expected_speakers
         result = self._model.process(samples).sort_by_start_time()
-        return [
+        segments = [
             SpeakerSegment(float(item.start), float(item.end), f"S{int(item.speaker) + 1}")
             for item in result
         ]
+        # sherpa 在长录音上会把同一真人撕成多个主簇（27 分钟实测 92 簇），
+        # 用簇均值声纹做一次保守二次合并，再交给 worker 的碎簇时间就近合并。
+        return merge_similar_clusters(
+            segments, self._cluster_embeddings(samples, target_rate, segments)
+        )
+
+    def _cluster_embeddings(
+        self, samples, sample_rate: int, segments: Sequence[SpeakerSegment]
+    ) -> dict[str, tuple[float, ...]]:
+        """对每个簇的代表片段提声纹，按片段时长加权平均出簇均值声纹。"""
+        by_cluster: dict[str, list[SpeakerSegment]] = {}
+        for segment in segments:
+            by_cluster.setdefault(segment.cluster_id, []).append(segment)
+
+        vectors: dict[str, tuple[float, ...]] = {}
+        for cluster_id, members in sorted(by_cluster.items()):
+            weighted: list[float] | None = None
+            weight_total = 0.0
+            for start, end in pick_embedding_spans(members):
+                piece = samples[int(start * sample_rate) : int(end * sample_rate)]
+                if len(piece) < int(0.3 * sample_rate):
+                    continue
+                stream = self._extractor.create_stream()
+                stream.accept_waveform(sample_rate=sample_rate, waveform=piece)
+                stream.input_finished()
+                if not self._extractor.is_ready(stream):
+                    continue
+                vector = [float(value) for value in self._extractor.compute(stream)]
+                norm = math.sqrt(sum(value * value for value in vector))
+                if norm <= 0:
+                    continue
+                weight = end - start
+                scaled = [value / norm * weight for value in vector]
+                weighted = (
+                    scaled
+                    if weighted is None
+                    else [a + b for a, b in zip(weighted, scaled, strict=True)]
+                )
+                weight_total += weight
+            if weighted is not None and weight_total > 0:
+                vectors[cluster_id] = tuple(value / weight_total for value in weighted)
+        return vectors
 
 
 def _require_darwin(backend_name: str) -> None:

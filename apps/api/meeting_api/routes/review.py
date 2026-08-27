@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Self
+from typing import Literal, Self
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -15,6 +15,7 @@ from meeting_domain import (
     ReviewIncomplete,
     SpeakerCard,
     SpeakerDecision,
+    SuggestionTier,
     decision_field_error,
     has_unconfirmed_speakers,
     review_complete,
@@ -43,6 +44,8 @@ class ReviewCard(BaseModel):
     suggested_person_id: str | None
     # 建议身份的显示名：定性表达，绝不附带数值置信度。
     suggested_display_name: str | None
+    # 建议档位只有两档：high=「较高」/ uncertain=「需判断」；无建议时为 None。
+    suggested_tier: Literal["high", "uncertain"] | None
     sample_clips: list[ReviewSample]
     text: str
 
@@ -158,6 +161,9 @@ def get_review(meeting_id: str, request: Request) -> ReviewResponse:
                     suggested_display_name=name_by_id.get(cluster.suggested_person_id)
                     if cluster.suggested_person_id is not None
                     else None,
+                    suggested_tier=cluster.suggested_tier
+                    if cluster.suggested_person_id is not None
+                    else None,
                     sample_clips=[
                         ReviewSample(
                             start_seconds=sample["start_seconds"],
@@ -205,9 +211,10 @@ def reopen_review(meeting_id: str, request: Request) -> ReviewReopenResponse:
         ).all()
         for cluster in clusters:
             # 上一轮已确认的身份回填为建议：重开后可一键「确认建议」，
-            # 最终身份仍由本轮用户决定产生。
+            # 最终身份仍由本轮用户决定产生。用户亲自确认过 → 档位「较高」。
             if cluster.person_id is not None:
                 cluster.suggested_person_id = cluster.person_id
+                cluster.suggested_tier = SuggestionTier.HIGH.value
 
         meeting.state = transition(
             current, MeetingState.AWAITING_SPEAKER_REVIEW

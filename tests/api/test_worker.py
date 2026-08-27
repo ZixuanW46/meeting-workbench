@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import wave
 from contextlib import contextmanager
 from pathlib import Path
@@ -65,14 +66,55 @@ def _worker(client, **overrides) -> Worker:
     return Worker(**options)
 
 
-def _seed_s1_voiceprint(client) -> None:
+# fake 切分（expected_speakers=2）里 S1 的前两段：声纹口径与试听片段口径一致。
+S1_WINDOWS = [(0.0, 5.0), (10.0, 15.0)]
+
+
+def _fake_vector(windows):
     backend = FakeEmbeddingBackend()
     with SingleModelSlot().use(backend) as loaded:
-        embedding = embedding_to_bytes(loaded.embed(Path("unused.wav"), "S1"))
+        return loaded.embed(Path("unused.wav"), windows)
+
+
+def _seed_voiceprint(client, vector) -> None:
     with client.app.state.session_factory() as session:
         session.add(Person(id="fake-person-1", display_name="已知用户 1"))
-        session.add(Voiceprint(person_id="fake-person-1", embedding=embedding))
+        session.add(
+            Voiceprint(person_id="fake-person-1", embedding=embedding_to_bytes(vector))
+        )
         session.commit()
+
+
+def _seed_s1_voiceprint(client) -> None:
+    _seed_voiceprint(client, _fake_vector(S1_WINDOWS))
+
+
+def _rotated(vector, cosine):
+    """构造与 vector 余弦恰为 cosine 的单位向量（固定种子 Gram-Schmidt，确定性）。"""
+    norm = math.sqrt(sum(value * value for value in vector))
+    unit = [value / norm for value in vector]
+    seed = [1.0] * len(unit)
+    projection = sum(a * b for a, b in zip(seed, unit, strict=True))
+    ortho = [a - projection * b for a, b in zip(seed, unit, strict=True)]
+    ortho_norm = math.sqrt(sum(value * value for value in ortho))
+    ortho_unit = [value / ortho_norm for value in ortho]
+    return tuple(
+        cosine * a + math.sqrt(1.0 - cosine * cosine) * b
+        for a, b in zip(unit, ortho_unit, strict=True)
+    )
+
+
+def _suggestions(client, meeting_id):
+    with client.app.state.session_factory() as session:
+        clusters = session.scalars(
+            select(SpeakerCluster)
+            .where(SpeakerCluster.meeting_id == meeting_id)
+            .order_by(SpeakerCluster.cluster_id)
+        ).all()
+        return {
+            cluster.cluster_id: (cluster.suggested_person_id, cluster.suggested_tier)
+            for cluster in clusters
+        }
 
 
 def test_process_next_synchronously_advances_uploaded_meeting_to_review(client):
@@ -280,8 +322,47 @@ def test_fragment_cluster_is_merged_and_meeting_reaches_review(client):
     assert {cluster.cluster_id for cluster in clusters} == {"S1", "S2"}
 
 
+def test_suggestion_matches_by_cosine_not_byte_equality(client):
+    # 真实后端重提的浮点向量不可能与库里字节相等：匹配口径必须是余弦相似。
+    perturbed = list(_fake_vector(S1_WINDOWS))
+    perturbed[0] += 0.05
+    _seed_voiceprint(client, tuple(perturbed))
+    meeting_id = _queue_meeting(client)
+
+    _worker(client).process_next()
+
+    assert _suggestions(client, meeting_id) == {
+        "S1": ("fake-person-1", "high"),
+        "S2": (None, None),
+    }
+
+
+def test_mid_similarity_suggestion_lands_in_uncertain_tier(client):
+    _seed_voiceprint(client, _rotated(_fake_vector(S1_WINDOWS), 0.5))
+    meeting_id = _queue_meeting(client)
+
+    _worker(client).process_next()
+
+    assert _suggestions(client, meeting_id) == {
+        "S1": ("fake-person-1", "uncertain"),
+        "S2": (None, None),
+    }
+
+
+def test_dissimilar_voiceprint_gives_no_suggestion(client):
+    _seed_voiceprint(client, _rotated(_fake_vector(S1_WINDOWS), 0.2))
+    meeting_id = _queue_meeting(client)
+
+    _worker(client).process_next()
+
+    assert _suggestions(client, meeting_id) == {
+        "S1": (None, None),
+        "S2": (None, None),
+    }
+
+
 class FailingEmbedding(FakeEmbeddingBackend):
-    def embed(self, audio_path: Path, cluster_id: str):
+    def embed(self, audio_path: Path, windows):
         raise RuntimeError("fake embedding 故障")
 
 

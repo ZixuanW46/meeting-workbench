@@ -3,10 +3,13 @@ from __future__ import annotations
 import hashlib
 import struct
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
 
 EmbeddingVector = tuple[float, ...]
+# 一个簇内的声纹提取时间窗（秒）；与确认停点的试听片段共用同一批窗口。
+TimeWindow = tuple[float, float]
 
 
 class EmbeddingBackend(Protocol):
@@ -19,11 +22,15 @@ class EmbeddingBackend(Protocol):
     @property
     def loaded(self) -> bool: ...
 
-    def embed(self, audio_path: Path, cluster_id: str) -> EmbeddingVector: ...
+    def embed(self, audio_path: Path, windows: Sequence[TimeWindow]) -> EmbeddingVector: ...
 
 
 class FakeEmbeddingBackend:
-    """只按簇 id 生成确定性向量；不读取音频，也不调用真实模型。"""
+    """只按时间窗生成确定性向量；不读取音频，也不调用真实模型。
+
+    向量各维居中到 [-1, 1]：不同窗口的向量近似正交（余弦≈0），
+    同一批窗口的向量完全一致（余弦=1），这样余弦阈值规则可被 fake 覆盖。
+    """
 
     name = "fake-embedding"
 
@@ -40,17 +47,25 @@ class FakeEmbeddingBackend:
     def loaded(self) -> bool:
         return self._loaded
 
-    def embed(self, audio_path: Path, cluster_id: str) -> EmbeddingVector:
+    def embed(self, audio_path: Path, windows: Sequence[TimeWindow]) -> EmbeddingVector:
         del audio_path
         if not self._loaded:
             raise RuntimeError("声纹后端未加载（先 load()）")
-        digest = hashlib.sha256(cluster_id.encode("utf-8")).digest()
-        return tuple(byte / 255.0 for byte in digest[:8])
+        if not windows:
+            raise ValueError("声纹提取需要至少一个时间窗")
+        key = "|".join(f"{start:.3f}-{end:.3f}" for start, end in windows)
+        digest = hashlib.sha256(key.encode("utf-8")).digest()
+        return tuple(byte / 127.5 - 1.0 for byte in digest)
 
 
 def embedding_to_bytes(vector: EmbeddingVector) -> bytes:
-    """使用固定大端 float32 编码，便于 SQLite BLOB 做确定性 fake 匹配。"""
+    """使用固定大端 float32 编码存 SQLite BLOB；读回用 embedding_from_bytes。"""
     return struct.pack(f">{len(vector)}f", *vector)
+
+
+def embedding_from_bytes(blob: bytes) -> EmbeddingVector:
+    count = len(blob) // 4
+    return tuple(struct.unpack(f">{count}f", blob[: count * 4]))
 
 
 class SherpaOnnxEmbeddingBackend:
@@ -86,21 +101,40 @@ class SherpaOnnxEmbeddingBackend:
     def loaded(self) -> bool:
         return self._model is not None
 
-    def embed(self, audio_path: Path, cluster_id: str) -> EmbeddingVector:
+    def embed(self, audio_path: Path, windows: Sequence[TimeWindow]) -> EmbeddingVector:
+        """对簇内各时间窗分别提声纹后求均值。
+
+        整场音频只提一个向量会把整场当成同一个人的声纹；声纹必须来自
+        该簇自己的发言片段。模型判定太短的窗口跳过，全部不可用才报错。
+        """
         if self._model is None:
             raise RuntimeError("声纹后端未加载（先 load()）")
+        if not windows:
+            raise ValueError("声纹提取需要至少一个时间窗")
         import numpy as np
         import soundfile as sf
 
-        del cluster_id
         audio, sample_rate = sf.read(audio_path, dtype="float32", always_2d=True)
         samples = np.ascontiguousarray(audio[:, 0])
-        stream = self._model.create_stream()
-        stream.accept_waveform(sample_rate=sample_rate, waveform=samples)
-        stream.input_finished()
-        if not self._model.is_ready(stream):
-            raise RuntimeError("音频太短，无法提取声纹")
-        return tuple(float(value) for value in self._model.compute(stream))
+        vectors: list[np.ndarray] = []
+        for start, end in windows:
+            lo = max(0, int(start * sample_rate))
+            hi = min(len(samples), int(end * sample_rate))
+            if hi <= lo:
+                continue
+            stream = self._model.create_stream()
+            stream.accept_waveform(
+                sample_rate=sample_rate,
+                waveform=np.ascontiguousarray(samples[lo:hi]),
+            )
+            stream.input_finished()
+            if not self._model.is_ready(stream):
+                continue
+            vectors.append(np.asarray(self._model.compute(stream), dtype=np.float64))
+        if not vectors:
+            raise RuntimeError("簇内片段都太短，无法提取声纹")
+        mean = np.mean(vectors, axis=0)
+        return tuple(float(value) for value in mean)
 
 
 def _require_darwin(backend_name: str) -> None:

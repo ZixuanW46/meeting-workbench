@@ -24,6 +24,7 @@ const REVIEW = {
       total_seconds: 450.1,
       suggested_person_id: 'fake-person-1',
       suggested_display_name: '王芳',
+      suggested_tier: 'high',
       sample_clips: [
         { start_seconds: 0, end_seconds: 2.5, text: '大家好，开始周会。' },
         { start_seconds: 6, end_seconds: 8, text: '' },
@@ -35,6 +36,7 @@ const REVIEW = {
       total_seconds: 3.5,
       suggested_person_id: null,
       suggested_display_name: null,
+      suggested_tier: null,
       sample_clips: [
         { start_seconds: 3, end_seconds: 5, text: '我补充一下进度。' },
         { start_seconds: 9, end_seconds: 10, text: '' },
@@ -154,6 +156,35 @@ describe('说话人确认卡', () => {
     ).toBeInTheDocument()
     expect(
       within(await findCard('S2')).getByText('累计发言 0:03'),
+    ).toBeInTheDocument()
+  })
+
+  it('建议档位「较高」随建议人名定性展示', async () => {
+    // 红线：只有「较高 / 需判断」两档，绝不显示数值置信度。
+    mockReview()
+    render(<SpeakerReview meetingId="m1" onSubmitted={() => {}} />)
+
+    expect(
+      within(await findCard('S1')).getByText('建议：王芳 · 较高'),
+    ).toBeInTheDocument()
+  })
+
+  it('相似度居中或缺档位信息时显示「需判断」', async () => {
+    server.use(
+      http.get('/api/meetings/m1/review', () =>
+        HttpResponse.json({
+          ...REVIEW,
+          cards: [
+            { ...REVIEW.cards[0], suggested_tier: 'uncertain' },
+            REVIEW.cards[1],
+          ],
+        }),
+      ),
+    )
+    render(<SpeakerReview meetingId="m1" onSubmitted={() => {}} />)
+
+    expect(
+      within(await findCard('S1')).getByText('建议：王芳 · 需判断'),
     ).toBeInTheDocument()
   })
 

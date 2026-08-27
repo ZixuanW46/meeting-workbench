@@ -98,6 +98,8 @@ class SpeakerCluster(Base):
     # 该簇在切分产物里的累计发言秒数（碎簇合并后口径），供确认停点排序与展示。
     total_seconds: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
     suggested_person_id: Mapped[str | None] = mapped_column(String(32), default=None)
+    # 建议档位：high=「较高」/ uncertain=「需判断」。定性两档，绝不存相似度数值。
+    suggested_tier: Mapped[str | None] = mapped_column(String(16), default=None)
     sample_clips_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]")
     # M10 fake 质量：默认合格；测试可显式降分，不引入真实 VAD。
     quality_score: Mapped[float] = mapped_column(Float, default=1.0, server_default="1.0")

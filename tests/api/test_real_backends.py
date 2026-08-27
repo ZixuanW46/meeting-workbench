@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import builtins
+import struct
 import sys
+import wave
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -272,3 +274,121 @@ def test_missing_model_files_give_actionable_path(monkeypatch, tmp_path, backend
 def test_unknown_backend_name_raises_value_error(factory, name):
     with pytest.raises(ValueError, match="未知"):
         factory(name, Path("data/models"))
+
+
+class _WindowProbeStream:
+    def __init__(self) -> None:
+        self.sample_rate: int | None = None
+        self.waveform = None
+        self.finished = False
+
+    def accept_waveform(self, sample_rate, waveform):
+        self.sample_rate = sample_rate
+        self.waveform = waveform
+
+    def input_finished(self):
+        self.finished = True
+
+
+class _WindowProbeExtractor:
+    """行为化假声纹模型：不足 0.1s 判不可用；向量 = (切片首样本值, 切片时长秒)。
+
+    首样本值暴露切片起点、时长暴露切片长度——整场提一个向量会立刻穿帮。
+    """
+
+    def __init__(self) -> None:
+        self.streams: list[_WindowProbeStream] = []
+
+    def create_stream(self):
+        stream = _WindowProbeStream()
+        self.streams.append(stream)
+        return stream
+
+    def is_ready(self, stream):
+        return len(stream.waveform) / stream.sample_rate >= 0.1
+
+    def compute(self, stream):
+        return [float(stream.waveform[0]), len(stream.waveform) / stream.sample_rate]
+
+
+def _window_probe_embedding_backend(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    models_dir = tmp_path / "models"
+    sherpa_dir = models_dir / "sherpa-onnx"
+    sherpa_dir.mkdir(parents=True)
+    (sherpa_dir / "embedding.onnx").touch()
+
+    extractor = _WindowProbeExtractor()
+    sherpa = ModuleType("sherpa_onnx")
+    sherpa.SpeakerEmbeddingExtractorConfig = lambda **kwargs: SimpleNamespace(
+        validate=lambda: True
+    )
+    sherpa.SpeakerEmbeddingExtractor = lambda _config: extractor
+    monkeypatch.setitem(sys.modules, "sherpa_onnx", sherpa)
+
+    backend = SherpaOnnxEmbeddingBackend(models_dir)
+    backend.load()
+    return backend, extractor
+
+
+def _write_three_plateau_wav(path: Path) -> None:
+    """3 秒 16kHz 单声道：三个 1 秒平台 0.25 / -0.5 / 0.75（int16 精确值）。"""
+    with wave.open(str(path), "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(16000)
+        writer.writeframes(
+            b"".join(
+                struct.pack("<h", value) * 16000 for value in (8192, -16384, 24576)
+            )
+        )
+
+
+def test_sherpa_embed_averages_only_the_given_cluster_windows(monkeypatch, tmp_path):
+    # 缺陷根因：整场音频提一个向量会把整场当成同一个人的声纹。
+    # 声纹必须按该簇的时间窗切片提取，再对多段求均值。
+    pytest.importorskip("numpy")
+    pytest.importorskip("soundfile")
+    backend, extractor = _window_probe_embedding_backend(monkeypatch, tmp_path)
+    audio_path = tmp_path / "meeting.wav"
+    _write_three_plateau_wav(audio_path)
+
+    result = backend.embed(audio_path, [(0.0, 1.0), (2.0, 3.0)])
+
+    # 首样本均值 (0.25 + 0.75) / 2；每窗时长 1s——整场提取会得到 (0.25, 3.0)。
+    assert result == (0.5, 1.0)
+    assert [len(stream.waveform) for stream in extractor.streams] == [16000, 16000]
+
+
+def test_sherpa_embed_skips_windows_too_short_for_the_model(monkeypatch, tmp_path):
+    pytest.importorskip("numpy")
+    pytest.importorskip("soundfile")
+    backend, _ = _window_probe_embedding_backend(monkeypatch, tmp_path)
+    audio_path = tmp_path / "meeting.wav"
+    _write_three_plateau_wav(audio_path)
+
+    result = backend.embed(audio_path, [(0.0, 0.005), (2.0, 3.0)])
+
+    assert result == (0.75, 1.0)
+
+
+def test_sherpa_embed_fails_clearly_when_no_window_usable(monkeypatch, tmp_path):
+    pytest.importorskip("numpy")
+    pytest.importorskip("soundfile")
+    backend, _ = _window_probe_embedding_backend(monkeypatch, tmp_path)
+    audio_path = tmp_path / "meeting.wav"
+    _write_three_plateau_wav(audio_path)
+
+    with pytest.raises(RuntimeError, match="太短"):
+        backend.embed(audio_path, [(0.0, 0.005)])
+
+
+def test_sherpa_embed_rejects_empty_window_list(monkeypatch, tmp_path):
+    pytest.importorskip("numpy")
+    pytest.importorskip("soundfile")
+    backend, _ = _window_probe_embedding_backend(monkeypatch, tmp_path)
+    audio_path = tmp_path / "meeting.wav"
+    _write_three_plateau_wav(audio_path)
+
+    with pytest.raises(ValueError, match="时间窗"):
+        backend.embed(audio_path, [])

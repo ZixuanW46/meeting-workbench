@@ -30,6 +30,8 @@ export interface ReviewCard {
   suggested_person_id: string | null
   /** 建议身份显示名：定性表达，后端绝不附带数值置信度 */
   suggested_display_name: string | null
+  /** 建议档位仅两档：high=「较高」/ uncertain=「需判断」；无建议时为 null */
+  suggested_tier: 'high' | 'uncertain' | null
   sample_clips: ReviewSample[]
   text: string
 }

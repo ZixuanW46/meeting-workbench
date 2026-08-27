@@ -268,9 +268,11 @@ export function SpeakerCard({
           {`累计发言 ${formatTotalSeconds(card.total_seconds)}`}
         </span>
         {card.suggested_person_id !== null ? (
-          // 建议身份只有「较高 / 需判断」的定性表达，绝不显示百分比
+          // 建议身份只有「较高 / 需判断」的定性表达，绝不显示百分比；
+          // 档位缺失（旧数据）按保守的「需判断」展示
           <span className="speaker-chip suggested">
-            建议：{card.suggested_display_name ?? '已知声纹'} · 需判断
+            建议：{card.suggested_display_name ?? '已知声纹'} ·{' '}
+            {card.suggested_tier === 'high' ? '较高' : '需判断'}
           </span>
         ) : (
           <span className="speaker-chip">未识别到已知声纹</span>

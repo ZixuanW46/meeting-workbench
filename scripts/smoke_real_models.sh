@@ -46,6 +46,13 @@ with slot.use(diarization) as loaded_diarization:
 print(f"切分：{len(speakers)} 个片段（切分模型已卸载）")
 
 with slot.use(embedding) as loaded_embedding:
-    vector = loaded_embedding.embed(audio_path, "smoke")
-print(f"声纹：{len(vector)} 维（声纹模型已卸载）")
+    # 与 worker 匹配口径一致：取首个簇的前 3 段时间窗提均值声纹。
+    first_cluster = speakers[0].cluster_id
+    windows = [
+        (segment.start, segment.end)
+        for segment in speakers
+        if segment.cluster_id == first_cluster
+    ][:3]
+    vector = loaded_embedding.embed(audio_path, windows)
+print(f"声纹：簇 {first_cluster} 取 {len(windows)} 窗，{len(vector)} 维（声纹模型已卸载）")
 PY

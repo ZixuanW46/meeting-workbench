@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 from sqlalchemy import text
+
+from meeting_api.pipeline.embedding import FakeEmbeddingBackend, embedding_to_bytes
 
 
 def _prepare_review(client, *, title: str = "声纹测试") -> str:
@@ -175,3 +179,52 @@ def test_delete_missing_voiceprint_returns_404(client):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "声纹不存在"
+
+
+def _s1_sample_windows(client, meeting_id: str) -> list[tuple[float, float]]:
+    with client.app.state.session_factory() as session:
+        clips_json = session.execute(
+            text(
+                "SELECT sample_clips_json FROM speaker_clusters "
+                "WHERE meeting_id = :meeting_id AND cluster_id = 'S1'"
+            ),
+            {"meeting_id": meeting_id},
+        ).scalar_one()
+    return [
+        (clip["start_seconds"], clip["end_seconds"]) for clip in json.loads(clips_json)
+    ]
+
+
+def test_enrolled_embedding_uses_the_clusters_sample_windows(client):
+    # 入库口径必须与匹配口径一致：都对该簇的试听时间窗提取声纹。
+    meeting_id = _prepare_review(client, title="入库口径")
+    windows = _s1_sample_windows(client, meeting_id)
+    assert windows  # 前置：确认包必然带试听片段
+
+    _submit_new_person_and_unknown(client, meeting_id)
+
+    backend = FakeEmbeddingBackend()
+    backend.load()
+    expected = embedding_to_bytes(backend.embed(Path("unused.wav"), windows))
+    rows = _voiceprint_rows(client)
+    assert len(rows) == 1
+    assert rows[0].embedding == expected
+
+
+def test_review_card_suggestion_carries_only_two_qualitative_tiers(client):
+    enrolled_meeting_id = _prepare_review(client, title="先入库")
+    _submit_new_person_and_unknown(client, enrolled_meeting_id)
+
+    matched_meeting_id = _prepare_review(client, title="再匹配")
+    cards = {
+        card["cluster_id"]: card
+        for card in client.get(f"/api/meetings/{matched_meeting_id}/review").json()[
+            "cards"
+        ]
+    }
+
+    # fake 口径下同簇窗口向量余弦≈1 → 「较高」；库里没人像 S2 → 无建议无档位。
+    assert cards["S1"]["suggested_person_id"] is not None
+    assert cards["S1"]["suggested_tier"] == "high"
+    assert cards["S2"]["suggested_person_id"] is None
+    assert cards["S2"]["suggested_tier"] is None

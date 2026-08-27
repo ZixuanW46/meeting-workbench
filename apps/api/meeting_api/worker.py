@@ -38,6 +38,8 @@ from meeting_api.pipeline.diarization import (
 )
 from meeting_api.pipeline.embedding import (
     EmbeddingBackend,
+    TimeWindow,
+    embedding_from_bytes,
     embedding_to_bytes,
     get_embedding_backend,
 )
@@ -47,6 +49,7 @@ from meeting_domain import (
     MeetingState,
     SpeakerDecision,
     eligible_for_enrollment,
+    match_voiceprint,
     snapshot,
     transition,
 )
@@ -57,6 +60,20 @@ STEP_DIARIZATION = "DIARIZATION"
 STEP_VOICEPRINT_MATCHING = "VOICEPRINT_MATCHING"
 STEP_PREPARING_REVIEW = "PREPARING_REVIEW"
 STEP_GENERATING_MINUTES = "GENERATING_MINUTES"
+
+# 每簇最多取前 3 段：既是确认停点的试听片段，也是声纹提取的时间窗。
+REVIEW_CLIP_LIMIT = 3
+
+
+def _cluster_windows(
+    speaker_segments: Sequence[SpeakerSegment], cluster_id: str
+) -> list[TimeWindow]:
+    """匹配、入库、试听共用同一批簇内时间窗，三个口径必须一致。"""
+    return [
+        (segment.start, segment.end)
+        for segment in speaker_segments
+        if segment.cluster_id == cluster_id
+    ][:REVIEW_CLIP_LIMIT]
 
 
 def recover_interrupted_meetings(session_factory: sessionmaker[Session]) -> int:
@@ -177,7 +194,9 @@ class Worker:
                 self._persist_segments(session, meeting_id, asr_segments, speaker_segments)
 
                 self._set_step(session, meeting, STEP_VOICEPRINT_MATCHING)
-                self._apply_voiceprint_suggestions(session, meeting_id, audio_path)
+                self._apply_voiceprint_suggestions(
+                    session, meeting_id, audio_path, speaker_segments
+                )
 
                 self._set_step(session, meeting, STEP_PREPARING_REVIEW)
                 self._prepare_review_samples(session, meeting_id, speaker_segments)
@@ -377,6 +396,7 @@ class Worker:
         session: Session,
         meeting_id: str,
         audio_path: Path,
+        speaker_segments: Sequence[SpeakerSegment],
     ) -> None:
         clusters = session.scalars(
             select(SpeakerCluster)
@@ -385,6 +405,7 @@ class Worker:
         ).all()
         for cluster in clusters:
             cluster.suggested_person_id = None
+            cluster.suggested_tier = None
 
         voiceprints = session.scalars(
             select(Voiceprint)
@@ -392,16 +413,21 @@ class Worker:
             .order_by(Voiceprint.id)
         ).all()
         if voiceprints:
-            person_by_embedding = {
-                voiceprint.embedding: voiceprint.person_id for voiceprint in voiceprints
+            enrolled = {
+                voiceprint.person_id: embedding_from_bytes(voiceprint.embedding)
+                for voiceprint in voiceprints
             }
             with self.model_slot.use(self.embedding_backend) as embedding_backend:
                 for cluster in clusters:
-                    candidate = embedding_to_bytes(
-                        embedding_backend.embed(audio_path, cluster.cluster_id)
-                    )
+                    windows = _cluster_windows(speaker_segments, cluster.cluster_id)
+                    if not windows:
+                        continue
+                    candidate = embedding_backend.embed(audio_path, windows)
                     # 这里只给建议；人工决定仍是唯一落名入口。
-                    cluster.suggested_person_id = person_by_embedding.get(candidate)
+                    match = match_voiceprint(candidate, enrolled)
+                    if match is not None:
+                        cluster.suggested_person_id = match.person_id
+                        cluster.suggested_tier = match.tier.value
         session.commit()
 
     def enroll_voiceprints(
@@ -438,8 +464,15 @@ class Worker:
                 person_id = cluster.person_id
                 if person_id is None:  # 已由筛选排除，仅用于类型收窄。
                     continue
+                # 入库口径与匹配口径一致：都用该簇的试听时间窗提均值声纹。
+                windows: list[TimeWindow] = [
+                    (clip["start_seconds"], clip["end_seconds"])
+                    for clip in json.loads(cluster.sample_clips_json)
+                ]
+                if not windows:
+                    continue
                 blob = embedding_to_bytes(
-                    embedding_backend.embed(audio_path, cluster.cluster_id)
+                    embedding_backend.embed(audio_path, windows)
                 )
                 voiceprint = existing_by_person.get(person_id)
                 if voiceprint is None:
@@ -461,13 +494,11 @@ class Worker:
         ).all()
         for cluster in clusters:
             samples = [
-                {
-                    "start_seconds": segment.start,
-                    "end_seconds": segment.end,
-                }
-                for segment in speaker_segments
-                if segment.cluster_id == cluster.cluster_id
-            ][:3]
+                {"start_seconds": start, "end_seconds": end}
+                for start, end in _cluster_windows(
+                    speaker_segments, cluster.cluster_id
+                )
+            ]
             # 单次发言者只有 1 个片段也合法；0 片段说明簇与片段已不一致，属数据错误。
             if len(samples) < 1:
                 raise ValueError(f"说话人簇 {cluster.cluster_id} 没有任何试听片段")

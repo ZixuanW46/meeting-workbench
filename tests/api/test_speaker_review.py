@@ -13,10 +13,22 @@ from meeting_api.pipeline.serial import SingleModelSlot
 from meeting_api.worker import Worker
 
 
-def _seed_s1_voiceprint(client) -> None:
+def _s1_windows(expected_speakers: int) -> list[tuple[float, float]]:
+    """fake 切分里 S1 的前几段时间窗：声纹口径与试听片段口径一致。"""
+    n = expected_speakers
+    return [
+        (float(i * 5), float(i * 5 + 5))
+        for i in range(max(4, 2 * n))
+        if i % n == 0
+    ][:3]
+
+
+def _seed_s1_voiceprint(client, expected_speakers: int = 2) -> None:
     backend = FakeEmbeddingBackend()
     with SingleModelSlot().use(backend) as loaded:
-        embedding = embedding_to_bytes(loaded.embed(Path("unused.wav"), "S1"))
+        embedding = embedding_to_bytes(
+            loaded.embed(Path("unused.wav"), _s1_windows(expected_speakers))
+        )
     with client.app.state.session_factory() as session:
         session.add(Person(id="fake-person-1", display_name="已知用户 1"))
         session.add(Voiceprint(person_id="fake-person-1", embedding=embedding))
@@ -26,7 +38,7 @@ def _seed_s1_voiceprint(client) -> None:
 def _prepare_review(
     client, *, title: str = "说话人确认测试", expected_speakers: int = 2
 ) -> str:
-    _seed_s1_voiceprint(client)
+    _seed_s1_voiceprint(client, expected_speakers)
     created = client.post(
         "/api/meetings",
         json={"title": title, "expected_speakers": expected_speakers},

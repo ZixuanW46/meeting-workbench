@@ -27,8 +27,14 @@ from meeting_domain.state import (
     transition,
 )
 from meeting_domain.voiceprint import (
+    VOICEPRINT_HIGH_THRESHOLD,
     VOICEPRINT_QUALITY_THRESHOLD,
+    VOICEPRINT_SUGGEST_THRESHOLD,
+    SuggestionTier,
+    VoiceprintMatch,
+    cosine_similarity,
     eligible_for_enrollment,
+    match_voiceprint,
 )
 
 __all__ = [
@@ -37,7 +43,9 @@ __all__ = [
     "RETRANSCRIBABLE_STATES",
     "TERMINAL_STATES",
     "TRANSITIONS",
+    "VOICEPRINT_HIGH_THRESHOLD",
     "VOICEPRINT_QUALITY_THRESHOLD",
+    "VOICEPRINT_SUGGEST_THRESHOLD",
     "DecisionKind",
     "FakeMeetingPipeline",
     "InvalidTransition",
@@ -45,10 +53,14 @@ __all__ = [
     "ReviewIncomplete",
     "SpeakerCard",
     "SpeakerDecision",
+    "SuggestionTier",
+    "VoiceprintMatch",
     "can_transition",
+    "cosine_similarity",
     "decision_field_error",
     "eligible_for_enrollment",
     "has_unconfirmed_speakers",
+    "match_voiceprint",
     "review_complete",
     "snapshot",
     "transition",

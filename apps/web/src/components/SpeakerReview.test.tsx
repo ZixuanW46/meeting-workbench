@@ -51,6 +51,27 @@ async function findCard(clusterId: string) {
 }
 
 describe('说话人确认卡', () => {
+  it('卡片数多于预计人数时提示用「合并」归并', async () => {
+    mockReview()
+    render(
+      <SpeakerReview meetingId="m1" expectedSpeakers={1} onSubmitted={() => {}} />,
+    )
+
+    await findCard('S1')
+    expect(
+      screen.getByText(/切分聚出 2 位说话人，多于预计的 1/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/「与其他说话人合并」归并/)).toBeInTheDocument()
+  })
+
+  it('未填预计人数或卡片不超时不出现过分聚类提示', async () => {
+    mockReview()
+    render(<SpeakerReview meetingId="m1" onSubmitted={() => {}} />)
+
+    await findCard('S1')
+    expect(screen.queryByText(/多于预计的/)).not.toBeInTheDocument()
+  })
+
   it('每卡必须选择一个决定后「提交」才可点', async () => {
     mockReview()
     render(<SpeakerReview meetingId="m1" onSubmitted={() => {}} />)

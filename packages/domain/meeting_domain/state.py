@@ -9,6 +9,7 @@ DRAFT → UPLOADING → QUEUED → PROCESSING → AWAITING_SPEAKER_REVIEW
 - CANCELED：用户主动取消处理中会议。
 - PARTIAL_READY：转写已好、纪要 CLI 失败；不是终态，可重试回 GENERATING_MINUTES。
 - AWAITING_SPEAKER_REVIEW / READY / PARTIAL_READY：用户可显式重转写回 QUEUED。
+- READY / PARTIAL_READY：用户可重开说话人确认（复用转写与切分，仅重出纪要）。
 """
 
 from __future__ import annotations
@@ -72,11 +73,14 @@ TRANSITIONS: dict[MeetingState, frozenset[MeetingState]] = {
         {
             MeetingState.GENERATING_MINUTES,
             MeetingState.QUEUED,
+            MeetingState.AWAITING_SPEAKER_REVIEW,
             MeetingState.CANCELED,
         }
     ),
-    # QUEUED 边只供用户显式重转写；不是自动失败或自动重试。
-    MeetingState.READY: frozenset({MeetingState.QUEUED}),
+    # QUEUED 边只供用户显式重转写；AWAITING 边只供用户重开说话人确认。
+    MeetingState.READY: frozenset(
+        {MeetingState.QUEUED, MeetingState.AWAITING_SPEAKER_REVIEW}
+    ),
     MeetingState.FAILED: frozenset(),
     MeetingState.CANCELED: frozenset(),
 }
@@ -90,6 +94,15 @@ TERMINAL_STATES: frozenset[MeetingState] = frozenset(
 RETRANSCRIBABLE_STATES: frozenset[MeetingState] = frozenset(
     {
         MeetingState.AWAITING_SPEAKER_REVIEW,
+        MeetingState.READY,
+        MeetingState.PARTIAL_READY,
+    }
+)
+
+# 重开说话人确认只允许从这些状态发起：PROCESSING → AWAITING 是主链完成边，
+# 不是重开；不能只靠 transition() 区分两者。
+REOPENABLE_REVIEW_STATES: frozenset[MeetingState] = frozenset(
+    {
         MeetingState.READY,
         MeetingState.PARTIAL_READY,
     }

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { makeDoctorReport } from '../test/doctor'
 import { server } from '../test/server'
@@ -54,5 +54,36 @@ describe('工作台页', () => {
       await screen.findByText(/音频已转写并完成说话人确认/),
     ).toBeInTheDocument()
     expect(screen.getByText(/本机 Claude 或 Codex CLI/)).toBeInTheDocument()
+  })
+
+  it('READY 提供「重新确认说话人」，点击后回到确认停点', async () => {
+    let meetingState = 'READY'
+    let reopenCalled = false
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json({ ...MEETING, state: meetingState }),
+      ),
+      http.get('/api/meetings/m1/minutes', () =>
+        HttpResponse.json({ markdown: '# 会议纪要', note: '' }),
+      ),
+      http.post('/api/meetings/m1/review/reopen', () => {
+        reopenCalled = true
+        meetingState = 'AWAITING_SPEAKER_REVIEW'
+        return HttpResponse.json({ state: meetingState })
+      }),
+      http.get('/api/meetings/m1/review', () =>
+        HttpResponse.json({ cards: [] }),
+      ),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    const reopen = await screen.findByRole('button', {
+      name: '重新确认说话人',
+    })
+    fireEvent.click(reopen)
+
+    expect(await screen.findByText('说话人确认')).toBeInTheDocument()
+    expect(reopenCalled).toBe(true)
   })
 })

@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from meeting_api.models import Meeting, Person, SpeakerCluster, TranscriptSegment
 from meeting_domain import (
+    REOPENABLE_REVIEW_STATES,
     DecisionKind,
     MeetingState,
     ReviewIncomplete,
@@ -128,6 +129,46 @@ def get_review(meeting_id: str, request: Request) -> ReviewResponse:
                 for cluster in clusters
             ]
         )
+
+
+class ReviewReopenResponse(BaseModel):
+    state: str
+
+
+@router.post("/{meeting_id}/review/reopen", response_model=ReviewReopenResponse)
+def reopen_review(meeting_id: str, request: Request) -> ReviewReopenResponse:
+    """READY / PARTIAL_READY 重开说话人确认：复用转写与切分，确认后只重出纪要。"""
+    session_factory = request.app.state.session_factory
+    with session_factory() as session:
+        meeting = session.get(Meeting, meeting_id)
+        if meeting is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会议不存在")
+        current = MeetingState(meeting.state)
+        if current not in REOPENABLE_REVIEW_STATES:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="当前会议状态不允许重新确认说话人",
+            )
+
+        clusters = session.scalars(
+            select(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
+        ).all()
+        for cluster in clusters:
+            # 上一轮已确认的身份回填为建议：重开后可一键「确认建议」，
+            # 最终身份仍由本轮用户决定产生。
+            if cluster.person_id is not None:
+                cluster.suggested_person_id = cluster.person_id
+
+        meeting.state = transition(
+            current, MeetingState.AWAITING_SPEAKER_REVIEW
+        ).value
+        meeting.processing_error = None
+        session.commit()
+
+        request.app.state.events.publish(
+            meeting.id, meeting.state, meeting.processing_step
+        )
+        return ReviewReopenResponse(state=meeting.state)
 
 
 @router.post(

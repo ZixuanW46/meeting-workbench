@@ -2,6 +2,7 @@ import pytest
 
 from meeting_domain import (
     ACTIVE_STATES,
+    REOPENABLE_REVIEW_STATES,
     RETRANSCRIBABLE_STATES,
     TERMINAL_STATES,
     TRANSITIONS,
@@ -85,6 +86,26 @@ def test_retranscribable_states_are_exactly_the_completed_transcription_states()
     # UPLOADING → QUEUED 是上传完成边，仍然合法，但不属于可重转写状态。
     assert can_transition(MeetingState.UPLOADING, MeetingState.QUEUED)
     assert MeetingState.UPLOADING not in RETRANSCRIBABLE_STATES
+
+
+@pytest.mark.parametrize(
+    "state", [MeetingState.READY, MeetingState.PARTIAL_READY]
+)
+def test_completed_states_can_reopen_speaker_review(state):
+    # 事后想改说话人决定（补名字/合并）不该被迫整场重转写：
+    # 已完成状态可以只重开确认停点，确认后重出纪要。
+    assert (
+        transition(state, MeetingState.AWAITING_SPEAKER_REVIEW)
+        == MeetingState.AWAITING_SPEAKER_REVIEW
+    )
+
+
+def test_reopenable_review_states_are_exactly_the_completed_states():
+    assert REOPENABLE_REVIEW_STATES == frozenset(
+        {MeetingState.READY, MeetingState.PARTIAL_READY}
+    )
+    # PROCESSING → AWAITING 是主链完成边，不属于重开。
+    assert MeetingState.PROCESSING not in REOPENABLE_REVIEW_STATES
 
 
 def test_partial_ready_is_retryable_not_terminal():

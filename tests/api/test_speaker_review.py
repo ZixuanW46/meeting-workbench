@@ -282,3 +282,94 @@ def test_decisions_rejected_outside_speaker_review_state(client):
 
     assert response.status_code == 409
     assert client.get(f"/api/meetings/{meeting_id}").json()["state"] == "DRAFT"
+
+
+def _drive_to_ready(client, meeting_id: str) -> None:
+    reviewed = client.post(
+        f"/api/meetings/{meeting_id}/review/decisions",
+        json={
+            "decisions": [
+                {"cluster_id": "S1", "kind": "NEW_PERSON", "display_name": "王芳"},
+                {"cluster_id": "S2", "kind": "KEEP_UNKNOWN"},
+            ]
+        },
+    )
+    assert reviewed.status_code == 200
+    assert client.app.state.worker.process_next() == meeting_id
+    assert client.get(f"/api/meetings/{meeting_id}").json()["state"] == "READY"
+
+
+def test_reopen_review_backfills_confirmed_identity_and_regenerates_minutes(client):
+    # 事后想改说话人决定不该整场重转写：READY 可重开确认停点，
+    # 上一轮确认的身份回填为建议，确认后只重出纪要。
+    meeting_id = _prepare_review(client)
+    _drive_to_ready(client, meeting_id)
+    first_minutes = client.get(f"/api/meetings/{meeting_id}/minutes").json()["markdown"]
+
+    reopened = client.post(f"/api/meetings/{meeting_id}/review/reopen")
+
+    assert reopened.status_code == 200
+    assert reopened.json()["state"] == "AWAITING_SPEAKER_REVIEW"
+    review = client.get(f"/api/meetings/{meeting_id}/review")
+    assert review.status_code == 200
+    cards = {card["cluster_id"]: card for card in review.json()["cards"]}
+    # 上一轮 S1 落名王芳：重开后显示为建议身份，可一键确认。
+    assert cards["S1"]["suggested_person_id"] is not None
+
+    resubmitted = client.post(
+        f"/api/meetings/{meeting_id}/review/decisions",
+        json={
+            "decisions": [
+                {"cluster_id": "S1", "kind": "CONFIRM"},
+                {"cluster_id": "S2", "kind": "NEW_PERSON", "display_name": "李雷"},
+            ]
+        },
+    )
+    assert resubmitted.status_code == 200
+    assert resubmitted.json()["has_unconfirmed_speakers"] is False
+    assert client.app.state.worker.process_next() == meeting_id
+
+    detail = client.get(f"/api/meetings/{meeting_id}")
+    assert detail.json()["state"] == "READY"
+    second_minutes = client.get(f"/api/meetings/{meeting_id}/minutes").json()["markdown"]
+    # 第一版带「含未确认说话人」标记；全部确认后的终版不再带。
+    assert first_minutes.startswith("含未确认说话人")
+    assert not second_minutes.startswith("含未确认说话人")
+
+
+def test_reopen_review_allowed_from_partial_ready(client):
+    meeting_id = _prepare_review(client)
+    from meeting_api.minutes.adapter import FakeMinutesAdapter, MinutesCliError
+
+    reviewed = client.post(
+        f"/api/meetings/{meeting_id}/review/decisions",
+        json={
+            "decisions": [
+                {"cluster_id": "S1", "kind": "UNDECIDED_UNKNOWN"},
+                {"cluster_id": "S2", "kind": "UNDECIDED_UNKNOWN"},
+            ]
+        },
+    )
+    assert reviewed.status_code == 200
+    client.app.state.worker.minutes_adapter = FakeMinutesAdapter(
+        error=MinutesCliError("模拟 CLI 失败")
+    )
+    assert client.app.state.worker.process_next() == meeting_id
+    assert client.get(f"/api/meetings/{meeting_id}").json()["state"] == "PARTIAL_READY"
+
+    reopened = client.post(f"/api/meetings/{meeting_id}/review/reopen")
+
+    assert reopened.status_code == 200
+    assert reopened.json()["state"] == "AWAITING_SPEAKER_REVIEW"
+
+
+def test_reopen_review_rejected_outside_completed_states(client):
+    meeting_id = _prepare_review(client)
+
+    response = client.post(f"/api/meetings/{meeting_id}/review/reopen")
+
+    assert response.status_code == 409
+    assert (
+        client.get(f"/api/meetings/{meeting_id}").json()["state"]
+        == "AWAITING_SPEAKER_REVIEW"
+    )

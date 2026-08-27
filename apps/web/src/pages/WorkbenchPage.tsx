@@ -3,6 +3,7 @@ import {
   exportUrls,
   formatApiError,
   getMeeting,
+  reopenReview,
   type Meeting,
 } from '../api/client'
 import { DoctorBanner } from '../components/DoctorBanner'
@@ -121,6 +122,7 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
       {meeting.state === 'AWAITING_SPEAKER_REVIEW' && (
         <SpeakerReview
           meetingId={meetingId}
+          expectedSpeakers={meeting.expected_speakers}
           onSubmitted={(result) => {
             if (result.has_unconfirmed_speakers) {
               setNotice('本场含未确认说话人，纪要会带「含未确认说话人」标记')
@@ -158,6 +160,22 @@ function ResultPanel({
   const [tab, setTab] = useState<'transcript' | 'minutes'>(
     state === 'PARTIAL_READY' ? 'transcript' : 'minutes',
   )
+  const [reopening, setReopening] = useState(false)
+  const [reopenError, setReopenError] = useState<string | null>(null)
+
+  const handleReopen = async () => {
+    setReopening(true)
+    setReopenError(null)
+    try {
+      // 复用已有转写与切分，只重开确认停点；确认后仅重出纪要。
+      await reopenReview(meetingId)
+      onChanged()
+    } catch (e: unknown) {
+      setReopenError(formatApiError(e))
+    } finally {
+      setReopening(false)
+    }
+  }
 
   return (
     <section className="section">
@@ -165,6 +183,11 @@ function ResultPanel({
         <div className="notice notice-warn" style={{ marginBottom: 12 }}>
           音频已转写并完成说话人确认；生成纪要需要本机 Claude 或 Codex
           CLI，安装并登录后可在「纪要」页重试。
+        </div>
+      )}
+      {reopenError !== null && (
+        <div className="notice notice-error" style={{ marginBottom: 12 }}>
+          {reopenError}
         </div>
       )}
       <div className="result-toolbar">
@@ -185,6 +208,16 @@ function ResultPanel({
           </button>
         </div>
         <div className="export-links">
+          <button
+            type="button"
+            className="btn"
+            disabled={reopening}
+            onClick={() => {
+              void handleReopen()
+            }}
+          >
+            重新确认说话人
+          </button>
           <a className="btn" href={exportUrls.transcriptMd(meetingId)} download>
             <Icon name="download" size={12} />
             导出转写 MD

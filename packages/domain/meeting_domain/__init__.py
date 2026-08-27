@@ -17,6 +17,7 @@ from meeting_domain.speaker_review import (
 )
 from meeting_domain.state import (
     ACTIVE_STATES,
+    REOPENABLE_REVIEW_STATES,
     RETRANSCRIBABLE_STATES,
     TERMINAL_STATES,
     TRANSITIONS,
@@ -32,6 +33,7 @@ from meeting_domain.voiceprint import (
 
 __all__ = [
     "ACTIVE_STATES",
+    "REOPENABLE_REVIEW_STATES",
     "RETRANSCRIBABLE_STATES",
     "TERMINAL_STATES",
     "TRANSITIONS",

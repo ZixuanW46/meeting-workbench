@@ -209,6 +209,10 @@ export function submitDecisions(
   return postJson(`/api/meetings/${meetingId}/review/decisions`, { decisions })
 }
 
+export function reopenReview(meetingId: string): Promise<{ state: string }> {
+  return apiFetch(`/api/meetings/${meetingId}/review/reopen`, { method: 'POST' })
+}
+
 export function getProgress(meetingId: string): Promise<ProgressSnapshot> {
   return apiFetch(`/api/meetings/${meetingId}/progress`)
 }

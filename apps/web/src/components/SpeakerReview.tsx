@@ -13,6 +13,7 @@ const UNKNOWN_KINDS = new Set(['KEEP_UNKNOWN', 'UNDECIDED_UNKNOWN'])
 
 interface SpeakerReviewProps {
   meetingId: string
+  expectedSpeakers?: number | null
   onSubmitted: (result: ReviewSubmitResult) => void
 }
 
@@ -27,7 +28,11 @@ function toDecision(clusterId: string, draft: DecisionDraft): SpeakerDecisionInp
   return decision
 }
 
-export function SpeakerReview({ meetingId, onSubmitted }: SpeakerReviewProps) {
+export function SpeakerReview({
+  meetingId,
+  expectedSpeakers = null,
+  onSubmitted,
+}: SpeakerReviewProps) {
   const [cards, setCards] = useState<ReviewCard[] | null>(null)
   const [drafts, setDrafts] = useState<Record<string, DecisionDraft>>({})
   const [error, setError] = useState<string | null>(null)
@@ -83,12 +88,22 @@ export function SpeakerReview({ meetingId, onSubmitted }: SpeakerReviewProps) {
     }
   }
 
+  // 嘈杂录音常被过分聚类；多出的卡由人工合并，先验人数只用来提示。
+  const overClustered =
+    expectedSpeakers !== null && cards.length > expectedSpeakers
+
   return (
     <section className="section">
       <h2 className="section-title">说话人确认</h2>
       <p className="section-desc">
         为每位说话人试听片段并做一个决定；系统只提供建议，最终身份由你确认，「暂不确定」也是合法决定。
       </p>
+      {overClustered && (
+        <div className="notice notice-warn" style={{ marginBottom: 12 }}>
+          切分聚出 {cards.length} 位说话人，多于预计的 {expectedSpeakers}
+          {' '}位：同一人的多张卡请用「与其他说话人合并」归并。
+        </div>
+      )}
       <div className="review-cards">
         {cards.map((card) => (
           <SpeakerCard

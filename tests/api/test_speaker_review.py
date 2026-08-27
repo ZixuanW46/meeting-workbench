@@ -449,3 +449,130 @@ def test_reopen_review_rejected_outside_completed_states(client):
         client.get(f"/api/meetings/{meeting_id}").json()["state"]
         == "AWAITING_SPEAKER_REVIEW"
     )
+
+
+def test_enrollment_replaces_redundant_template_with_fresh_provenance(client):
+    # 同一环境重复确认（候选与既有模板余弦=1）：不堆重复模板，
+    # 替换那条并刷新 来源会议/转写摘录。
+    meeting_id = _prepare_review(client)
+
+    response = client.post(
+        f"/api/meetings/{meeting_id}/review/decisions",
+        json={
+            "decisions": [
+                {"cluster_id": "S1", "kind": "CONFIRM"},
+                {"cluster_id": "S2", "kind": "NEW_PERSON", "display_name": "李雷"},
+            ]
+        },
+    )
+    assert response.status_code == 200
+
+    with client.app.state.session_factory() as session:
+        s1_rows = session.scalars(
+            select(Voiceprint).where(Voiceprint.person_id == "fake-person-1")
+        ).all()
+        lei_rows = session.scalars(
+            select(Voiceprint)
+            .join(Person, Person.id == Voiceprint.person_id)
+            .where(Person.display_name == "李雷")
+        ).all()
+    assert len(s1_rows) == 1
+    assert s1_rows[0].source_meeting_id == meeting_id
+    assert "假转写第一段" in s1_rows[0].snippet_text
+    assert len(lei_rows) == 1
+    assert lei_rows[0].source_meeting_id == meeting_id
+    assert "假转写第二段" in lei_rows[0].snippet_text
+
+
+def test_enrollment_appends_template_when_voice_differs(client):
+    # 换了环境（候选与既有模板近似正交）：追加为第二条模板而不是覆盖。
+    _seed_voiceprint = __import__(
+        "tests.api.test_worker", fromlist=["_seed_voiceprint", "_fake_vector"]
+    )
+    with client.app.state.session_factory() as session:
+        session.add(Person(id="fake-person-1", display_name="已知用户 1"))
+        session.add(
+            Voiceprint(
+                person_id="fake-person-1",
+                embedding=embedding_to_bytes(
+                    _seed_voiceprint._fake_vector([(100.0, 105.0)])
+                ),
+            )
+        )
+        session.commit()
+    created = client.post(
+        "/api/meetings", json={"title": "追加模板", "expected_speakers": 2}
+    )
+    meeting_id = created.json()["id"]
+    uploaded = client.post(
+        f"/api/meetings/{meeting_id}/upload",
+        files={"file": ("meeting.wav", b"fake audio bytes", "audio/wav")},
+    )
+    assert uploaded.status_code == 200
+    assert client.app.state.worker.process_next() == meeting_id
+
+    response = client.post(
+        f"/api/meetings/{meeting_id}/review/decisions",
+        json={
+            "decisions": [
+                {"cluster_id": "S1", "kind": "LINK_EXISTING", "person_id": "fake-person-1"},
+                {"cluster_id": "S2", "kind": "UNDECIDED_UNKNOWN"},
+            ]
+        },
+    )
+    assert response.status_code == 200
+
+    with client.app.state.session_factory() as session:
+        rows = session.scalars(
+            select(Voiceprint)
+            .where(Voiceprint.person_id == "fake-person-1")
+            .order_by(Voiceprint.created_at.is_(None).desc(), Voiceprint.created_at)
+        ).all()
+    assert len(rows) == 2
+    assert rows[1].source_meeting_id == meeting_id
+
+
+def test_enrollment_writes_audition_clip_for_real_wav(client, tmp_path):
+    # 每条模板留一段代表性试听切片（≤10 秒），供声纹库页人工核对。
+    import io
+    import wave as wave_module
+
+    created = client.post(
+        "/api/meetings", json={"title": "试听切片", "expected_speakers": 2}
+    )
+    meeting_id = created.json()["id"]
+    buffer = io.BytesIO()
+    with wave_module.open(buffer, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(16000)
+        writer.writeframes(b"\x00\x00" * int(16000 * 20))
+    uploaded = client.post(
+        f"/api/meetings/{meeting_id}/upload",
+        files={"file": ("meeting.wav", buffer.getvalue(), "audio/wav")},
+    )
+    assert uploaded.status_code == 200
+    assert client.app.state.worker.process_next() == meeting_id
+
+    response = client.post(
+        f"/api/meetings/{meeting_id}/review/decisions",
+        json={
+            "decisions": [
+                {"cluster_id": "S1", "kind": "NEW_PERSON", "display_name": "王芳"},
+                {"cluster_id": "S2", "kind": "UNDECIDED_UNKNOWN"},
+            ]
+        },
+    )
+    assert response.status_code == 200
+
+    with client.app.state.session_factory() as session:
+        row = session.scalars(
+            select(Voiceprint)
+            .join(Person, Person.id == Voiceprint.person_id)
+            .where(Person.display_name == "王芳")
+        ).one()
+    clip_path = (
+        client.app.state.settings.data_dir / "voiceprints" / f"{row.id}.wav"
+    )
+    assert clip_path.is_file()
+    assert clip_path.stat().st_size > 44  # 大于空 wav 头

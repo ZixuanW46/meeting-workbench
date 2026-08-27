@@ -7,6 +7,7 @@ import tempfile
 import threading
 import wave
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
@@ -50,6 +51,7 @@ from meeting_domain import (
     SpeakerDecision,
     eligible_for_enrollment,
     match_voiceprint,
+    plan_enrollment,
     snapshot,
     transition,
 )
@@ -60,6 +62,22 @@ STEP_DIARIZATION = "DIARIZATION"
 STEP_VOICEPRINT_MATCHING = "VOICEPRINT_MATCHING"
 STEP_PREPARING_REVIEW = "PREPARING_REVIEW"
 STEP_GENERATING_MINUTES = "GENERATING_MINUTES"
+
+# 声纹模板的代表性试听切片上限（秒）：够人听出是谁，又不臃肿。
+VOICEPRINT_CLIP_MAX_SECONDS = 10.0
+
+
+def _best_clip_window(cluster: SpeakerCluster) -> TimeWindow | None:
+    """取该簇最长的试听窗，截到切片上限。"""
+    windows = [
+        (clip["start_seconds"], clip["end_seconds"])
+        for clip in json.loads(cluster.sample_clips_json)
+    ]
+    if not windows:
+        return None
+    start, end = max(windows, key=lambda window: window[1] - window[0])
+    return (start, min(end, start + VOICEPRINT_CLIP_MAX_SECONDS))
+
 
 # 每簇最多取前 3 段：既是确认停点的试听片段，也是声纹提取的时间窗。
 REVIEW_CLIP_LIMIT = 3
@@ -412,24 +430,28 @@ class Worker:
             .join(Person, Person.id == Voiceprint.person_id)
             .order_by(Voiceprint.id)
         ).all()
-        if voiceprints:
-            # 每人一组模板（按 id 升序 = 入库时间升序），匹配取组内最高余弦。
-            enrolled: dict[str, list[tuple[float, ...]]] = {}
-            for voiceprint in voiceprints:
-                enrolled.setdefault(voiceprint.person_id, []).append(
-                    embedding_from_bytes(voiceprint.embedding)
-                )
-            with self.model_slot.use(self.embedding_backend) as embedding_backend:
-                for cluster in clusters:
-                    windows = _cluster_windows(speaker_segments, cluster.cluster_id)
-                    if not windows:
-                        continue
-                    candidate = embedding_backend.embed(audio_path, windows)
-                    # 这里只给建议；人工决定仍是唯一落名入口。
-                    match = match_voiceprint(candidate, enrolled)
-                    if match is not None:
-                        cluster.suggested_person_id = match.person_id
-                        cluster.suggested_tier = match.tier.value
+        # 每人一组模板，匹配取组内最高余弦（顺序对取最大无影响）。
+        enrolled: dict[str, list[tuple[float, ...]]] = {}
+        for voiceprint in voiceprints:
+            enrolled.setdefault(voiceprint.person_id, []).append(
+                embedding_from_bytes(voiceprint.embedding)
+            )
+        # 簇声纹始终落库（空声纹库也落）：入库与「按声纹就近归属」在决定
+        # 应用时直接复用，不必再加载声纹模型。
+        with self.model_slot.use(self.embedding_backend) as embedding_backend:
+            for cluster in clusters:
+                windows = _cluster_windows(speaker_segments, cluster.cluster_id)
+                if not windows:
+                    continue
+                candidate = embedding_backend.embed(audio_path, windows)
+                cluster.embedding = embedding_to_bytes(candidate)
+                if not enrolled:
+                    continue
+                # 这里只给建议；人工决定仍是唯一落名入口。
+                match = match_voiceprint(candidate, enrolled)
+                if match is not None:
+                    cluster.suggested_person_id = match.person_id
+                    cluster.suggested_tier = match.tier.value
         session.commit()
 
     def enroll_voiceprints(
@@ -439,7 +461,12 @@ class Worker:
         clusters: Sequence[SpeakerCluster],
         decisions: Sequence[SpeakerDecision],
     ) -> None:
-        """在 M5 决定应用后，为符合领域规则的簇生成或更新声纹。"""
+        """在 M5 决定应用后，按多模板策略为符合领域规则的簇入库声纹。
+
+        候选向量复用匹配阶段落库的簇声纹（缺失才现场补提）；与既有模板
+        冗余则替换那条并刷新出处，否则追加，满上限淘汰最旧。每条模板
+        同时留 ≤10s 试听切片与该窗的转写摘录，供声纹库页人工核对。
+        """
         decision_by_cluster = {decision.cluster_id: decision for decision in decisions}
         eligible_clusters = [
             cluster
@@ -454,36 +481,117 @@ class Worker:
             return
 
         audio_path = self._validate_audio(meeting)
+
+        # 旧数据（0010 之前的会议重开确认）没有落库的簇声纹：现场补提一次。
+        missing = [
+            cluster for cluster in eligible_clusters if cluster.embedding is None
+        ]
+        if missing:
+            with self.model_slot.use(self.embedding_backend) as embedding_backend:
+                for cluster in missing:
+                    windows: list[TimeWindow] = [
+                        (clip["start_seconds"], clip["end_seconds"])
+                        for clip in json.loads(cluster.sample_clips_json)
+                    ]
+                    if not windows:
+                        continue
+                    cluster.embedding = embedding_to_bytes(
+                        embedding_backend.embed(audio_path, windows)
+                    )
+        eligible_clusters = [
+            cluster for cluster in eligible_clusters if cluster.embedding is not None
+        ]
+
         person_ids = {cluster.person_id for cluster in eligible_clusters}
-        existing_by_person = {
-            voiceprint.person_id: voiceprint
-            for voiceprint in session.scalars(
-                select(Voiceprint).where(Voiceprint.person_id.in_(person_ids))
-            )
+        templates_by_person: dict[str, list[Voiceprint]] = {
+            person_id: [] for person_id in person_ids if person_id is not None
         }
-        with self.model_slot.use(self.embedding_backend) as embedding_backend:
-            for cluster in eligible_clusters:
-                person_id = cluster.person_id
-                if person_id is None:  # 已由筛选排除，仅用于类型收窄。
-                    continue
-                # 入库口径与匹配口径一致：都用该簇的试听时间窗提均值声纹。
-                windows: list[TimeWindow] = [
-                    (clip["start_seconds"], clip["end_seconds"])
-                    for clip in json.loads(cluster.sample_clips_json)
-                ]
-                if not windows:
-                    continue
-                blob = embedding_to_bytes(
-                    embedding_backend.embed(audio_path, windows)
+        for row in session.scalars(
+            select(Voiceprint)
+            .where(Voiceprint.person_id.in_(person_ids))
+            # 最旧在前（0010 之前的存量行 created_at 为空，视为最旧）。
+            .order_by(
+                Voiceprint.created_at.is_(None).desc(),
+                Voiceprint.created_at,
+                Voiceprint.id,
+            )
+        ):
+            templates_by_person[row.person_id].append(row)
+
+        for cluster in eligible_clusters:
+            person_id = cluster.person_id
+            if person_id is None or cluster.embedding is None:  # 类型收窄
+                continue
+            candidate = embedding_from_bytes(cluster.embedding)
+            rows = templates_by_person.setdefault(person_id, [])
+            plan = plan_enrollment(
+                [embedding_from_bytes(row.embedding) for row in rows], candidate
+            )
+            window = _best_clip_window(cluster)
+            snippet = self._clip_snippet(
+                session, meeting.id, cluster.cluster_id, window
+            )
+            blob = embedding_to_bytes(candidate)
+            if plan.action == "replace" and rows:
+                assert plan.replace_index is not None
+                target = rows[plan.replace_index]
+                target.embedding = blob
+                target.created_at = datetime.now(UTC)
+                target.source_meeting_id = meeting.id
+                target.snippet_text = snippet
+            else:
+                target = Voiceprint(
+                    person_id=person_id,
+                    embedding=blob,
+                    source_meeting_id=meeting.id,
+                    snippet_text=snippet,
                 )
-                voiceprint = existing_by_person.get(person_id)
-                if voiceprint is None:
-                    voiceprint = Voiceprint(person_id=person_id, embedding=blob)
-                    session.add(voiceprint)
-                    existing_by_person[person_id] = voiceprint
-                else:
-                    voiceprint.embedding = blob
+                session.add(target)
+                rows.append(target)
+            session.flush()
+            if window is not None:
+                self._write_voiceprint_clip(audio_path, window, target.id)
         session.flush()
+
+    def _write_voiceprint_clip(
+        self, audio_path: Path, window: TimeWindow, voiceprint_id: str
+    ) -> None:
+        """留代表性切片供人工试听；音频不可按 PCM 切片时静默跳过，模板仍有效。"""
+        target_dir = self.settings.data_dir / "voiceprints"
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            _write_wav_slice(
+                audio_path, window[0], window[1], target_dir / f"{voiceprint_id}.wav"
+            )
+        except (wave.Error, EOFError, OSError):
+            pass
+
+    @staticmethod
+    def _clip_snippet(
+        session: Session,
+        meeting_id: str,
+        cluster_id: str,
+        window: TimeWindow | None,
+    ) -> str:
+        if window is None:
+            return ""
+        start, end = window
+        texts = [
+            segment.text
+            for segment in session.scalars(
+                select(TranscriptSegment)
+                .where(
+                    TranscriptSegment.meeting_id == meeting_id,
+                    TranscriptSegment.cluster_id == cluster_id,
+                )
+                .order_by(TranscriptSegment.start_seconds)
+            )
+            if segment.start_seconds < end and segment.end_seconds > start
+        ]
+        joined = " ".join(texts)
+        if len(joined) > 80:
+            return f"{joined[:80]}…"
+        return joined
 
     @staticmethod
     def _prepare_review_samples(

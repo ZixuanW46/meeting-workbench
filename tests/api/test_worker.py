@@ -536,3 +536,21 @@ def test_processing_exception_marks_meeting_failed_and_persists_error(client):
         assert meeting.processing_step == "ASR"
         assert meeting.processing_error is not None
         assert "fake ASR 故障" in meeting.processing_error
+
+
+def test_cluster_embeddings_persisted_for_later_assignment(client):
+    # 匹配阶段就把簇声纹落库（空声纹库也要落）：就近归属与入库都复用它，
+    # 决定应用时不必再加载声纹模型。
+    meeting_id = _queue_meeting(client)
+
+    _worker(client).process_next()
+
+    with client.app.state.session_factory() as session:
+        clusters = session.scalars(
+            select(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
+        ).all()
+    assert clusters
+    assert all(
+        cluster.embedding is not None and len(cluster.embedding) > 0
+        for cluster in clusters
+    )

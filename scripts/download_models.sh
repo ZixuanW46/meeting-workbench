@@ -40,12 +40,13 @@ run mkdir -p "$ASR_DIR" "$SHERPA_DIR"
 if [[ -f "$ASR_DIR/config.json" ]]; then
     echo "ASR 模型已存在，跳过下载：$ASR_DIR"
 else
-    HF_CLI="$REPO_ROOT/.venv/bin/huggingface-cli"
+    # huggingface-hub 1.x 的 CLI 叫 hf；老的 huggingface-cli 在 1.x 只剩废弃提示、不能下载。
+    HF_CLI="$REPO_ROOT/.venv/bin/hf"
     if [[ ! -x "$HF_CLI" ]]; then
-        HF_CLI="huggingface-cli"
+        HF_CLI="hf"
     fi
     if [[ "$DRY_RUN" != "1" ]] && ! command -v "$HF_CLI" >/dev/null 2>&1; then
-        echo "未找到 huggingface-cli，请先安装仓库的 mac 依赖。" >&2
+        echo "未找到 hf CLI（huggingface-hub 1.x），请先安装仓库的 mac 依赖。" >&2
         exit 1
     fi
     # 尊重调用者已有的 HF_ENDPOINT；公开仓库无需 login 或 token。

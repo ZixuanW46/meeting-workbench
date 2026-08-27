@@ -80,9 +80,9 @@ run "$PYTHON_BIN" -m venv .venv
 run "$REPO_ROOT/.venv/bin/python" -m pip install --upgrade pip
 run "$REPO_ROOT/.venv/bin/python" -m pip install -e ".[mac]"
 
-if [[ ! -x "$REPO_ROOT/.venv/bin/huggingface-cli" ]] && \
-    ! command -v huggingface-cli >/dev/null 2>&1; then
-    echo "mac 依赖安装后仍未找到 huggingface-cli。" >&2
+if [[ ! -x "$REPO_ROOT/.venv/bin/hf" ]] && \
+    ! command -v hf >/dev/null 2>&1; then
+    echo "mac 依赖安装后仍未找到 hf CLI（huggingface-hub 1.x）。" >&2
     exit 1
 fi
 

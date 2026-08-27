@@ -76,7 +76,7 @@ def test_dry_run_prints_all_downloads_without_network_or_writes(tmp_path):
     calls_file = tmp_path / "network-calls"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for command in ("curl", "huggingface-cli"):
+    for command in ("curl", "hf"):
         _write_command_stub(bin_dir, command, calls_file)
 
     result = _run(
@@ -88,7 +88,7 @@ def test_dry_run_prints_all_downloads_without_network_or_writes(tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert "huggingface-cli" in result.stdout
+    assert "/hf" in result.stdout
     assert "mlx-community/Qwen3-ASR-1.7B-8bit" in result.stdout
     assert SEGMENTATION_URL in result.stdout
     assert EMBEDDING_URL in result.stdout
@@ -114,7 +114,7 @@ def test_existing_models_do_not_invoke_download_commands(tmp_path):
     calls_file = tmp_path / "download-calls"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for command in ("curl", "huggingface-cli"):
+    for command in ("curl", "hf"):
         _write_command_stub(bin_dir, command, calls_file)
 
     result = _run(

@@ -58,6 +58,8 @@ def test_mac_install_dry_run_is_safe_on_linux():
     assert "node" in result.stdout
     assert "download_models.sh" in result.stdout
     assert "doctor.sh" in result.stdout
+    # DRY RUN 打印与真实安装同款 pip 参数（printf %q 会转义方括号）。
+    assert "pip install -e .\\[mac\\]" in result.stdout
 
 
 def test_mac_install_non_darwin_skips_without_running_install_commands(tmp_path):
@@ -79,6 +81,46 @@ def test_mac_install_non_darwin_skips_without_running_install_commands(tmp_path)
     assert result.returncode == 0, result.stderr
     assert "非 macOS" in result.stdout
     assert not marker.exists()
+
+
+def test_mac_install_darwin_with_deps_present_does_not_require_brew(tmp_path):
+    # 依赖齐全（python3.12/ffmpeg/node 都能找到）时不得因缺 Homebrew 而失败。
+    # 受控 PATH 里没有 brew；python3.12 桩让版本检查失败，使脚本在真实安装步骤前停下。
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    stub = fake_bin / "python3.12"
+    stub.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+    stub.chmod(0o755)
+
+    result = _run(
+        SCRIPTS / "mac_install.sh",
+        env={
+            # 仅供 Linux 测试覆盖 Darwin 分支，生产安装不应设置此变量。
+            "MW_FORCE_DARWIN": "1",
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+        },
+    )
+
+    assert result.returncode == 1
+    assert "需要 Python 3.12" in result.stderr
+    assert "Homebrew" not in result.stderr
+
+
+def test_mac_install_darwin_missing_dep_without_brew_points_to_brew_site(tmp_path):
+    # 缺 python3.12 又没有 Homebrew：指向官网并退出 1，不代装 brew。
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+
+    result = _run(
+        SCRIPTS / "mac_install.sh",
+        env={
+            "MW_FORCE_DARWIN": "1",
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+        },
+    )
+
+    assert result.returncode == 1
+    assert "https://brew.sh/" in result.stderr
 
 
 def test_launchd_files_exist_and_install_dry_run_does_not_execute_launchctl(tmp_path):

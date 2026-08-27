@@ -73,7 +73,11 @@ elif [[ "$DRY_RUN" == "1" ]]; then
     run mkdir -p "$DRY_TEMP/extracted"
     run curl --fail --location "$SEGMENTATION_URL" --output "$DRY_TEMP/segmentation.tar.bz2"
     run tar -xjf "$DRY_TEMP/segmentation.tar.bz2" -C "$DRY_TEMP/extracted"
-    run install -m 0644 "$DRY_TEMP/extracted/model.onnx" "$SEGMENTATION_MODEL"
+    # 与真实路径一致：归档解出的子目录里用 find 定位 model.onnx 再落盘。
+    run find "$DRY_TEMP/extracted" -type f -name model.onnx -print -quit
+    run install -m 0644 \
+        "$DRY_TEMP/extracted/sherpa-onnx-pyannote-segmentation-3-0/model.onnx" \
+        "$SEGMENTATION_MODEL"
     run rm -rf "$DRY_TEMP"
 else
     cleanup_dir="$(mktemp -d "$MODELS_DIR/.model-download.XXXXXX")"
@@ -87,7 +91,7 @@ else
         echo "切分模型归档中未找到 model.onnx。" >&2
         exit 1
     fi
-    # 转换模型源自 pyannote segmentation 3.0；原始权重按 MIT 许可证发布。
+    # 转换模型源自 pyannote segmentation-3.0；许可条款以 k2-fsa 归档内附带的 LICENSE 文件为准。
     install -m 0644 "$source_model" "$SEGMENTATION_MODEL"
     cleanup
     cleanup_dir=""

@@ -86,6 +86,9 @@ def test_dry_run_prints_all_downloads_without_network_or_writes(tmp_path):
     assert "segmentation.onnx" in result.stdout
     assert "embedding.onnx" in result.stdout
     assert "tar" in result.stdout
+    # DRY RUN 与真实路径一致：find 定位归档子目录里的 model.onnx。
+    assert "find" in result.stdout
+    assert "sherpa-onnx-pyannote-segmentation-3-0/model.onnx" in result.stdout
     assert not calls_file.exists()
     assert not data_dir.exists()
 

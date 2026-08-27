@@ -21,6 +21,7 @@ NEW_SCRIPTS = [
     SCRIPTS / "download_models.sh",
     SCRIPTS / "backup.sh",
     SCRIPTS / "restore.sh",
+    SCRIPTS / "smoke_minutes.sh",
     SCRIPTS / "launchd" / "install_launchd.sh",
 ]
 

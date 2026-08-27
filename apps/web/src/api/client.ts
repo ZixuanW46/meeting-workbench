@@ -112,6 +112,17 @@ export interface Voiceprint {
   has_clip: boolean
 }
 
+export interface VoiceprintPerson {
+  id: string
+  display_name: string
+}
+
+/** 声纹库全貌：people 是全部参会人（含暂无模板者），与确认页人员口径一致 */
+export interface VoiceprintLibrary {
+  items: Voiceprint[]
+  people: VoiceprintPerson[]
+}
+
 export class ApiError extends Error {
   status: number
   detail: unknown
@@ -257,9 +268,8 @@ export function getDoctor(): Promise<DoctorReport> {
   return apiFetch<DoctorReport>('/api/doctor')
 }
 
-export async function listVoiceprints(): Promise<Voiceprint[]> {
-  const data = await apiFetch<{ items: Voiceprint[] }>('/api/voiceprints')
-  return data.items
+export function listVoiceprints(): Promise<VoiceprintLibrary> {
+  return apiFetch<VoiceprintLibrary>('/api/voiceprints')
 }
 
 export function deleteVoiceprint(voiceprintId: string): Promise<void> {

@@ -577,6 +577,13 @@ a {
   cursor: default;
 }
 
+/* 参会人存在但模板为空（如被逐条删光）：解释状态，避免与确认页显得矛盾 */
+.voiceprint-empty-note {
+  padding: 14px 16px;
+  font-size: 12px;
+  color: var(--ink-tertiary);
+}
+
 /* 空态 */
 .empty {
   padding: 48px 20px;

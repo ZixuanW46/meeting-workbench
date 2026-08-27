@@ -24,10 +24,20 @@ class VoiceprintResponse(BaseModel):
     has_clip: bool
 
 
+class VoiceprintPerson(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    display_name: str
+
+
 class VoiceprintListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[VoiceprintResponse]
+    # 全部参会人（含暂无模板者）。确认页的建议与人员下拉引用的是人员表，
+    # 声纹库页必须同口径展示，否则「确认页有人、声纹库却是空的」会显得自相矛盾。
+    people: list[VoiceprintPerson]
 
 
 def _clip_path(request: Request, voiceprint_id: str):
@@ -44,7 +54,14 @@ def list_voiceprints(request: Request) -> VoiceprintListResponse:
             .join(Meeting, Meeting.id == Voiceprint.source_meeting_id, isouter=True)
             .order_by(Person.display_name, Voiceprint.id)
         ).all()
+        people = session.scalars(
+            select(Person).order_by(Person.display_name, Person.id)
+        ).all()
         return VoiceprintListResponse(
+            people=[
+                VoiceprintPerson(id=person.id, display_name=person.display_name)
+                for person in people
+            ],
             items=[
                 VoiceprintResponse(
                     id=voiceprint.id,

@@ -132,8 +132,10 @@ def test_list_voiceprints_exposes_only_identity_metadata(client):
 
     assert response.status_code == 200
     body = response.json()
-    # 与热词 API 保持一致的 {items: []} 包装。
-    assert set(body) == {"items"}
+    # items 是模板；people 是全部参会人（与确认页同一份人员口径）。
+    assert set(body) == {"items", "people"}
+    assert [set(person) for person in body["people"]] == [{"id", "display_name"}]
+    assert body["people"][0]["display_name"] == "王芳"
     items = body["items"]
     assert len(items) == 1
     assert set(items[0]) == {
@@ -174,7 +176,11 @@ def test_delete_voiceprint_removes_it_and_future_worker_no_longer_suggests_perso
 
     assert deleted.status_code == 204
     assert deleted.content == b""
-    assert client.get("/api/voiceprints").json() == {"items": []}
+    emptied = client.get("/api/voiceprints").json()
+    assert emptied["items"] == []
+    # 模板删光后人还在：确认页的建议/下拉仍会引用她，声纹库页必须
+    # 同口径展示「有人、暂无模板」，不能显示成什么都没有。
+    assert [person["display_name"] for person in emptied["people"]] == ["王芳"]
 
     unmatched_meeting_id = _prepare_review(client, title="删除后不再匹配")
     cards_after = client.get(f"/api/meetings/{unmatched_meeting_id}/review").json()["cards"]

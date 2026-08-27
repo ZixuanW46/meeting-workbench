@@ -33,10 +33,17 @@ const ITEMS = [
   },
 ]
 
+const PEOPLE = [
+  { id: 'p2', display_name: '李雷' },
+  { id: 'p1', display_name: '王芳' },
+]
+
 describe('声纹库页', () => {
   it('按人分组展示多条模板：摘录、来源会议、试听按钮', async () => {
     server.use(
-      http.get('/api/voiceprints', () => HttpResponse.json({ items: ITEMS })),
+      http.get('/api/voiceprints', () =>
+        HttpResponse.json({ items: ITEMS, people: PEOPLE }),
+      ),
     )
 
     render(<VoiceprintsPage />)
@@ -60,7 +67,9 @@ describe('声纹库页', () => {
   it('删除单条模板：该行消失，同组其余模板保留', async () => {
     let deleted: string | null = null
     server.use(
-      http.get('/api/voiceprints', () => HttpResponse.json({ items: ITEMS })),
+      http.get('/api/voiceprints', () =>
+        HttpResponse.json({ items: ITEMS, people: PEOPLE }),
+      ),
       http.delete('/api/voiceprints/:id', ({ params }) => {
         deleted = String(params.id)
         return new HttpResponse(null, { status: 204 })
@@ -101,7 +110,10 @@ describe('声纹库页', () => {
     }))
     server.use(
       http.get('/api/voiceprints', () =>
-        HttpResponse.json({ items: [...ITEMS, ...many] }),
+        HttpResponse.json({
+          items: [...ITEMS, ...many],
+          people: [...PEOPLE, { id: 'p9', display_name: '陈默' }],
+        }),
       ),
     )
 
@@ -118,7 +130,9 @@ describe('声纹库页', () => {
 
   it('声纹库为空时保留空态引导', async () => {
     server.use(
-      http.get('/api/voiceprints', () => HttpResponse.json({ items: [] })),
+      http.get('/api/voiceprints', () =>
+        HttpResponse.json({ items: [], people: [] }),
+      ),
     )
 
     render(<VoiceprintsPage />)
@@ -126,9 +140,33 @@ describe('声纹库页', () => {
     expect(await screen.findByText('声纹库是空的')).toBeInTheDocument()
   })
 
+  it('有参会人但模板被删光时：显示人和「暂无模板」提示，而不是空库', async () => {
+    // 确认页的建议/人员下拉引用的是人员表；模板删光后这里若显示
+    // 「什么都没有」，两页会看起来自相矛盾。
+    server.use(
+      http.get('/api/voiceprints', () =>
+        HttpResponse.json({
+          items: [],
+          people: [{ id: 'pa', display_name: '参会人A' }],
+        }),
+      ),
+    )
+
+    render(<VoiceprintsPage />)
+
+    await screen.findByText('参会人A')
+    expect(screen.queryByText('声纹库是空的')).not.toBeInTheDocument()
+    expect(screen.getByText('暂无模板')).toBeInTheDocument()
+    expect(
+      screen.getByText(/下次确认这个人的会议发言后会自动入库/),
+    ).toBeInTheDocument()
+  })
+
   it('点试听不因环境不支持音频而崩溃', async () => {
     server.use(
-      http.get('/api/voiceprints', () => HttpResponse.json({ items: ITEMS })),
+      http.get('/api/voiceprints', () =>
+        HttpResponse.json({ items: ITEMS, people: PEOPLE }),
+      ),
     )
 
     render(<VoiceprintsPage />)

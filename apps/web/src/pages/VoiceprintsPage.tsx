@@ -5,6 +5,7 @@ import {
   listVoiceprints,
   voiceprintAudioUrl,
   type Voiceprint,
+  type VoiceprintLibrary,
 } from '../api/client'
 import { Icon } from '../components/Icon'
 
@@ -26,7 +27,7 @@ function formatEnrolledAt(value: string | null): string {
 
 /** 声纹库：按人分组的多模板列表，每条模板可试听、核对摘录、单独删除。 */
 export function VoiceprintsPage() {
-  const [voiceprints, setVoiceprints] = useState<Voiceprint[] | null>(null)
+  const [library, setLibrary] = useState<VoiceprintLibrary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [playingId, setPlayingId] = useState<string | null>(null)
@@ -35,9 +36,9 @@ export function VoiceprintsPage() {
   useEffect(() => {
     let stale = false
     listVoiceprints()
-      .then((items) => {
+      .then((data) => {
         if (!stale) {
-          setVoiceprints(items)
+          setLibrary(data)
         }
       })
       .catch((e: unknown) => {
@@ -76,8 +77,13 @@ export function VoiceprintsPage() {
     setError(null)
     deleteVoiceprint(voiceprintId)
       .then(() => {
-        setVoiceprints((current) =>
-          current === null ? current : current.filter((item) => item.id !== voiceprintId),
+        setLibrary((current) =>
+          current === null
+            ? current
+            : {
+                ...current,
+                items: current.items.filter((item) => item.id !== voiceprintId),
+              },
         )
         if (playingId === voiceprintId) {
           audioRef.current?.pause()
@@ -92,19 +98,14 @@ export function VoiceprintsPage() {
       })
   }
 
-  const groups: Array<{ personId: string; displayName: string; templates: Voiceprint[] }> = []
-  for (const item of voiceprints ?? []) {
-    const group = groups.find((entry) => entry.personId === item.person_id)
-    if (group) {
-      group.templates.push(item)
-    } else {
-      groups.push({
-        personId: item.person_id,
-        displayName: item.display_name,
-        templates: [item],
-      })
-    }
-  }
+  // 以人员表为准分组：暂无模板的参会人也占一组，与确认页的人员口径保持一致。
+  const groups: Array<{ personId: string; displayName: string; templates: Voiceprint[] }> = (
+    library?.people ?? []
+  ).map((person) => ({
+    personId: person.id,
+    displayName: person.display_name,
+    templates: (library?.items ?? []).filter((item) => item.person_id === person.id),
+  }))
 
   return (
     <div className="page">
@@ -119,7 +120,7 @@ export function VoiceprintsPage() {
 
       {error !== null && <div className="notice notice-error">{error}</div>}
 
-      {voiceprints !== null && (
+      {library !== null && (
         <div className="voiceprint-groups">
           {groups.length === 0 ? (
             <div className="list-card">
@@ -133,13 +134,22 @@ export function VoiceprintsPage() {
               <div key={group.personId} className="list-card voiceprint-group">
                 <div className="voiceprint-group-head">
                   <span className="list-row-title">{group.displayName}</span>
-                  <span className="list-row-meta">{group.templates.length} 条模板</span>
+                  <span className="list-row-meta">
+                    {group.templates.length > 0
+                      ? `${group.templates.length} 条模板`
+                      : '暂无模板'}
+                  </span>
                   {group.templates.length > 5 && (
                     <span className="voiceprint-over-cap">
                       超出上限：请试听后删掉一条（超限期间暂停自动入库）
                     </span>
                   )}
                 </div>
+                {group.templates.length === 0 && (
+                  <div className="voiceprint-empty-note">
+                    这位参会人还没有声纹模板，下次确认这个人的会议发言后会自动入库
+                  </div>
+                )}
                 {group.templates.map((template) => (
                   <div key={template.id} className="list-row voiceprint-template">
                     {template.has_clip ? (

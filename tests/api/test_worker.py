@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import json
+import wave
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -24,6 +26,28 @@ def _queue_meeting(client, title: str = "待处理会议", expected_speakers: in
     uploaded = client.post(
         f"/api/meetings/{meeting_id}/upload",
         files={"file": ("meeting.wav", b"fake audio bytes", "audio/wav")},
+    )
+    assert uploaded.status_code == 200
+    return meeting_id
+
+
+def _queue_meeting_with_real_wav(
+    client, seconds: float = 20.0, title: str = "真 wav 会议"
+) -> str:
+    created = client.post(
+        "/api/meetings", json={"title": title, "expected_speakers": 2}
+    )
+    assert created.status_code == 201
+    meeting_id = created.json()["id"]
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(16000)
+        writer.writeframes(b"\x00\x00" * int(16000 * seconds))
+    uploaded = client.post(
+        f"/api/meetings/{meeting_id}/upload",
+        files={"file": ("meeting.wav", buffer.getvalue(), "audio/wav")},
     )
     assert uploaded.status_code == 200
     return meeting_id
@@ -276,6 +300,97 @@ def test_late_failure_after_segments_commit_still_lands_in_failed(client):
     _worker(client).process_next()
     detail = client.get(f"/api/meetings/{other_id}")
     assert detail.json()["state"] == "AWAITING_SPEAKER_REVIEW"
+
+
+class BlobAsr(FakeAsrBackend):
+    """整段无时间戳转写并记录每次收到的音频：模拟 Qwen3-ASR 的真实行为。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[Path] = []
+
+    def transcribe(self, audio_path: Path, hotwords=()) -> list[AsrSegment]:
+        if not self.loaded:
+            raise RuntimeError("ASR 后端未加载（先 load()）")
+        self.calls.append(Path(audio_path))
+        return [AsrSegment(0.0, 1.0, f"整段转写{len(self.calls)}")]
+
+
+def test_blob_transcript_is_retranscribed_per_turn(client):
+    # 整段无时间戳转写 + 多个发言轮次：逐轮切音频重转写，让每句话有归属。
+    meeting_id = _queue_meeting_with_real_wav(client, seconds=20.0)
+    asr = BlobAsr()
+
+    _worker(client, asr_backend=asr).process_next()
+
+    detail = client.get(f"/api/meetings/{meeting_id}")
+    assert detail.json()["state"] == "AWAITING_SPEAKER_REVIEW"
+    with client.app.state.session_factory() as session:
+        segments = session.scalars(
+            select(TranscriptSegment)
+            .where(TranscriptSegment.meeting_id == meeting_id)
+            .order_by(TranscriptSegment.start_seconds)
+        ).all()
+    # fake 切分给出 S1/S2 交替 4 轮（每轮 5s）；首次整段转写被逐轮结果替换。
+    assert [segment.cluster_id for segment in segments] == ["S1", "S2", "S1", "S2"]
+    assert [segment.text for segment in segments] == [
+        "整段转写2",
+        "整段转写3",
+        "整段转写4",
+        "整段转写5",
+    ]
+    assert [
+        (segment.start_seconds, segment.end_seconds) for segment in segments
+    ] == [(0.0, 5.0), (5.0, 10.0), (10.0, 15.0), (15.0, 20.0)]
+    # 第 1 次是整段，后 4 次是切片；切片文件在临时目录、事后清理。
+    assert len(asr.calls) == 5
+    assert all(not path.exists() for path in asr.calls[1:])
+
+
+class SingleClusterDiarization(FakeDiarizationBackend):
+    def diarize(self, audio_path: Path, expected_speakers=None):
+        del expected_speakers
+        if not self.loaded:
+            raise RuntimeError("diarization 后端未加载（先 load()）")
+        return [
+            SpeakerSegment(0.0, 5.0, "S1"),
+            SpeakerSegment(5.0, 10.0, "S1"),
+        ]
+
+
+def test_blob_transcript_with_single_turn_is_kept_as_is(client):
+    meeting_id = _queue_meeting_with_real_wav(client, seconds=10.0)
+    asr = BlobAsr()
+
+    _worker(
+        client, asr_backend=asr, diarization_backend=SingleClusterDiarization()
+    ).process_next()
+
+    detail = client.get(f"/api/meetings/{meeting_id}")
+    assert detail.json()["state"] == "AWAITING_SPEAKER_REVIEW"
+    assert len(asr.calls) == 1
+    with client.app.state.session_factory() as session:
+        segments = session.scalars(
+            select(TranscriptSegment).where(TranscriptSegment.meeting_id == meeting_id)
+        ).all()
+    assert [segment.text for segment in segments] == ["整段转写1"]
+
+
+def test_blob_transcript_keeps_whole_text_when_audio_not_sliceable(client):
+    # 音频不是可解析的 PCM wav（如损坏文件）：保留整段转写，不许整场失败。
+    meeting_id = _queue_meeting(client)
+    asr = BlobAsr()
+
+    _worker(client, asr_backend=asr).process_next()
+
+    detail = client.get(f"/api/meetings/{meeting_id}")
+    assert detail.json()["state"] == "AWAITING_SPEAKER_REVIEW"
+    assert len(asr.calls) == 1
+    with client.app.state.session_factory() as session:
+        segments = session.scalars(
+            select(TranscriptSegment).where(TranscriptSegment.meeting_id == meeting_id)
+        ).all()
+    assert [segment.text for segment in segments] == ["整段转写1"]
 
 
 class FailingAsr(FakeAsrBackend):

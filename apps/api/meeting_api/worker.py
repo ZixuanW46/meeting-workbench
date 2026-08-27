@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import threading
+import wave
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -31,6 +33,7 @@ from meeting_api.pipeline.diarization import (
     SpeakerSegment,
     consolidate_fragment_clusters,
     get_diarization_backend,
+    merge_adjacent_turns,
 )
 from meeting_api.pipeline.embedding import (
     EmbeddingBackend,
@@ -167,6 +170,9 @@ class Worker:
                 # 真实音频的自动聚类几乎必产亚秒碎簇；并入最近主簇后再落库，
                 # 否则确认包准备会因「凑不齐试听片段」整场失败。
                 speaker_segments = consolidate_fragment_clusters(speaker_segments)
+                asr_segments = self._retranscribe_blob_per_turn(
+                    audio_path, asr_segments, speaker_segments, hotwords
+                )
                 self._persist_segments(session, meeting_id, asr_segments, speaker_segments)
 
                 self._set_step(session, meeting, STEP_VOICEPRINT_MATCHING)
@@ -265,6 +271,45 @@ class Worker:
             f"{labels.get(segment.cluster_id, segment.cluster_id)}: {segment.text}"
             for segment in segments
         )
+
+    def _retranscribe_blob_per_turn(
+        self,
+        audio_path: Path,
+        asr_segments: Sequence[AsrSegment],
+        speaker_segments: Sequence[SpeakerSegment],
+        hotwords: Sequence[str],
+    ) -> Sequence[AsrSegment]:
+        """整段无时间戳转写按发言轮次切音频重转写。
+
+        Qwen3-ASR 只回整段文本，全部转写会被判给单一说话人；有多个发言
+        轮次时逐轮切片重转写，让每句话落在正确的簇上。音频不是可解析的
+        PCM wav（转码前的损坏文件等）时保留整段结果，不让会议失败。
+        """
+        if len(asr_segments) != 1:
+            return asr_segments
+        turns = merge_adjacent_turns(speaker_segments)
+        if len(turns) <= 1:
+            return asr_segments
+        with tempfile.TemporaryDirectory(prefix="mw-turns-") as scratch:
+            pieces: list[tuple[SpeakerSegment, Path]] = []
+            try:
+                for index, turn in enumerate(turns):
+                    piece_path = Path(scratch) / f"turn-{index:04d}.wav"
+                    _write_wav_slice(audio_path, turn.start, turn.end, piece_path)
+                    pieces.append((turn, piece_path))
+            except (wave.Error, EOFError, OSError):
+                return asr_segments
+
+            retranscribed: list[AsrSegment] = []
+            with self.model_slot.use(self.asr_backend) as asr:
+                for turn, piece_path in pieces:
+                    text = "".join(
+                        piece.text
+                        for piece in asr.transcribe(piece_path, hotwords=tuple(hotwords))
+                    ).strip()
+                    if text:
+                        retranscribed.append(AsrSegment(turn.start, turn.end, text))
+        return retranscribed or asr_segments
 
     def _validate_audio(self, meeting: Meeting) -> Path:
         if not meeting.audio_filename or not meeting.audio_size or not meeting.audio_sha256:
@@ -414,6 +459,23 @@ class Worker:
                 raise ValueError(f"说话人簇 {cluster.cluster_id} 没有任何试听片段")
             cluster.sample_clips_json = json.dumps(samples, ensure_ascii=False)
         session.commit()
+
+
+def _write_wav_slice(source: Path, start: float, end: float, target: Path) -> None:
+    """用标准库 wave 按秒切 PCM wav；非 PCM 或越界由调用方按不可切片处理。"""
+    with wave.open(str(source), "rb") as reader:
+        rate = reader.getframerate()
+        start_frame = max(0, int(start * rate))
+        end_frame = min(reader.getnframes(), int(end * rate))
+        if end_frame <= start_frame:
+            raise wave.Error("切片超出音频范围")
+        reader.setpos(start_frame)
+        frames = reader.readframes(end_frame - start_frame)
+        with wave.open(str(target), "wb") as writer:
+            writer.setnchannels(reader.getnchannels())
+            writer.setsampwidth(reader.getsampwidth())
+            writer.setframerate(rate)
+            writer.writeframes(frames)
 
 
 def _cluster_for_transcript(

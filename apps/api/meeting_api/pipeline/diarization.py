@@ -74,6 +74,30 @@ def consolidate_fragment_clusters(
     ]
 
 
+def merge_adjacent_turns(
+    segments: Sequence[SpeakerSegment],
+    *,
+    max_gap_seconds: float = 1.0,
+) -> list[SpeakerSegment]:
+    """把时间上连续的同簇片段并成发言轮次，供整段转写按轮次重切。"""
+    ordered = sorted(segments, key=lambda segment: (segment.start, segment.end))
+    turns: list[SpeakerSegment] = []
+    for segment in ordered:
+        if (
+            turns
+            and turns[-1].cluster_id == segment.cluster_id
+            and segment.start - turns[-1].end <= max_gap_seconds
+        ):
+            turns[-1] = SpeakerSegment(
+                turns[-1].start,
+                max(turns[-1].end, segment.end),
+                segment.cluster_id,
+            )
+        else:
+            turns.append(segment)
+    return turns
+
+
 class DiarizationBackend(Protocol):
     name: str
 

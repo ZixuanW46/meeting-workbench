@@ -6,6 +6,7 @@ from __future__ import annotations
 from meeting_api.pipeline.diarization import (
     SpeakerSegment,
     consolidate_fragment_clusters,
+    merge_adjacent_turns,
 )
 
 
@@ -71,3 +72,53 @@ def test_all_fragments_keep_largest_cluster_as_anchor():
 
 def test_empty_input_returns_empty():
     assert consolidate_fragment_clusters([]) == []
+
+
+def test_merge_adjacent_turns_keeps_alternating_speakers_separate():
+    segments = [
+        SpeakerSegment(0.0, 5.0, "S1"),
+        SpeakerSegment(5.0, 10.0, "S2"),
+        SpeakerSegment(10.0, 15.0, "S1"),
+    ]
+
+    assert merge_adjacent_turns(segments) == segments
+
+
+def test_merge_adjacent_turns_joins_same_cluster_within_gap():
+    segments = [
+        SpeakerSegment(0.0, 4.0, "S1"),
+        SpeakerSegment(4.5, 8.0, "S1"),  # 同簇 0.5s 停顿：同一轮发言
+        SpeakerSegment(8.2, 12.0, "S2"),
+    ]
+
+    turns = merge_adjacent_turns(segments)
+
+    assert turns == [
+        SpeakerSegment(0.0, 8.0, "S1"),
+        SpeakerSegment(8.2, 12.0, "S2"),
+    ]
+
+
+def test_merge_adjacent_turns_splits_same_cluster_beyond_gap():
+    segments = [
+        SpeakerSegment(0.0, 4.0, "S1"),
+        SpeakerSegment(9.0, 12.0, "S1"),  # 停顿 5s：两轮发言
+    ]
+
+    turns = merge_adjacent_turns(segments)
+
+    assert turns == segments
+
+
+def test_merge_adjacent_turns_sorts_by_time_first():
+    segments = [
+        SpeakerSegment(5.0, 8.0, "S2"),
+        SpeakerSegment(0.0, 5.0, "S1"),
+    ]
+
+    turns = merge_adjacent_turns(segments)
+
+    assert turns == [
+        SpeakerSegment(0.0, 5.0, "S1"),
+        SpeakerSegment(5.0, 8.0, "S2"),
+    ]

@@ -6,6 +6,7 @@ import {
   retryMinutes,
   type MinutesResult,
 } from '../api/client'
+import { Icon } from './Icon'
 
 interface MinutesViewProps {
   meetingId: string
@@ -108,6 +109,7 @@ export function MinutesView({ meetingId, canRetry, onRetried }: MinutesViewProps
               void handleRetry()
             }}
           >
+            <Icon name="refresh" size={12} />
             重试生成纪要
           </button>
         </div>

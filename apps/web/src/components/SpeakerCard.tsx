@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import WaveSurfer from 'wavesurfer.js'
 import { audioUrl, type DecisionKind, type ReviewCard } from '../api/client'
+import { Icon } from './Icon'
 
 /** 前端的决定草稿：只做体验层拦截，最终合法性以后端为准。 */
 export interface DecisionDraft {
@@ -133,7 +134,8 @@ export function SpeakerCard({
             className="clip-btn"
             onClick={() => playClipRef.current(clip.start_seconds, clip.end_seconds)}
           >
-            ▶ {formatSeconds(clip.start_seconds)}–{formatSeconds(clip.end_seconds)}
+            <Icon name="play" size={10} />
+            {formatSeconds(clip.start_seconds)}–{formatSeconds(clip.end_seconds)}
           </button>
         ))}
       </div>

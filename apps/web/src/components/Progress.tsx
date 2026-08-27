@@ -90,13 +90,18 @@ export function Progress({ meetingId, onSnapshot }: ProgressProps) {
         )}
       </div>
       <div className="progress-track" aria-hidden="true">
-        {PIPELINE_STEPS.map((step, index) => (
-          <span
-            key={step.key}
-            title={step.label}
-            className={`progress-seg${currentIndex >= 0 && index <= currentIndex ? ' filled' : ''}`}
-          />
-        ))}
+        {PIPELINE_STEPS.map((step, index) => {
+          // 已过步骤实心、当前步骤实心且轻微呼吸
+          const filled = currentIndex >= 0 && index <= currentIndex
+          const current = currentIndex >= 0 && index === currentIndex
+          return (
+            <span
+              key={step.key}
+              title={step.label}
+              className={`progress-seg${filled ? ' filled' : ''}${current ? ' current' : ''}`}
+            />
+          )
+        })}
       </div>
       {degraded && (
         <span className="progress-degraded">实时连接已断开，每 3 秒自动刷新</span>

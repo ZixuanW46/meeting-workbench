@@ -1,5 +1,6 @@
 import { useState, type KeyboardEvent } from 'react'
 import { createMeeting, formatApiError } from '../api/client'
+import { Icon } from '../components/Icon'
 
 const SPEAKER_CHOICES = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 
@@ -55,7 +56,8 @@ export function NewMeetingPage() {
   return (
     <div className="page">
       <a className="back-link" href="#/">
-        ← 返回会议列表
+        <Icon name="chevron-left" size={12} />
+        返回会议列表
       </a>
       <div className="page-header">
         <div>
@@ -118,7 +120,7 @@ export function NewMeetingPage() {
                   aria-label={`移除热词 ${word}`}
                   onClick={() => setHotwords(hotwords.filter((w) => w !== word))}
                 >
-                  ×
+                  <Icon name="close" size={10} />
                 </button>
               </span>
             ))}

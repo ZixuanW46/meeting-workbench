@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react'
 import * as tus from 'tus-js-client'
 import { formatApiError } from '../api/client'
+import { Icon } from './Icon'
 
 type Phase = 'idle' | 'uploading' | 'paused'
 
@@ -80,6 +81,9 @@ export function UploadPanel({
 
   return (
     <div className="upload-panel">
+      <span className="upload-icon">
+        <Icon name="mic" size={16} />
+      </span>
       <div>
         <div className="section-title">上传会议录音</div>
         <div className="section-desc">音频只在本机处理，不会上传到云端</div>
@@ -102,6 +106,7 @@ export function UploadPanel({
           disabled={file === null}
           onClick={startUpload}
         >
+          <Icon name="upload" size={12} />
           上传音频
         </button>
       ) : (
@@ -116,10 +121,12 @@ export function UploadPanel({
           </div>
           {phase === 'uploading' ? (
             <button type="button" className="btn" onClick={pause}>
+              <Icon name="pause" size={12} />
               暂停
             </button>
           ) : (
             <button type="button" className="btn btn-primary" onClick={resume}>
+              <Icon name="play" size={12} />
               继续
             </button>
           )}

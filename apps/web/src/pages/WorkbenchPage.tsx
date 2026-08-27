@@ -6,6 +6,7 @@ import {
   type Meeting,
 } from '../api/client'
 import { DoctorBanner } from '../components/DoctorBanner'
+import { Icon } from '../components/Icon'
 import { MinutesView } from '../components/MinutesView'
 import { Progress } from '../components/Progress'
 import { SpeakerReview } from '../components/SpeakerReview'
@@ -47,7 +48,8 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
     return (
       <div className="page">
         <a className="back-link" href="#/">
-          ← 返回会议列表
+          <Icon name="chevron-left" size={12} />
+          返回会议列表
         </a>
         {error !== null ? (
           <div className="notice notice-error">{error}</div>
@@ -61,7 +63,8 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
   return (
     <div className="page">
       <a className="back-link" href="#/">
-        ← 返回会议列表
+        <Icon name="chevron-left" size={12} />
+        返回会议列表
       </a>
       <div className="page-header">
         <div>
@@ -183,14 +186,17 @@ function ResultPanel({
         </div>
         <div className="export-links">
           <a className="btn" href={exportUrls.transcriptMd(meetingId)} download>
+            <Icon name="download" size={12} />
             导出转写 MD
           </a>
           {state === 'READY' && (
             <>
               <a className="btn" href={exportUrls.minutesMd(meetingId)} download>
+                <Icon name="download" size={12} />
                 导出纪要 MD
               </a>
               <a className="btn" href={exportUrls.minutesDocx(meetingId)} download>
+                <Icon name="download" size={12} />
                 导出纪要 DOCX
               </a>
             </>

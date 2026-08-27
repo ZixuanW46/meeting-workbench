@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getDoctor, type DoctorReport } from '../api/client'
+import { Icon } from './Icon'
 
 // 关闭只记本次会话（sessionStorage）：刷新标签页后若仍未就绪会再次提示
 const DISMISS_KEYS = {
@@ -98,7 +99,7 @@ export function DoctorBanner() {
             aria-label="关闭转写提示"
             onClick={() => dismiss('transcription')}
           >
-            ×
+            <Icon name="close" size={12} />
           </button>
         </div>
       )}
@@ -114,7 +115,7 @@ export function DoctorBanner() {
             aria-label="关闭纪要提示"
             onClick={() => dismiss('minutes')}
           >
-            ×
+            <Icon name="close" size={12} />
           </button>
         </div>
       )}

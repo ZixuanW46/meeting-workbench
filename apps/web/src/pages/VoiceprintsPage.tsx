@@ -5,6 +5,7 @@ import {
   listVoiceprints,
   type Voiceprint,
 } from '../api/client'
+import { Icon } from '../components/Icon'
 
 export function VoiceprintsPage() {
   const [voiceprints, setVoiceprints] = useState<Voiceprint[] | null>(null)
@@ -77,6 +78,7 @@ export function VoiceprintsPage() {
                   onClick={() => onDelete(voiceprint.id)}
                   aria-label={`删除 ${voiceprint.display_name} 的声纹`}
                 >
+                  <Icon name="trash" size={12} />
                   删除
                 </button>
               </div>

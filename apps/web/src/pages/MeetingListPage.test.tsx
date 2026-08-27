@@ -67,6 +67,25 @@ describe('会议列表页', () => {
     expect(screen.getByRole('link', { name: '新建会议' })).toBeInTheDocument()
   })
 
+  it('列表行带 hover 行尾箭头（图标装饰，不进可访问名）', async () => {
+    server.use(
+      http.get('/api/meetings', () => HttpResponse.json({ items: MEETINGS })),
+    )
+
+    const { container } = render(<MeetingListPage />)
+
+    await screen.findByText('产品周会')
+    const rows = container.querySelectorAll('.list-row')
+    expect(rows).toHaveLength(2)
+    for (const row of rows) {
+      const chevron = row.querySelector('.list-row-chevron')
+      expect(chevron).not.toBeNull()
+      expect(chevron).toHaveAttribute('aria-hidden', 'true')
+    }
+    // 行链接可访问名仍是标题本身
+    expect(screen.getByRole('link', { name: /产品周会/ })).toBeInTheDocument()
+  })
+
   it('空列表保留空态', async () => {
     server.use(http.get('/api/meetings', () => HttpResponse.json({ items: [] })))
 

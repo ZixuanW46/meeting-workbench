@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { formatApiError, listMeetings, type Meeting } from '../api/client'
 import { DoctorBanner } from '../components/DoctorBanner'
+import { Icon } from '../components/Icon'
 import { StateBadge } from '../components/StateBadge'
 
 function formatCreatedAt(value: string): string {
@@ -46,6 +47,7 @@ export function MeetingListPage() {
           <p className="page-subtitle">上传录音，确认说话人，得到转写与纪要</p>
         </div>
         <a className="btn btn-primary" href="#/new">
+          <Icon name="plus" size={12} />
           新建会议
         </a>
       </div>
@@ -61,6 +63,7 @@ export function MeetingListPage() {
               <div className="empty-title">还没有会议</div>
               <div>新建一场会议并上传录音，开始第一次转写</div>
               <a className="btn" href="#/new">
+                <Icon name="plus" size={12} />
                 新建第一场会议
               </a>
             </div>
@@ -76,6 +79,7 @@ export function MeetingListPage() {
                 <span className="list-row-meta">
                   {formatCreatedAt(meeting.created_at)}
                 </span>
+                <Icon name="chevron-right" size={12} className="list-row-chevron" />
               </a>
             ))
           )}

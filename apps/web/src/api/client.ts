@@ -242,6 +242,24 @@ export function deleteVoiceprint(voiceprintId: string): Promise<void> {
   return apiFetch<void>(`/api/voiceprints/${voiceprintId}`, { method: 'DELETE' })
 }
 
+export interface Hotword {
+  id: string
+  word: string
+}
+
+export async function listHotwords(): Promise<Hotword[]> {
+  const data = await apiFetch<{ items: Hotword[] }>('/api/hotwords')
+  return data.items
+}
+
+export function createHotword(word: string): Promise<Hotword> {
+  return postJson<Hotword>('/api/hotwords', { word })
+}
+
+export function deleteHotword(hotwordId: string): Promise<void> {
+  return apiFetch<void>(`/api/hotwords/${hotwordId}`, { method: 'DELETE' })
+}
+
 export function audioUrl(meetingId: string): string {
   return `/api/meetings/${meetingId}/audio`
 }

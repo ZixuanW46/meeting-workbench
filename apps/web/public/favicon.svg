@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- 近黑圆角底 + 白色三柱波形：与工作台的 Linear 近黑视觉一致 -->
+  <rect width="32" height="32" rx="7" fill="#0a0a0c"/>
+  <rect x="8" y="12" width="3" height="8" rx="1.5" fill="#e8e8ea"/>
+  <rect x="14.5" y="8" width="3" height="16" rx="1.5" fill="#e8e8ea"/>
+  <rect x="21" y="13" width="3" height="6" rx="1.5" fill="#8a8a90"/>
+</svg>

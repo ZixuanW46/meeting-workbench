@@ -32,12 +32,7 @@ export default function App() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <div className="sidebar-brand">
-          <span className="sidebar-brand-mark">
-            <Icon name="mic" size={12} />
-          </span>
-          会议工作台
-        </div>
+        <div className="sidebar-brand">会议工作台</div>
         <nav className="sidebar-nav">
           <a
             href="#/"

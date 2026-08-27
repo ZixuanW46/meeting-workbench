@@ -10,7 +10,7 @@ const css = readFileSync(join(process.cwd(), 'src/styles.css'), 'utf8')
 describe('Linear 近黑画布令牌', () => {
   it('画布是 #010102，而不是纯黑 #000000', () => {
     expect(css).toContain('--canvas: #010102')
-    expect(css).not.toContain('#000000')
+    expect(css).not.toContain('--canvas: #000000')
   })
 
   it('四级表面阶梯与发丝线取自 DESIGN.md', () => {
@@ -33,6 +33,17 @@ describe('Linear 近黑画布令牌', () => {
     expect(css).toContain('--primary: #5e6ad2')
     expect(css).toContain('--primary-hover: #828fff')
     expect(css).toContain('--primary-focus: #5e69d1')
+  })
+
+  it('强调 CTA 是 Linear button-inverse 白底，不用薰衣草填充', () => {
+    expect(css).toContain('--inverse-canvas: #ffffff')
+    const btnPrimary = /\.btn-primary\s*\{[^}]*\}/.exec(css)?.[0] ?? ''
+    expect(btnPrimary).toContain('background: var(--inverse-canvas)')
+    expect(btnPrimary).not.toContain('var(--primary)')
+  })
+
+  it('品牌标记已移除：CSS 里不再有 .sidebar-brand-mark', () => {
+    expect(css).not.toContain('.sidebar-brand-mark')
   })
 
   it('成功色只有 #27a644 一个营销色', () => {

@@ -43,19 +43,22 @@ def cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float:
 
 def match_voiceprint(
     candidate: Sequence[float],
-    enrolled: Mapping[str, Sequence[float]],
+    enrolled: Mapping[str, Sequence[Sequence[float]]],
 ) -> VoiceprintMatch | None:
     """在声纹库里找与候选向量最相似的人；不够相似返回 None。
 
-    这里只产生建议——落名永远来自用户在确认停点的决定。
+    每人可有多条模板（不同会议/环境各留一条），取其中最高余弦——
+    同一个人换了设备或房间，总有一条模板接得住。这里只产生建议——
+    落名永远来自用户在确认停点的决定。
     """
     best_person_id: str | None = None
     best_similarity = 0.0
     for person_id in sorted(enrolled):
-        similarity = cosine_similarity(candidate, enrolled[person_id])
-        if similarity > best_similarity:
-            best_person_id = person_id
-            best_similarity = similarity
+        for template in enrolled[person_id]:
+            similarity = cosine_similarity(candidate, template)
+            if similarity > best_similarity:
+                best_person_id = person_id
+                best_similarity = similarity
     if best_person_id is None or best_similarity < VOICEPRINT_SUGGEST_THRESHOLD:
         return None
     tier = (
@@ -64,6 +67,43 @@ def match_voiceprint(
         else SuggestionTier.UNCERTAIN
     )
     return VoiceprintMatch(person_id=best_person_id, tier=tier)
+
+
+# 每人模板上限：控住「取最高余弦」的误报面、把单次误挂污染限制在 1/K
+# 并可被淘汰、保持声纹库审核页在人工可核对的规模。
+TEMPLATE_CAP = 4
+
+# 与现有模板余弦达到该值视为冗余：没有信息增益，只刷新录音条件。
+TEMPLATE_REDUNDANCY_THRESHOLD = 0.9
+
+
+@dataclass(frozen=True)
+class EnrollmentPlan:
+    action: str  # "append" | "replace"
+    replace_index: int | None = None
+
+
+def plan_enrollment(
+    existing: Sequence[Sequence[float]],
+    candidate: Sequence[float],
+) -> EnrollmentPlan:
+    """多模板入库策略；existing 按入库时间升序（最旧在前）。
+
+    与某现有模板冗余（余弦 ≥0.9）→ 替换最相似那条（刷新录音条件而不是
+    堆重复）；未满上限 → 追加（保留环境多样性）；满了 → 替换最旧。
+    """
+    best_index: int | None = None
+    best_similarity = 0.0
+    for index, template in enumerate(existing):
+        similarity = cosine_similarity(candidate, template)
+        if similarity > best_similarity:
+            best_similarity = similarity
+            best_index = index
+    if best_index is not None and best_similarity >= TEMPLATE_REDUNDANCY_THRESHOLD:
+        return EnrollmentPlan(action="replace", replace_index=best_index)
+    if len(existing) < TEMPLATE_CAP:
+        return EnrollmentPlan(action="append")
+    return EnrollmentPlan(action="replace", replace_index=0)
 
 ENROLLABLE_DECISION_KINDS: frozenset[DecisionKind] = frozenset(
     {

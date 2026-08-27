@@ -413,10 +413,12 @@ class Worker:
             .order_by(Voiceprint.id)
         ).all()
         if voiceprints:
-            enrolled = {
-                voiceprint.person_id: embedding_from_bytes(voiceprint.embedding)
-                for voiceprint in voiceprints
-            }
+            # 每人一组模板（按 id 升序 = 入库时间升序），匹配取组内最高余弦。
+            enrolled: dict[str, list[tuple[float, ...]]] = {}
+            for voiceprint in voiceprints:
+                enrolled.setdefault(voiceprint.person_id, []).append(
+                    embedding_from_bytes(voiceprint.embedding)
+                )
             with self.model_slot.use(self.embedding_backend) as embedding_backend:
                 for cluster in clusters:
                     windows = _cluster_windows(speaker_segments, cluster.cluster_id)

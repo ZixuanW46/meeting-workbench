@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { formatApiError, listMeetings, type Meeting } from '../api/client'
+import { DoctorBanner } from '../components/DoctorBanner'
 import { StateBadge } from '../components/StateBadge'
 
 function formatCreatedAt(value: string): string {
@@ -48,6 +49,8 @@ export function MeetingListPage() {
           新建会议
         </a>
       </div>
+
+      <DoctorBanner />
 
       {error !== null && <div className="notice notice-error">{error}</div>}
 

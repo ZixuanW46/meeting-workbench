@@ -61,6 +61,29 @@ export interface MinutesResult {
   note: string
 }
 
+// GET /api/doctor 的响应，字段与后端 DoctorResponse 一一对应
+export interface DoctorModels {
+  asr: boolean
+  segmentation: boolean
+  embedding: boolean
+}
+
+export interface DoctorCli {
+  claude_available: boolean
+  claude_logged_in: boolean
+  codex_available: boolean
+  codex_logged_in: boolean
+}
+
+export interface DoctorReport {
+  ffmpeg: boolean
+  models: DoctorModels
+  cli: DoctorCli
+  disk_gb_free: number
+  transcription_ready: boolean
+  minutes_ready: boolean
+}
+
 export interface Voiceprint {
   id: string
   person_id: string
@@ -200,6 +223,10 @@ export function retryMinutes(meetingId: string): Promise<{ state: string }> {
 
 export function getTranscriptMarkdown(meetingId: string): Promise<string> {
   return apiFetchText(`/api/meetings/${meetingId}/export/transcript.md`)
+}
+
+export function getDoctor(): Promise<DoctorReport> {
+  return apiFetch<DoctorReport>('/api/doctor')
 }
 
 export async function listVoiceprints(): Promise<Voiceprint[]> {

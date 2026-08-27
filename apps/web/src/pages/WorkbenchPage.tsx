@@ -5,6 +5,7 @@ import {
   getMeeting,
   type Meeting,
 } from '../api/client'
+import { DoctorBanner } from '../components/DoctorBanner'
 import { MinutesView } from '../components/MinutesView'
 import { Progress } from '../components/Progress'
 import { SpeakerReview } from '../components/SpeakerReview'
@@ -84,6 +85,8 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
         </div>
       </div>
 
+      <DoctorBanner />
+
       {error !== null && <div className="notice notice-error">{error}</div>}
       {notice !== null && (
         <div className="notice notice-warn" style={{ marginBottom: 12 }}>
@@ -155,6 +158,12 @@ function ResultPanel({
 
   return (
     <section className="section">
+      {state === 'PARTIAL_READY' && (
+        <div className="notice notice-warn" style={{ marginBottom: 12 }}>
+          音频已转写并完成说话人确认；生成纪要需要本机 Claude 或 Codex
+          CLI，安装并登录后可在「纪要」页重试。
+        </div>
+      )}
       <div className="result-toolbar">
         <div className="tabs">
           <button

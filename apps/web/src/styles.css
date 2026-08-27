@@ -480,6 +480,35 @@ a {
   color: #4a53a8;
 }
 
+/* 就绪横幅：可堆叠、可关闭 */
+.doctor-banners {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.doctor-banner {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.notice-close {
+  flex: none;
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+.notice-close:hover {
+  opacity: 1;
+}
+
 /* ---------- 进度 ---------- */
 
 .progress-panel {

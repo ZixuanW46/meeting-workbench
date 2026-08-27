@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
+import { makeDoctorReport } from '../test/doctor'
 import { server } from '../test/server'
 import { MeetingListPage } from './MeetingListPage'
 
@@ -40,6 +41,30 @@ describe('会议列表页', () => {
       'href',
       '#/meetings/m1',
     )
+  })
+
+  it('doctor 未就绪时两条横幅同时出现，不挡列表与新建', async () => {
+    sessionStorage.clear()
+    server.use(
+      http.get('/api/meetings', () => HttpResponse.json({ items: MEETINGS })),
+      http.get('/api/doctor', () =>
+        HttpResponse.json(
+          makeDoctorReport({
+            ffmpeg: false,
+            transcription_ready: false,
+            minutes_ready: false,
+          }),
+        ),
+      ),
+    )
+
+    render(<MeetingListPage />)
+
+    expect(await screen.findByText(/转写暂不可用/)).toBeInTheDocument()
+    expect(await screen.findByText(/纪要暂不可用/)).toBeInTheDocument()
+    // 列表与新建入口照常可用
+    expect(await screen.findByText('产品周会')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '新建会议' })).toBeInTheDocument()
   })
 
   it('空列表保留空态', async () => {

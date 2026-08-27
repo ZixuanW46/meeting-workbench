@@ -9,7 +9,7 @@ export const STATE_LABELS: Record<string, string> = {
   APPLYING_DECISIONS: '应用决定中',
   GENERATING_MINUTES: '生成纪要中',
   READY: '已完成',
-  PARTIAL_READY: '纪要待重试',
+  PARTIAL_READY: '转写完成，纪要待生成',
   FAILED: '处理失败',
   CANCELED: '已取消',
 }

@@ -94,7 +94,8 @@ class CodexCliAdapter:
 class AutoMinutesAdapter:
     """真实运行的默认适配器：每次生成时按 PATH 探测本机 CLI。
 
-    优先 claude，其次 codex；都没有就抛 MinutesCliError，让会议走
+    优先 claude；claude 执行失败（未登录、配额不足）且本机有 codex 时
+    换通道再试一次；全部失败合并原因抛 MinutesCliError，让会议走
     PARTIAL_READY，绝不默默产出 fake 纪要。逐次探测保证用户装好 CLI
     后重试即可成功，无需重启服务。
     """
@@ -113,7 +114,24 @@ class AutoMinutesAdapter:
         raise MinutesCliError("本机未找到 claude 或 codex CLI，无法生成纪要")
 
     def generate(self, transcript: str) -> str:
-        return self.resolve().generate(transcript)
+        claude = shutil.which("claude", path=self.path)
+        codex = shutil.which("codex", path=self.path)
+        if claude is None and codex is None:
+            raise MinutesCliError("本机未找到 claude 或 codex CLI，无法生成纪要")
+        if claude is None:
+            return CodexCliAdapter(executable=codex).generate(transcript)
+        try:
+            return ClaudeCliAdapter(executable=claude).generate(transcript)
+        except MinutesCliError as claude_error:
+            if codex is None:
+                raise
+            # claude 在 PATH 但执行失败（最常见是未登录）：换 codex 通道重试。
+            try:
+                return CodexCliAdapter(executable=codex).generate(transcript)
+            except MinutesCliError as codex_error:
+                raise MinutesCliError(
+                    f"claude 失败：{claude_error}；codex 失败：{codex_error}"
+                ) from codex_error
 
 
 def resolve_minutes_adapter(backend: str) -> MinutesAdapter:

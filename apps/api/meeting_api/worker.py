@@ -19,6 +19,7 @@ from meeting_api.minutes.adapter import (
     MinutesCliError,
     resolve_minutes_adapter,
 )
+from meeting_api.minutes.prompt import build_minutes_prompt
 from meeting_api.models import (
     HotwordEntry,
     Meeting,
@@ -212,7 +213,7 @@ class Worker:
             target_dir.mkdir(parents=True, exist_ok=True)
             (target_dir / "transcript.txt").write_text(transcript, encoding="utf-8")
 
-            markdown = self.minutes_adapter.generate(transcript)
+            markdown = self.minutes_adapter.generate(build_minutes_prompt(transcript))
             if meeting.has_unconfirmed_speakers:
                 markdown = f"含未确认说话人\n\n{markdown}"
             (target_dir / "minutes.md").write_text(markdown, encoding="utf-8")

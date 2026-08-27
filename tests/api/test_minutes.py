@@ -115,6 +115,71 @@ def test_cli_error_makes_partial_ready_then_retry_can_succeed(client):
     assert client.get(f"/api/meetings/{meeting_id}/minutes").status_code == 200
 
 
+class RecordingAdapter:
+    """记录 worker 实际交给纪要 CLI 的提示词。"""
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def generate(self, transcript: str) -> str:
+        self.prompts.append(transcript)
+        return "# 会议纪要\n\n- 已生成"
+
+
+def test_worker_wraps_transcript_with_minutes_instructions(client):
+    # 裸逐字稿会让 CLI 自由发挥（解释、评论环境）；必须带明确任务指令。
+    meeting_id = _prepare_generating_minutes(client)
+    adapter = RecordingAdapter()
+    client.app.state.worker.minutes_adapter = adapter
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    (prompt,) = adapter.prompts
+    assert "会议纪要" in prompt
+    assert "只输出纪要正文" in prompt
+    assert "不要编造" in prompt
+    assert "假转写第一段" in prompt  # 逐字稿本体在指令之后
+    assert prompt.index("只输出纪要正文") < prompt.index("假转写第一段")
+
+    # 磁盘上的 transcript.txt 仍是纯逐字稿，不掺指令。
+    transcript_path = (
+        client.app.state.settings.data_dir / "meetings" / meeting_id / "transcript.txt"
+    )
+    text = transcript_path.read_text(encoding="utf-8")
+    assert "假转写第一段" in text
+    assert "只输出纪要正文" not in text
+
+
+def test_auto_adapter_falls_back_to_codex_when_claude_fails(tmp_path):
+    # 真机场景：claude 在 PATH 但未登录（或配额不足）时不该整场卡住，
+    # 本机若有 codex 就换通道再试一次。
+    both = tmp_path / "both"
+    both.mkdir()
+    _write_script(both / "claude", "echo 'Not logged in' >&2\nexit 1")
+    _write_script(both / "codex", "cat")
+
+    adapter = AutoMinutesAdapter(path=str(both))
+
+    assert adapter.generate("逐字稿正文") == "逐字稿正文"
+
+
+def test_auto_adapter_reports_both_errors_when_all_clis_fail(tmp_path):
+    both = tmp_path / "both"
+    both.mkdir()
+    _write_script(both / "claude", "echo 'Not logged in' >&2\nexit 1")
+    _write_script(both / "codex", "echo '配额不足' >&2\nexit 2")
+
+    adapter = AutoMinutesAdapter(path=str(both))
+
+    with pytest.raises(MinutesCliError) as excinfo:
+        adapter.generate("逐字稿正文")
+    message = str(excinfo.value)
+    assert "claude" in message
+    assert "codex" in message
+    assert "Not logged in" in message
+    assert "配额不足" in message
+
+
 def test_claude_command_uses_print_json_and_disables_file_tools():
     command = ClaudeCliAdapter().build_command()
 

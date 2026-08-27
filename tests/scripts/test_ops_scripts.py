@@ -4,9 +4,11 @@ import os
 import re
 import sqlite3
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from meeting_api.config import Settings
@@ -34,6 +36,9 @@ def _run(script: Path, *args: str, env: dict[str, str] | None = None):
         check=False,
         capture_output=True,
         text=True,
+        # macOS bash 3.2 的 printf %q 会把非 ASCII 仓库路径打成非法 UTF-8 字节，
+        # 宽松解码保证断言仍在文本层进行，而不是在 decode 阶段炸掉。
+        errors="backslashreplace",
     )
 
 
@@ -62,6 +67,9 @@ def test_mac_install_dry_run_is_safe_on_linux():
     assert "pip install -e .\\[mac\\]" in result.stdout
 
 
+@pytest.mark.skipif(
+    sys.platform == "darwin", reason="断言的是非 macOS 的跳过分支，只能在 Linux 上验证"
+)
 def test_mac_install_non_darwin_skips_without_running_install_commands(tmp_path):
     marker = tmp_path / "install-command-called"
     fake_bin = tmp_path / "bin"

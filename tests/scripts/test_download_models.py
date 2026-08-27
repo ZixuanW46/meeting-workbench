@@ -3,7 +3,10 @@ from __future__ import annotations
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "download_models.sh"
@@ -28,6 +31,9 @@ def _run(*, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         check=False,
         capture_output=True,
         text=True,
+        # macOS bash 3.2 的 printf %q 会把非 ASCII 仓库路径打成非法 UTF-8 字节，
+        # 宽松解码保证断言仍在文本层进行，而不是在 decode 阶段炸掉。
+        errors="backslashreplace",
     )
 
 
@@ -51,6 +57,9 @@ def test_download_models_script_is_executable_and_has_valid_bash_syntax():
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.skipif(
+    sys.platform == "darwin", reason="断言的是非 macOS 的跳过分支，只能在 Linux 上验证"
+)
 def test_non_darwin_skips_without_creating_model_files(tmp_path):
     data_dir = tmp_path / "data"
 

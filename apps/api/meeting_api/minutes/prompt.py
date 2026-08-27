@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 MINUTES_PROMPT_HEADER = (
     "你是会议纪要助手。请根据下面的会议逐字稿，用中文输出一份 Markdown 会议纪要，"
     "结构依次为：一级标题（会议主题）、参会人、议题与结论、行动项（表格列：事项、"
@@ -18,5 +20,20 @@ MINUTES_PROMPT_HEADER = (
 )
 
 
-def build_minutes_prompt(transcript: str) -> str:
+def build_minutes_prompt(transcript: str, *, template: str | None = None) -> str:
+    """template 非空时覆盖默认指令头；逐字稿始终附在指令之后。"""
+    if template is not None:
+        return f"{template.rstrip()}\n\n会议逐字稿：\n{transcript}"
     return f"{MINUTES_PROMPT_HEADER}{transcript}"
+
+
+def load_minutes_template(data_dir: Path) -> str | None:
+    """读取 data_dir/minutes_prompt.md 作为自定义指令头；不存在或为空返回 None。
+
+    用户借此不改代码即可调整纪要风格与结构；文件属本机数据，不入 git。
+    """
+    try:
+        text = (data_dir / "minutes_prompt.md").read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return text or None

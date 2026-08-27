@@ -150,6 +150,38 @@ def test_worker_wraps_transcript_with_minutes_instructions(client):
     assert "只输出纪要正文" not in text
 
 
+def test_custom_minutes_template_overrides_default_instructions(client):
+    # data/minutes_prompt.md 存在即覆盖默认指令头；逐字稿仍附在其后，
+    # 用户可以不改代码调纪要风格。
+    meeting_id = _prepare_generating_minutes(client)
+    (client.app.state.settings.data_dir / "minutes_prompt.md").write_text(
+        "请用一句话总结本次会议。", encoding="utf-8"
+    )
+    adapter = RecordingAdapter()
+    client.app.state.worker.minutes_adapter = adapter
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    (prompt,) = adapter.prompts
+    assert prompt.startswith("请用一句话总结本次会议。")
+    assert "只输出纪要正文" not in prompt
+    assert "假转写第一段" in prompt
+
+
+def test_blank_minutes_template_falls_back_to_default(client):
+    meeting_id = _prepare_generating_minutes(client)
+    (client.app.state.settings.data_dir / "minutes_prompt.md").write_text(
+        "   \n", encoding="utf-8"
+    )
+    adapter = RecordingAdapter()
+    client.app.state.worker.minutes_adapter = adapter
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    (prompt,) = adapter.prompts
+    assert "只输出纪要正文" in prompt
+
+
 def test_auto_adapter_falls_back_to_codex_when_claude_fails(tmp_path):
     # 真机场景：claude 在 PATH 但未登录（或配额不足）时不该整场卡住，
     # 本机若有 codex 就换通道再试一次。

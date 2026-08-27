@@ -16,12 +16,14 @@ from fastapi.responses import Response
 from meeting_api.models import Meeting
 from meeting_api.schemas import UploadResponse
 from meeting_api.storage import (
+    AudioTranscodeError,
     EmptyUploadError,
     clear_pending_uploads,
     create_pending_upload,
     get_pending_upload,
     remove_pending_upload,
     save_stream,
+    transcode_audio_if_needed,
 )
 from meeting_domain import InvalidTransition, MeetingState, transition
 
@@ -162,7 +164,17 @@ def upload_audio(
                 file.filename,
                 file.file,
             )
+            saved = transcode_audio_if_needed(
+                request.app.state.settings,
+                meeting.id,
+                saved,
+            )
         except EmptyUploadError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+        except AudioTranscodeError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=str(exc),
@@ -300,6 +312,18 @@ async def patch_tus_upload(
                     pending.filename,
                     stream,
                 )
+                try:
+                    saved = transcode_audio_if_needed(
+                        request.app.state.settings,
+                        meeting.id,
+                        saved,
+                    )
+                except AudioTranscodeError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail=str(exc),
+                        headers=TUS_HEADERS,
+                    ) from exc
             meeting.audio_filename = saved.filename
             meeting.audio_sha256 = saved.sha256
             meeting.audio_size = saved.size

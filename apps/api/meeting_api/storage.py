@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -28,6 +29,20 @@ class PendingUpload:
 
 class EmptyUploadError(ValueError):
     pass
+
+
+class AudioTranscodeError(RuntimeError):
+    pass
+
+
+def _describe_file(path: Path) -> SavedUpload:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+            size += len(chunk)
+    return SavedUpload(filename=path.name, size=size, sha256=digest.hexdigest())
 
 
 def meeting_dir(settings: Settings, meeting_id: str) -> Path:
@@ -135,3 +150,51 @@ def save_stream(
         raise EmptyUploadError("音频文件不能为空")
 
     return SavedUpload(filename=safe_filename, size=size, sha256=digest.hexdigest())
+
+
+def transcode_audio_if_needed(
+    settings: Settings,
+    meeting_id: str,
+    saved: SavedUpload,
+) -> SavedUpload:
+    """把需要兼容的压缩音频转为 16kHz 单声道 PCM WAV。"""
+    if Path(saved.filename).suffix.lower() not in {".mp3", ".m4a", ".aac"}:
+        return saved
+
+    raw_dir = meeting_dir(settings, meeting_id) / "raw"
+    source = raw_dir / saved.filename
+    wav_filename = f"{Path(saved.filename).stem}.wav"
+    target = raw_dir / wav_filename
+    command = [
+        "ffmpeg",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(source),
+        "-c:a",
+        "pcm_s16le",
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        str(target),
+    ]
+
+    try:
+        completed = subprocess.run(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        source.unlink(missing_ok=True)
+        raise AudioTranscodeError("未找到 ffmpeg，无法完成音频转码") from exc
+
+    if completed.returncode != 0 or not target.is_file() or target.stat().st_size == 0:
+        source.unlink(missing_ok=True)
+        target.unlink(missing_ok=True)
+        raise AudioTranscodeError("音频转码失败，请检查音频文件是否损坏")
+
+    source.unlink(missing_ok=True)
+    return _describe_file(target)

@@ -77,6 +77,29 @@ def test_get_review_returns_cards_with_samples_and_text_without_fake_precision(c
     assert not ({key.lower() for key in _all_keys(body)} & forbidden)
 
 
+def test_get_review_clips_carry_transcript_and_people_directory(client):
+    # 每个试听片段带该时间窗内的逐段转写摘录；建议身份给显示名（无数值置信度）；
+    # 附全局人员清单，供「换成其他人 / 从声纹库选择」下拉使用。
+    meeting_id = _prepare_review(client)
+
+    body = client.get(f"/api/meetings/{meeting_id}/review").json()
+
+    cards = {card["cluster_id"]: card for card in body["cards"]}
+    s1_clips = cards["S1"]["sample_clips"]
+    assert all("text" in clip for clip in s1_clips)
+    # fake 流水线：S1 的第一个片段 [0,5) 覆盖假转写第一段；[10,15) 无转写落在其上。
+    assert "假转写第一段" in s1_clips[0]["text"]
+    assert s1_clips[1]["text"] == ""
+    assert "假转写第二段" in cards["S2"]["sample_clips"][0]["text"]
+
+    assert cards["S1"]["suggested_display_name"] == "已知用户 1"
+    assert cards["S2"]["suggested_display_name"] is None
+
+    assert body["people"] == [
+        {"id": "fake-person-1", "display_name": "已知用户 1"}
+    ]
+
+
 def test_all_decisions_advance_state_and_apply_final_labels(client):
     meeting_id = _prepare_review(client)
 

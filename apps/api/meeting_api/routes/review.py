@@ -30,6 +30,8 @@ class ReviewSample(BaseModel):
 
     start_seconds: float
     end_seconds: float
+    # 该时间窗内、同簇的逐段转写摘录；无覆盖时为空串。
+    text: str = ""
 
 
 class ReviewCard(BaseModel):
@@ -37,14 +39,25 @@ class ReviewCard(BaseModel):
 
     cluster_id: str
     suggested_person_id: str | None
+    # 建议身份的显示名：定性表达，绝不附带数值置信度。
+    suggested_display_name: str | None
     sample_clips: list[ReviewSample]
     text: str
+
+
+class ReviewPerson(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    display_name: str
 
 
 class ReviewResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     cards: list[ReviewCard]
+    # 全局人员清单：供「换成其他人 / 从声纹库选择」下拉使用。
+    people: list[ReviewPerson]
 
 
 class DecisionPayload(BaseModel):
@@ -115,19 +128,52 @@ def get_review(meeting_id: str, request: Request) -> ReviewResponse:
         for segment in segments:
             text_by_cluster.setdefault(segment.cluster_id, []).append(segment.text)
 
+        people = session.scalars(
+            select(Person).order_by(Person.display_name, Person.id)
+        ).all()
+        name_by_id = {person.id: person.display_name for person in people}
+
+        def clip_text(cluster_id: str, start: float, end: float) -> str:
+            texts = [
+                segment.text
+                for segment in segments
+                if segment.cluster_id == cluster_id
+                and segment.start_seconds < end
+                and segment.end_seconds > start
+            ]
+            joined = " ".join(texts)
+            if len(joined) > 160:
+                return f"{joined[:160]}…"
+            return joined
+
         return ReviewResponse(
             cards=[
                 ReviewCard(
                     cluster_id=cluster.cluster_id,
                     suggested_person_id=cluster.suggested_person_id,
+                    suggested_display_name=name_by_id.get(cluster.suggested_person_id)
+                    if cluster.suggested_person_id is not None
+                    else None,
                     sample_clips=[
-                        ReviewSample.model_validate(sample)
+                        ReviewSample(
+                            start_seconds=sample["start_seconds"],
+                            end_seconds=sample["end_seconds"],
+                            text=clip_text(
+                                cluster.cluster_id,
+                                sample["start_seconds"],
+                                sample["end_seconds"],
+                            ),
+                        )
                         for sample in json.loads(cluster.sample_clips_json)
                     ],
                     text="\n".join(text_by_cluster.get(cluster.cluster_id, [])),
                 )
                 for cluster in clusters
-            ]
+            ],
+            people=[
+                ReviewPerson(id=person.id, display_name=person.display_name)
+                for person in people
+            ],
         )
 
 

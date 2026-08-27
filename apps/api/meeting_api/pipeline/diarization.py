@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -11,6 +12,66 @@ class SpeakerSegment:
     start: float  # 秒
     end: float
     cluster_id: str  # 本场内的说话人簇代号，如 "S1"
+
+
+# 总时长低于该值的簇撑不起人工试听判断，视为切分噪声（笑声、插话、拖尾）。
+FRAGMENT_CLUSTER_MAX_SECONDS = 3.0
+
+
+def consolidate_fragment_clusters(
+    segments: Sequence[SpeakerSegment],
+    *,
+    min_cluster_seconds: float = FRAGMENT_CLUSTER_MAX_SECONDS,
+) -> list[SpeakerSegment]:
+    """把总时长过短的碎簇并入时间上最近的主簇。
+
+    真实音频的自动聚类几乎必产亚秒碎簇，曾让确认包准备整场 FAILED。
+    这里只重排时间轴上的簇标签，不做任何身份判断——身份仍只能来自用户
+    在确认停点的决定；总时长达标的单次发言者会原样保留。
+    """
+    if not segments:
+        return []
+    totals: dict[str, float] = {}
+    for segment in segments:
+        totals[segment.cluster_id] = (
+            totals.get(segment.cluster_id, 0.0) + segment.end - segment.start
+        )
+    majors = {
+        cluster_id
+        for cluster_id, total in totals.items()
+        if total >= min_cluster_seconds
+    }
+    if not majors:
+        # 全是碎簇的极端输入：留总时长最大的当锚，保证停点仍有簇可确认。
+        majors = {max(totals, key=lambda cluster_id: (totals[cluster_id], cluster_id))}
+    major_segments = [
+        segment for segment in segments if segment.cluster_id in majors
+    ]
+
+    def nearest_major_id(fragment: SpeakerSegment) -> str:
+        def gap(candidate: SpeakerSegment) -> float:
+            if candidate.end < fragment.start:
+                return fragment.start - candidate.end
+            if fragment.end < candidate.start:
+                return candidate.start - fragment.end
+            return 0.0
+
+        best = min(
+            major_segments,
+            key=lambda candidate: (
+                gap(candidate),
+                -totals[candidate.cluster_id],
+                candidate.cluster_id,
+            ),
+        )
+        return best.cluster_id
+
+    return [
+        segment
+        if segment.cluster_id in majors
+        else SpeakerSegment(segment.start, segment.end, nearest_major_id(segment))
+        for segment in segments
+    ]
 
 
 class DiarizationBackend(Protocol):

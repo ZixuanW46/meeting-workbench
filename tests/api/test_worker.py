@@ -189,8 +189,8 @@ def test_models_use_single_slot_and_are_never_loaded_together(client):
     assert not diarization.loaded
 
 
-class SparseDiarization(FakeDiarizationBackend):
-    """某簇只有 1 段：让失败发生在片段已落库之后的准备确认包步骤。"""
+class SingleTurnDiarization(FakeDiarizationBackend):
+    """S2 只发言一次但时长足够：是真实说话人，必须保留并给出 1 个试听片段。"""
 
     def diarize(self, audio_path: Path, expected_speakers=None):
         del expected_speakers
@@ -203,16 +203,73 @@ class SparseDiarization(FakeDiarizationBackend):
         ]
 
 
-def test_late_failure_after_processing_commit_still_lands_in_failed(client):
+def test_single_turn_cluster_reaches_review_with_one_clip(client):
+    # 回归：过去「每簇必须凑满 2 个试听片段」会把单次发言者整场打成 FAILED。
     meeting_id = _queue_meeting(client)
 
-    _worker(client, diarization_backend=SparseDiarization()).process_next()
+    _worker(client, diarization_backend=SingleTurnDiarization()).process_next()
+
+    detail = client.get(f"/api/meetings/{meeting_id}")
+    assert detail.json()["state"] == "AWAITING_SPEAKER_REVIEW"
+    with client.app.state.session_factory() as session:
+        clusters = {
+            cluster.cluster_id: json.loads(cluster.sample_clips_json)
+            for cluster in session.scalars(
+                select(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
+            )
+        }
+    assert set(clusters) == {"S1", "S2"}
+    assert len(clusters["S1"]) == 2
+    assert len(clusters["S2"]) == 1
+
+
+class FragmentDiarization(FakeDiarizationBackend):
+    """真实音频常见输出：主簇之外混着一个亚秒碎簇 S9。"""
+
+    def diarize(self, audio_path: Path, expected_speakers=None):
+        del expected_speakers
+        if not self.loaded:
+            raise RuntimeError("diarization 后端未加载（先 load()）")
+        return [
+            SpeakerSegment(0.0, 5.0, "S1"),
+            SpeakerSegment(5.0, 10.0, "S2"),
+            SpeakerSegment(10.0, 15.0, "S1"),
+            SpeakerSegment(15.2, 15.8, "S9"),
+            SpeakerSegment(16.0, 21.0, "S2"),
+        ]
+
+
+def test_fragment_cluster_is_merged_and_meeting_reaches_review(client):
+    meeting_id = _queue_meeting(client)
+
+    _worker(client, diarization_backend=FragmentDiarization()).process_next()
+
+    detail = client.get(f"/api/meetings/{meeting_id}")
+    assert detail.json()["state"] == "AWAITING_SPEAKER_REVIEW"
+    with client.app.state.session_factory() as session:
+        clusters = session.scalars(
+            select(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
+        ).all()
+    assert {cluster.cluster_id for cluster in clusters} == {"S1", "S2"}
+
+
+class FailingEmbedding(FakeEmbeddingBackend):
+    def embed(self, audio_path: Path, cluster_id: str):
+        raise RuntimeError("fake embedding 故障")
+
+
+def test_late_failure_after_segments_commit_still_lands_in_failed(client):
+    # 声纹匹配发生在转写片段已落库之后：晚期异常仍要回滚并落 FAILED。
+    meeting_id = _queue_meeting(client)
+    _seed_s1_voiceprint(client)
+
+    _worker(client, embedding_backend=FailingEmbedding()).process_next()
 
     with client.app.state.session_factory() as session:
         meeting = session.get(Meeting, meeting_id)
         assert meeting.state == "FAILED"
-        assert meeting.processing_step == "PREPARING_REVIEW"
-        assert "S2" in meeting.processing_error
+        assert meeting.processing_step == "VOICEPRINT_MATCHING"
+        assert "fake embedding 故障" in meeting.processing_error
 
     # 失败后队列不被卡住：下一场照常处理。
     other_id = _queue_meeting(client, "下一场")

@@ -29,6 +29,7 @@ from meeting_api.pipeline.asr import AsrBackend, AsrSegment, get_asr_backend
 from meeting_api.pipeline.diarization import (
     DiarizationBackend,
     SpeakerSegment,
+    consolidate_fragment_clusters,
     get_diarization_backend,
 )
 from meeting_api.pipeline.embedding import (
@@ -163,6 +164,9 @@ class Worker:
                         audio_path,
                         expected_speakers=meeting.expected_speakers,
                     )
+                # 真实音频的自动聚类几乎必产亚秒碎簇；并入最近主簇后再落库，
+                # 否则确认包准备会因「凑不齐试听片段」整场失败。
+                speaker_segments = consolidate_fragment_clusters(speaker_segments)
                 self._persist_segments(session, meeting_id, asr_segments, speaker_segments)
 
                 self._set_step(session, meeting, STEP_VOICEPRINT_MATCHING)
@@ -405,8 +409,9 @@ class Worker:
                 for segment in speaker_segments
                 if segment.cluster_id == cluster.cluster_id
             ][:3]
-            if len(samples) < 2:
-                raise ValueError(f"说话人簇 {cluster.cluster_id} 缺少足够的试听片段")
+            # 单次发言者只有 1 个片段也合法；0 片段说明簇与片段已不一致，属数据错误。
+            if len(samples) < 1:
+                raise ValueError(f"说话人簇 {cluster.cluster_id} 没有任何试听片段")
             cluster.sample_clips_json = json.dumps(samples, ensure_ascii=False)
         session.commit()
 

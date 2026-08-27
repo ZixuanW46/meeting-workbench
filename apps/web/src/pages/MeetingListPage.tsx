@@ -20,6 +20,9 @@ function formatCreatedAt(value: string): string {
 export function MeetingListPage() {
   const [meetings, setMeetings] = useState<Meeting[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const awaitingCount =
+    meetings?.filter((meeting) => meeting.state === 'AWAITING_SPEAKER_REVIEW')
+      .length ?? 0
 
   useEffect(() => {
     let stale = false
@@ -44,7 +47,13 @@ export function MeetingListPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">会议</h1>
-          <p className="page-subtitle">上传录音，确认说话人，得到转写与纪要</p>
+          <p className="page-subtitle">
+            {meetings !== null && meetings.length > 0
+              ? `${meetings.length} 场会议${
+                  awaitingCount > 0 ? ` · ${awaitingCount} 场等你确认说话人` : ''
+                }`
+              : '上传录音，确认说话人，得到转写与纪要'}
+          </p>
         </div>
         <a className="btn btn-primary" href="#/new">
           <Icon name="plus" size={12} />
@@ -74,11 +83,16 @@ export function MeetingListPage() {
                 className="list-row"
                 href={`#/meetings/${meeting.id}`}
               >
-                <span className="list-row-title">{meeting.title}</span>
-                <StateBadge state={meeting.state} />
-                <span className="list-row-meta">
-                  {formatCreatedAt(meeting.created_at)}
+                <span className="list-row-main">
+                  <span className="list-row-title">{meeting.title}</span>
+                  <span className="list-row-meta">
+                    {meeting.expected_speakers !== null
+                      ? `预计 ${meeting.expected_speakers} 人 · `
+                      : ''}
+                    {formatCreatedAt(meeting.created_at)}
+                  </span>
                 </span>
+                <StateBadge state={meeting.state} />
                 <Icon name="chevron-right" size={12} className="list-row-chevron" />
               </a>
             ))

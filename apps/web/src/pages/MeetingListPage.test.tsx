@@ -43,6 +43,20 @@ describe('会议列表页', () => {
     )
   })
 
+  it('列表行两行式：标题下带人数与时间；副标题显示统计', async () => {
+    server.use(http.get('/api/meetings', () => HttpResponse.json({ items: MEETINGS })))
+
+    render(<MeetingListPage />)
+
+    await screen.findByText('产品周会')
+    // 副标题：总数 + 等确认数
+    expect(screen.getByText('2 场会议 · 1 场等你确认说话人')).toBeInTheDocument()
+    // 行内第二行：预计人数 + 创建时间（人数未填的行只有时间）
+    expect(screen.getByText(/预计 4 人 · /)).toBeInTheDocument()
+    const rows = screen.getAllByRole('link', { name: /评审|周会/ })
+    expect(rows).toHaveLength(2)
+  })
+
   it('doctor 未就绪时两条横幅同时出现，不挡列表与新建', async () => {
     sessionStorage.clear()
     server.use(

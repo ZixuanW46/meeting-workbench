@@ -61,11 +61,6 @@ export default function App() {
             词库
           </a>
         </nav>
-        <div className="sidebar-foot">
-          音频与转写全程本机处理
-          <br />
-          仅纪要文本经本机 CLI 调用云端
-        </div>
       </aside>
       <main className="main">{page}</main>
     </div>

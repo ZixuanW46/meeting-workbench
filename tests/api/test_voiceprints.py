@@ -136,7 +136,15 @@ def test_list_voiceprints_exposes_only_identity_metadata(client):
     assert set(body) == {"items"}
     items = body["items"]
     assert len(items) == 1
-    assert set(items[0]) == {"id", "person_id", "display_name"}
+    assert set(items[0]) == {
+        "id",
+        "person_id",
+        "display_name",
+        "created_at",
+        "source_meeting_title",
+        "snippet_text",
+        "has_clip",
+    }
     assert items[0]["display_name"] == "王芳"
 
     flattened = list(_walk(body))
@@ -228,3 +236,84 @@ def test_review_card_suggestion_carries_only_two_qualitative_tiers(client):
     assert cards["S1"]["suggested_tier"] == "high"
     assert cards["S2"]["suggested_person_id"] is None
     assert cards["S2"]["suggested_tier"] is None
+
+
+def test_list_carries_template_provenance_for_manual_audit(client):
+    # 声纹库页人工核对需要：来源会议标题（不是路径）、该窗转写摘录、
+    # 是否有试听切片、入库时间。
+    meeting_id = _prepare_review(client, title="出处核对")
+    _submit_new_person_and_unknown(client, meeting_id)
+
+    items = client.get("/api/voiceprints").json()["items"]
+
+    assert len(items) == 1
+    assert items[0]["source_meeting_title"] == "出处核对"
+    assert "假转写第一段" in items[0]["snippet_text"]
+    assert items[0]["created_at"] is not None
+    # fake 字节音频切不出片：如实报 False，端点返回 409。
+    assert items[0]["has_clip"] is False
+    audio = client.get(f"/api/voiceprints/{items[0]['id']}/audio")
+    assert audio.status_code == 409
+
+
+def test_template_audio_endpoint_streams_clip_and_404s_unknown(client):
+    import io
+    import wave as wave_module
+
+    created = client.post(
+        "/api/meetings", json={"title": "切片试听", "expected_speakers": 2}
+    )
+    meeting_id = created.json()["id"]
+    buffer = io.BytesIO()
+    with wave_module.open(buffer, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(16000)
+        writer.writeframes(b"\x00\x00" * int(16000 * 20))
+    client.post(
+        f"/api/meetings/{meeting_id}/upload",
+        files={"file": ("meeting.wav", buffer.getvalue(), "audio/wav")},
+    )
+    assert client.app.state.worker.process_next() == meeting_id
+    _submit_new_person_and_unknown(client, meeting_id)
+
+    items = client.get("/api/voiceprints").json()["items"]
+    assert items[0]["has_clip"] is True
+
+    audio = client.get(f"/api/voiceprints/{items[0]['id']}/audio")
+    assert audio.status_code == 200
+    assert audio.headers["content-type"].startswith("audio/")
+    assert len(audio.content) > 44
+
+    assert client.get("/api/voiceprints/deadbeef/audio").status_code == 404
+
+
+def test_delete_voiceprint_also_removes_clip_file(client):
+    import io
+    import wave as wave_module
+
+    created = client.post(
+        "/api/meetings", json={"title": "删除清片", "expected_speakers": 2}
+    )
+    meeting_id = created.json()["id"]
+    buffer = io.BytesIO()
+    with wave_module.open(buffer, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(16000)
+        writer.writeframes(b"\x00\x00" * int(16000 * 20))
+    client.post(
+        f"/api/meetings/{meeting_id}/upload",
+        files={"file": ("meeting.wav", buffer.getvalue(), "audio/wav")},
+    )
+    assert client.app.state.worker.process_next() == meeting_id
+    _submit_new_person_and_unknown(client, meeting_id)
+    items = client.get("/api/voiceprints").json()["items"]
+    clip_path = (
+        client.app.state.settings.data_dir / "voiceprints" / f"{items[0]['id']}.wav"
+    )
+    assert clip_path.is_file()
+
+    assert client.delete(f"/api/voiceprints/{items[0]['id']}").status_code == 204
+
+    assert not clip_path.exists()

@@ -535,6 +535,39 @@ a {
   background: var(--hairline-tertiary);
 }
 
+/* 声纹库：按人分组的多模板列表 */
+.voiceprint-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.voiceprint-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface-2);
+}
+
+.voiceprint-template .list-row-meta {
+  font-variant-numeric: tabular-nums;
+}
+
+.voiceprint-snippet {
+  font-size: 13px;
+  color: var(--ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voiceprint-no-clip {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* 空态 */
 .empty {
   padding: 48px 20px;

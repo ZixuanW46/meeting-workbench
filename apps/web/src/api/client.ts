@@ -101,6 +101,14 @@ export interface Voiceprint {
   id: string
   person_id: string
   display_name: string
+  /** 入库时间（ISO），0010 之前的存量模板为 null */
+  created_at: string | null
+  /** 模板来源会议标题；绝不是文件路径 */
+  source_meeting_title: string | null
+  /** 该模板试听窗对应的转写摘录 */
+  snippet_text: string
+  /** 是否有试听切片可播放 */
+  has_clip: boolean
 }
 
 export class ApiError extends Error {
@@ -255,6 +263,10 @@ export async function listVoiceprints(): Promise<Voiceprint[]> {
 
 export function deleteVoiceprint(voiceprintId: string): Promise<void> {
   return apiFetch<void>(`/api/voiceprints/${voiceprintId}`, { method: 'DELETE' })
+}
+
+export function voiceprintAudioUrl(voiceprintId: string): string {
+  return `/api/voiceprints/${voiceprintId}/audio`
 }
 
 export interface Hotword {

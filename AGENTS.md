@@ -13,7 +13,7 @@
 1. **先写失败测试**：按 ROADMAP 该节「先写失败测试」列的用例写测试，跑一遍确认它们**因缺实现而失败**（不是因语法错误失败）。
 2. **最薄实现**：只写让这些测试变绿的代码，不顺手做下一个 milestone 的事。
 3. **全绿**：`make test`（后端 pytest + 前端 vitest）+ `make lint`（ruff + tsc）全部通过。
-4. **提交**：一个 milestone 一个（或少数几个）commit，message 以 milestone id 开头，如 `M1: 新建会议闭环`。
+4. **提交**：遵循 [Conventional Commits](https://www.conventionalcommits.org/)——`type(scope): 摘要`，type 限 `feat` / `fix` / `test` / `docs` / `refactor` / `perf` / `chore`；milestone 交付时把 milestone id 写进 scope（如 `feat(M22): 新建会议闭环`），日常修复/优化可省略 scope。一个逻辑变更一个 commit，正文写清动机与验证方式；禁止把无关文件捆进同一个 commit。
 
 ## 常用命令
 

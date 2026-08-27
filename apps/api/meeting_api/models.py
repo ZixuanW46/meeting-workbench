@@ -68,10 +68,15 @@ class Voiceprint(Base):
     __tablename__ = "voiceprints"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    # 每人可有多条模板（上限与淘汰见 meeting_domain.plan_enrollment）。
     person_id: Mapped[str] = mapped_column(
-        ForeignKey("persons.id", ondelete="CASCADE"), unique=True, index=True
+        ForeignKey("persons.id", ondelete="CASCADE"), index=True
     )
     embedding: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime | None] = mapped_column(default=_now)
+    # 模板来源会议与该模板试听切片对应的转写摘录，供声纹库页人工核对。
+    source_meeting_id: Mapped[str | None] = mapped_column(String(32), default=None)
+    snippet_text: Mapped[str] = mapped_column(Text, default="", server_default="")
 
 
 class TranscriptSegment(Base):
@@ -103,6 +108,10 @@ class SpeakerCluster(Base):
     sample_clips_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]")
     # M10 fake 质量：默认合格；测试可显式降分，不引入真实 VAD。
     quality_score: Mapped[float] = mapped_column(Float, default=1.0, server_default="1.0")
+    # 簇声纹（匹配阶段写入），供「按声纹就近归属」在决定应用时复用。
+    embedding: Mapped[bytes | None] = mapped_column(LargeBinary, default=None)
+    # 身份来源：NULL=人工直接决定；voiceprint_nearest=用户授权的就近归属。
+    assigned_via: Mapped[str | None] = mapped_column(String(32), default=None)
     person_id: Mapped[str | None] = mapped_column(
         ForeignKey("persons.id"), default=None
     )

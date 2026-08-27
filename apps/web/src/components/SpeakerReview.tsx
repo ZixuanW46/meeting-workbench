@@ -4,6 +4,7 @@ import {
   getReview,
   submitDecisions,
   type ReviewCard,
+  type ReviewPerson,
   type ReviewSubmitResult,
   type SpeakerDecisionInput,
 } from '../api/client'
@@ -25,6 +26,9 @@ function toDecision(clusterId: string, draft: DecisionDraft): SpeakerDecisionInp
   if (draft.kind === 'MERGE_WITH_CLUSTER') {
     decision.merge_into_cluster_id = draft.merge_into_cluster_id
   }
+  if (draft.kind === 'REASSIGN' || draft.kind === 'LINK_EXISTING') {
+    decision.person_id = draft.person_id
+  }
   return decision
 }
 
@@ -34,6 +38,7 @@ export function SpeakerReview({
   onSubmitted,
 }: SpeakerReviewProps) {
   const [cards, setCards] = useState<ReviewCard[] | null>(null)
+  const [people, setPeople] = useState<ReviewPerson[]>([])
   const [drafts, setDrafts] = useState<Record<string, DecisionDraft>>({})
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -44,6 +49,7 @@ export function SpeakerReview({
       .then((review) => {
         if (!stale) {
           setCards(review.cards)
+          setPeople(review.people ?? [])
         }
       })
       .catch((e: unknown) => {
@@ -105,7 +111,7 @@ export function SpeakerReview({
         </div>
       )}
       <div className="review-cards">
-        {cards.map((card) => (
+        {cards.map((card, index) => (
           <SpeakerCard
             key={card.cluster_id}
             meetingId={meetingId}
@@ -113,6 +119,8 @@ export function SpeakerReview({
             otherClusterIds={cards
               .map((c) => c.cluster_id)
               .filter((clusterId) => clusterId !== card.cluster_id)}
+            people={people}
+            anonymousIndex={index + 1}
             draft={drafts[card.cluster_id]}
             onChange={(draft) =>
               setDrafts((prev) => ({ ...prev, [card.cluster_id]: draft }))

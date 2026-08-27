@@ -19,13 +19,22 @@ export interface MeetingCreateInput {
 export interface ReviewSample {
   start_seconds: number
   end_seconds: number
+  /** 该时间窗内、同簇的逐段转写摘录；无覆盖时为空串 */
+  text: string
 }
 
 export interface ReviewCard {
   cluster_id: string
   suggested_person_id: string | null
+  /** 建议身份显示名：定性表达，后端绝不附带数值置信度 */
+  suggested_display_name: string | null
   sample_clips: ReviewSample[]
   text: string
+}
+
+export interface ReviewPerson {
+  id: string
+  display_name: string
 }
 
 export type DecisionKind =
@@ -198,7 +207,9 @@ export function uploadAudio(
   return apiFetch(`/api/meetings/${meetingId}/upload`, { method: 'POST', body: form })
 }
 
-export function getReview(meetingId: string): Promise<{ cards: ReviewCard[] }> {
+export function getReview(
+  meetingId: string,
+): Promise<{ cards: ReviewCard[]; people: ReviewPerson[] }> {
   return apiFetch(`/api/meetings/${meetingId}/review`)
 }
 

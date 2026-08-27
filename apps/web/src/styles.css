@@ -802,40 +802,70 @@ a {
   white-space: pre-wrap;
 }
 
-.waveform {
+/* 试听子卡：每段片段一张，含播放键 + 片段波形（带进度）+ 时间码 + 逐段转写 */
+.speaker-clips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.clip-card {
   border: 1px solid var(--hairline);
   border-radius: var(--radius-md);
-  padding: 4px 8px;
   background: var(--surface-2);
-  min-height: 20px;
-}
-
-.clip-row {
+  padding: 8px 10px;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 6px;
-  align-items: center;
 }
 
-.clip-btn {
-  font: inherit;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
+.clip-card-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.clip-play {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface-3);
+  color: var(--ink-muted);
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  border: 1px solid var(--hairline-strong);
-  background: var(--surface-2);
-  border-radius: var(--radius-pill);
-  padding: 2px 10px;
-  color: var(--ink-subtle);
+  justify-content: center;
   cursor: pointer;
+  flex: none;
+  padding: 0;
+  font: inherit;
   transition: border-color 0.12s var(--ease), color 0.12s var(--ease);
 }
 
-.clip-btn:hover {
+.clip-play:hover {
   border-color: var(--primary);
   color: var(--primary-hover);
+}
+
+.clip-wave {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  display: block;
+}
+
+.clip-time {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-tertiary);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+.clip-text {
+  font-size: 13px;
+  color: var(--ink-subtle);
+  line-height: 1.55;
 }
 
 .decision-options {

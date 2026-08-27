@@ -1,6 +1,11 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import WaveSurfer from 'wavesurfer.js'
-import { audioUrl, type DecisionKind, type ReviewCard } from '../api/client'
+import {
+  audioUrl,
+  type DecisionKind,
+  type ReviewCard,
+  type ReviewPerson,
+} from '../api/client'
 import { Icon } from './Icon'
 
 /** 前端的决定草稿：只做体验层拦截，最终合法性以后端为准。 */
@@ -8,6 +13,7 @@ export interface DecisionDraft {
   kind: DecisionKind
   display_name?: string
   merge_into_cluster_id?: string
+  person_id?: string
 }
 
 export function draftValid(draft: DecisionDraft | undefined): boolean {
@@ -20,14 +26,23 @@ export function draftValid(draft: DecisionDraft | undefined): boolean {
   if (draft.kind === 'MERGE_WITH_CLUSTER') {
     return (draft.merge_into_cluster_id ?? '') !== ''
   }
+  if (draft.kind === 'REASSIGN' || draft.kind === 'LINK_EXISTING') {
+    return (draft.person_id ?? '') !== ''
+  }
   return true
 }
+
+const ANONYMOUS_KINDS = new Set<DecisionKind>(['KEEP_UNKNOWN', 'UNDECIDED_UNKNOWN'])
 
 interface SpeakerCardProps {
   meetingId: string
   card: ReviewCard
   /** 本场其他簇代号，给「与其他说话人合并」选目标用 */
   otherClusterIds: string[]
+  /** 全局人员清单，给「换成其他人 / 从声纹库选择」下拉用 */
+  people: ReviewPerson[]
+  /** 保持匿名时的编号：纪要与转写会以「说话人 N」引用 */
+  anonymousIndex: number
   draft: DecisionDraft | undefined
   onChange: (draft: DecisionDraft) => void
 }
@@ -38,18 +53,96 @@ function formatSeconds(value: number): string {
   return `${minutes}:${seconds.toFixed(1).padStart(4, '0')}`
 }
 
+/** 从整段解码峰值里切出片段的条形波形（48 根柱，0–1 振幅） */
+function clipBars(
+  peaks: number[],
+  duration: number,
+  start: number,
+  end: number,
+): number[] {
+  if (peaks.length === 0 || duration <= 0 || end <= start) {
+    return []
+  }
+  const from = Math.floor((start / duration) * peaks.length)
+  const to = Math.max(from + 1, Math.ceil((end / duration) * peaks.length))
+  const slice = peaks.slice(from, to)
+  const bars: number[] = []
+  const BAR_COUNT = 48
+  for (let i = 0; i < BAR_COUNT; i += 1) {
+    const lo = Math.floor((i / BAR_COUNT) * slice.length)
+    const hi = Math.max(lo + 1, Math.floor(((i + 1) / BAR_COUNT) * slice.length))
+    let peak = 0
+    for (let j = lo; j < hi; j += 1) {
+      peak = Math.max(peak, Math.abs(slice[j] ?? 0))
+    }
+    bars.push(peak)
+  }
+  return bars
+}
+
+function ClipWave({
+  bars,
+  progress,
+  clipId,
+}: {
+  bars: number[]
+  progress: number
+  clipId: string
+}) {
+  const rects = bars.map((value, index) => {
+    const height = Math.max(2, value * 22)
+    return (
+      <rect
+        key={index}
+        x={index * 4}
+        y={12 - height / 2}
+        width={2}
+        height={height}
+        rx={1}
+      />
+    )
+  })
+  return (
+    <svg
+      className="clip-wave"
+      viewBox="0 0 192 24"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      <defs>
+        <clipPath id={clipId}>
+          <rect x="0" y="0" width={progress * 192} height="24" />
+        </clipPath>
+      </defs>
+      <g fill="#3e3e44">{rects}</g>
+      {progress > 0 && (
+        <g fill="#5e6ad2" clipPath={`url(#${clipId})`}>
+          {rects}
+        </g>
+      )}
+    </svg>
+  )
+}
+
 export function SpeakerCard({
   meetingId,
   card,
   otherClusterIds,
+  people,
+  anonymousIndex,
   draft,
   onChange,
 }: SpeakerCardProps) {
-  const waveformRef = useRef<HTMLDivElement>(null)
-  const playClipRef = useRef<(start: number, end: number) => void>(() => {})
+  const containerRef = useRef<HTMLDivElement>(null)
+  const surferRef = useRef<WaveSurfer | null>(null)
+  const activeRef = useRef<{ key: string; start: number; end: number } | null>(null)
+  const [peaks, setPeaks] = useState<number[] | null>(null)
+  const [decodedDuration, setDecodedDuration] = useState(0)
+  const [activeKey, setActiveKey] = useState<string | null>(null)
+  const [progress, setProgress] = useState(0)
 
   useEffect(() => {
-    const container = waveformRef.current
+    const container = containerRef.current
     if (container === null) {
       return
     }
@@ -58,58 +151,105 @@ export function SpeakerCard({
       surfer = WaveSurfer.create({
         container,
         url: audioUrl(meetingId),
-        height: 36,
-        waveColor: '#3e3e44',
-        progressColor: '#5e6ad2',
-        cursorColor: '#5e6ad2',
-        cursorWidth: 1,
-        barWidth: 2,
-        barGap: 1,
-        barRadius: 2,
+        height: 0,
         normalize: true,
         interact: false,
       })
     } catch {
-      // 环境不支持（如测试）时静默降级：无波形也能做决定
+      // 环境不支持（如测试）时静默降级：无波形也能试听与决定
       return
     }
     const ws = surfer
-    let stopAt: number | null = null
+    surferRef.current = ws
+    ws.on('decode', () => {
+      try {
+        // 峰值只用于绘制片段波形；导出失败不影响试听
+        const exporter = ws as unknown as {
+          exportPeaks?: (options: {
+            channels?: number
+            maxLength?: number
+          }) => number[][]
+        }
+        const exported = exporter.exportPeaks?.({ channels: 1, maxLength: 2000 })
+        const first = exported?.[0]
+        if (first !== undefined && first.length > 0) {
+          setPeaks(first)
+          setDecodedDuration(ws.getDuration())
+        }
+      } catch {
+        // 保持无波形展示
+      }
+    })
     ws.on('timeupdate', (time: number) => {
-      if (stopAt !== null && time >= stopAt) {
-        stopAt = null
+      const active = activeRef.current
+      if (active === null) {
+        return
+      }
+      const span = active.end - active.start
+      setProgress(span > 0 ? Math.min(1, Math.max(0, (time - active.start) / span)) : 0)
+      if (time >= active.end) {
+        activeRef.current = null
+        setActiveKey(null)
+        setProgress(0)
         ws.pause()
       }
     })
-    playClipRef.current = (start, end) => {
-      try {
-        stopAt = end
-        ws.setTime(start)
-        void ws.play()
-      } catch {
-        stopAt = null
-      }
-    }
     return () => {
-      playClipRef.current = () => {}
+      activeRef.current = null
+      surferRef.current = null
       ws.destroy()
     }
   }, [meetingId])
+
+  const toggleClip = (key: string, start: number, end: number) => {
+    const ws = surferRef.current
+    if (ws === null) {
+      return
+    }
+    if (activeRef.current?.key === key) {
+      activeRef.current = null
+      setActiveKey(null)
+      setProgress(0)
+      try {
+        ws.pause()
+      } catch {
+        // 忽略暂停失败
+      }
+      return
+    }
+    try {
+      activeRef.current = { key, start, end }
+      setActiveKey(key)
+      setProgress(0)
+      ws.setTime(start)
+      void ws.play()
+    } catch {
+      activeRef.current = null
+      setActiveKey(null)
+    }
+  }
 
   const setKind = (kind: DecisionKind) => {
     onChange({ kind })
   }
 
+  const anonymousLabel = `保持匿名（标为说话人 ${anonymousIndex}）`
   const options: Array<{ kind: DecisionKind; label: string }> =
     card.suggested_person_id !== null
       ? [
           { kind: 'CONFIRM', label: '确认建议身份' },
-          { kind: 'KEEP_UNKNOWN', label: '保持未知' },
+          ...(people.length > 0
+            ? [{ kind: 'REASSIGN' as DecisionKind, label: '换成其他人' }]
+            : []),
+          { kind: 'KEEP_UNKNOWN', label: anonymousLabel },
         ]
       : [
           { kind: 'NEW_PERSON', label: '新建人' },
+          ...(people.length > 0
+            ? [{ kind: 'LINK_EXISTING' as DecisionKind, label: '从声纹库选择' }]
+            : []),
           { kind: 'MERGE_WITH_CLUSTER', label: '与其他说话人合并' },
-          { kind: 'UNDECIDED_UNKNOWN', label: '暂不确定' },
+          { kind: 'UNDECIDED_UNKNOWN', label: anonymousLabel },
         ]
 
   return (
@@ -118,31 +258,62 @@ export function SpeakerCard({
         <span className="speaker-card-name">说话人 {card.cluster_id}</span>
         {card.suggested_person_id !== null ? (
           // 建议身份只有「较高 / 需判断」的定性表达，绝不显示百分比
-          <span className="speaker-chip suggested">有建议身份 · 需判断</span>
+          <span className="speaker-chip suggested">
+            建议：{card.suggested_display_name ?? '已知声纹'} · 需判断
+          </span>
         ) : (
           <span className="speaker-chip">未识别到已知声纹</span>
         )}
+        {draft !== undefined && ANONYMOUS_KINDS.has(draft.kind) && (
+          <span className="speaker-chip">将标为：说话人 {anonymousIndex}</span>
+        )}
       </div>
 
-      <div ref={waveformRef} className="waveform" />
-      <div className="clip-row">
-        <span className="form-hint">试听片段</span>
-        {card.sample_clips.map((clip) => (
-          <button
-            key={`${clip.start_seconds}-${clip.end_seconds}`}
-            type="button"
-            className="clip-btn"
-            onClick={() => playClipRef.current(clip.start_seconds, clip.end_seconds)}
-          >
-            <Icon name="play" size={10} />
-            {formatSeconds(clip.start_seconds)}–{formatSeconds(clip.end_seconds)}
-          </button>
-        ))}
+      <div ref={containerRef} style={{ display: 'none' }} />
+      <div className="speaker-clips">
+        {card.sample_clips.map((clip) => {
+          const key = `${clip.start_seconds}-${clip.end_seconds}`
+          const playing = activeKey === key
+          const bars =
+            peaks !== null
+              ? clipBars(peaks, decodedDuration, clip.start_seconds, clip.end_seconds)
+              : []
+          const range = `${formatSeconds(clip.start_seconds)}–${formatSeconds(clip.end_seconds)}`
+          return (
+            <div key={key} className="clip-card">
+              <div className="clip-card-row">
+                <button
+                  type="button"
+                  className="clip-play"
+                  aria-label={playing ? `暂停 ${range}` : `试听 ${range}`}
+                  onClick={() =>
+                    toggleClip(key, clip.start_seconds, clip.end_seconds)
+                  }
+                >
+                  <Icon name={playing ? 'pause' : 'play'} size={10} />
+                </button>
+                {bars.length > 0 ? (
+                  <ClipWave
+                    bars={bars}
+                    progress={playing ? progress : 0}
+                    clipId={`clip-${card.cluster_id}-${key}`}
+                  />
+                ) : (
+                  <span className="clip-wave" />
+                )}
+                <span className="clip-time">{range}</span>
+              </div>
+              {clip.text !== '' && <div className="clip-text">{clip.text}</div>}
+            </div>
+          )
+        })}
       </div>
 
-      {card.text !== '' && <div className="speaker-text">{card.text}</div>}
-
-      <div className="decision-options" role="radiogroup" aria-label={`说话人 ${card.cluster_id} 的决定`}>
+      <div
+        className="decision-options"
+        role="radiogroup"
+        aria-label={`说话人 ${card.cluster_id} 的决定`}
+      >
         {options.map((option) => (
           <label key={option.kind} className="decision-option">
             <input
@@ -166,6 +337,26 @@ export function SpeakerCard({
               onChange({ kind: 'NEW_PERSON', display_name: event.target.value })
             }
           />
+        </div>
+      )}
+
+      {(draft?.kind === 'REASSIGN' || draft?.kind === 'LINK_EXISTING') && (
+        <div className="decision-extra">
+          <select
+            className="select"
+            aria-label="选择已有人"
+            value={draft.person_id ?? ''}
+            onChange={(event) =>
+              onChange({ kind: draft.kind, person_id: event.target.value })
+            }
+          >
+            <option value="">从声纹库选择</option>
+            {people.map((person) => (
+              <option key={person.id} value={person.id}>
+                {person.display_name}
+              </option>
+            ))}
+          </select>
         </div>
       )}
 

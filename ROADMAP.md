@@ -330,3 +330,61 @@
 **验收命令**：`make test` + Mac 上 `scripts/mac_install.sh && launchctl list | grep meeting`
 
 **明确不做**：Linux+GPU 安装包、多用户、外网访问、自动更新。
+
+---
+
+## M14 — 系统就绪检测（doctor + auto 后端）
+
+**目标**：本机缺 ffmpeg / 模型 / Claude / Codex 时，脚本和 API 都能人话说明；Darwin 且模型齐全则自动走真实后端，否则 fake。
+
+**先写失败测试**：
+- GET /api/doctor 报告 ffmpeg、模型文件、claude/codex 是否在 PATH、是否已登录（官方 doctor/whoami，禁止 --bare）
+- asr/diarization/embedding 后端加 auto：Linux 或模型不全 → fake；Darwin 且模型目录齐全 → 真实后端
+- /api/settings/minutes-cli 可保留，内部走同一套探测
+- scripts/doctor.sh bash -n + DRY 可测
+
+**明确不做**：不拉模型、不装 brew 包、不改 apps/web。
+
+---
+
+## M15 — 上传音频转码
+
+**目标**：MP3/M4A/AAC 在入库为 QUEUED 之前用 ffmpeg 转成 16kHz 单声道 WAV；已是 WAV/FLAC/OGG 则跳过。缺 ffmpeg 或转码失败 → 422 人话。
+
+**先写失败测试**：multipart 与 tus 完成都走转码；假 ffmpeg 锁定参数；缺二进制 422。
+
+**明确不做**：不在浏览器转码、不改 apps/web、不拉模型。
+
+---
+
+## M16 — 一键安装与模型落地
+
+**目标**：mac_install.sh 自动 brew 装 ffmpeg/node，并调用 download_models.sh 拉取公开 ASR 与 sherpa onnx（GitHub Releases / 公开 HF 仓库）。安装末尾跑 doctor。Linux 跳过模型与 brew。
+
+**先写失败测试**：DRY_RUN 命令序列；非 Darwin 跳过；已有模型不重复拉。
+
+**明确不做**：不代登 Hugging Face / Claude / Codex；CI 不拉模型。
+
+---
+
+## M17 — 前端就绪横幅（Fable 5）
+
+**目标**：列表和工作台读 GET /api/doctor。转写未就绪红条，纪要 CLI 未就绪黄条，可关闭。PARTIAL_READY 人话文案。
+
+**明确不做**：Codex 不改 apps/web。
+
+---
+
+## M18 — 开源仓库外壳
+
+**目标**：MIT LICENSE、README 改成 clone + mac_install.sh、gitignore 补 .env/logs/backups、GitHub Actions 只跑 fake 测试。
+
+**明确不做**：不强行创建 GitHub remote（需 Will 建库）。
+
+---
+
+## M19 — 前端高级感重构（Fable 5）
+
+**目标**：仍模仿 Linear：克制、浅色、细边框、紧凑。但要比现在更高级——统一图标、间距/字号节奏、状态色、轻微 micro-interaction（hover、列表行、按钮、进度），不要花哨仪表盘，不要回到 Ant Design 企业风。
+
+**验收**：截图对比列表 / 新建 / 工作台 / 说话人确认 / 声纹库；vitest 全绿。

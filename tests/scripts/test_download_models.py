@@ -1,0 +1,121 @@
+from __future__ import annotations
+
+import os
+import stat
+import subprocess
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = REPO_ROOT / "scripts" / "download_models.sh"
+SEGMENTATION_URL = (
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/"
+    "speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"
+)
+EMBEDDING_URL = (
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/"
+    "speaker-recongition-models/"
+    "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
+)
+
+
+def _run(*, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    command_env = os.environ.copy()
+    command_env.update(env)
+    return subprocess.run(
+        ["bash", str(SCRIPT)],
+        cwd=REPO_ROOT,
+        env=command_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _write_command_stub(bin_dir: Path, name: str, calls_file: Path) -> None:
+    stub = bin_dir / name
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        f"printf '%s\\n' '{name}' >> '{calls_file}'\n"
+        "exit 97\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+
+
+def test_download_models_script_is_executable_and_has_valid_bash_syntax():
+    assert SCRIPT.is_file()
+    assert SCRIPT.stat().st_mode & stat.S_IXUSR
+    result = subprocess.run(
+        ["bash", "-n", str(SCRIPT)], check=False, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_non_darwin_skips_without_creating_model_files(tmp_path):
+    data_dir = tmp_path / "data"
+
+    result = _run(env={"MW_DATA_DIR": str(data_dir)})
+
+    assert result.returncode == 0, result.stderr
+    assert "非 macOS，跳过模型下载" in result.stdout
+    assert not list(tmp_path.rglob("*.onnx"))
+    assert not list(tmp_path.rglob("*.safetensors"))
+
+
+def test_dry_run_prints_all_downloads_without_network_or_writes(tmp_path):
+    data_dir = tmp_path / "data"
+    calls_file = tmp_path / "network-calls"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for command in ("curl", "huggingface-cli"):
+        _write_command_stub(bin_dir, command, calls_file)
+
+    result = _run(
+        env={
+            "DRY_RUN": "1",
+            "MW_DATA_DIR": str(data_dir),
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        }
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "huggingface-cli" in result.stdout
+    assert "mlx-community/Qwen3-ASR-1.7B-8bit" in result.stdout
+    assert SEGMENTATION_URL in result.stdout
+    assert EMBEDDING_URL in result.stdout
+    assert "segmentation.onnx" in result.stdout
+    assert "embedding.onnx" in result.stdout
+    assert "tar" in result.stdout
+    assert not calls_file.exists()
+    assert not data_dir.exists()
+
+
+def test_existing_models_do_not_invoke_download_commands(tmp_path):
+    data_dir = tmp_path / "data"
+    asr_dir = data_dir / "models" / "qwen3-asr-mlx"
+    sherpa_dir = data_dir / "models" / "sherpa-onnx"
+    asr_dir.mkdir(parents=True)
+    sherpa_dir.mkdir(parents=True)
+    (asr_dir / "config.json").write_text("{}", encoding="utf-8")
+    (sherpa_dir / "segmentation.onnx").write_bytes(b"existing")
+    (sherpa_dir / "embedding.onnx").write_bytes(b"existing")
+    calls_file = tmp_path / "download-calls"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for command in ("curl", "huggingface-cli"):
+        _write_command_stub(bin_dir, command, calls_file)
+
+    result = _run(
+        env={
+            # 仅供 Linux 测试覆盖 Darwin 下载分支，生产安装不应设置此变量。
+            "MW_FORCE_DARWIN": "1",
+            "MW_DATA_DIR": str(data_dir),
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        }
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not calls_file.exists()
+    assert (asr_dir / "config.json").read_text(encoding="utf-8") == "{}"
+    assert (sherpa_dir / "segmentation.onnx").read_bytes() == b"existing"
+    assert (sherpa_dir / "embedding.onnx").read_bytes() == b"existing"

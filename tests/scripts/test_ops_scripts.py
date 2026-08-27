@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO_ROOT / "scripts"
 NEW_SCRIPTS = [
     SCRIPTS / "mac_install.sh",
+    SCRIPTS / "download_models.sh",
     SCRIPTS / "backup.sh",
     SCRIPTS / "restore.sh",
     SCRIPTS / "launchd" / "install_launchd.sh",
@@ -53,6 +54,31 @@ def test_mac_install_dry_run_is_safe_on_linux():
     assert "Python 3.12" in result.stdout
     assert "Alembic" in result.stdout
     assert "前端" in result.stdout
+    assert "ffmpeg" in result.stdout
+    assert "node" in result.stdout
+    assert "download_models.sh" in result.stdout
+    assert "doctor.sh" in result.stdout
+
+
+def test_mac_install_non_darwin_skips_without_running_install_commands(tmp_path):
+    marker = tmp_path / "install-command-called"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for command in ("brew", "python3.12", "npm", "huggingface-cli"):
+        stub = fake_bin / command
+        stub.write_text(
+            f"#!/usr/bin/env bash\ntouch '{marker}'\nexit 99\n", encoding="utf-8"
+        )
+        stub.chmod(0o755)
+
+    result = _run(
+        SCRIPTS / "mac_install.sh",
+        env={"PATH": f"{fake_bin}:{os.environ['PATH']}"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "非 macOS" in result.stdout
+    assert not marker.exists()
 
 
 def test_launchd_files_exist_and_install_dry_run_does_not_execute_launchctl(tmp_path):

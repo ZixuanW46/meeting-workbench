@@ -1,8 +1,21 @@
-# M12 本地模型准备（仅 macOS）
+# M16 本地模型准备（仅 macOS）
 
-模型权重不由本项目下载。请 Will 用浏览器或自己信任的下载工具手动取得下列文件，
-并放进 `MW_DATA_DIR` 下的 `models/`；未设置 `MW_DATA_DIR` 时就是仓库内的
-`data/models/`。
+首选直接运行公开模型下载脚本：
+
+```bash
+./scripts/download_models.sh
+```
+
+脚本只在 macOS 下载，不执行 Hugging Face 登录，也不需要 token；若已设置
+`HF_ENDPOINT` 会原样尊重。模型放进 `MW_DATA_DIR` 下的 `models/`；未设置
+`MW_DATA_DIR` 时就是仓库内的 `data/models/`。Linux 测试机可先预览命令：
+
+```bash
+DRY_RUN=1 ./scripts/download_models.sh
+```
+
+脚本还识别 `MW_FORCE_DARWIN=1`，但它仅供自动化测试覆盖非 DRY 的 Darwin
+分支，不应在生产安装中设置。
 
 最终目录必须是：
 
@@ -19,7 +32,7 @@ data/models/
 
 ## Qwen3-ASR MLX
 
-手动下载 mlx-audio 支持的 Qwen3-ASR MLX 模型仓库完整内容，例如
+若自动脚本不可用，可手动下载 mlx-audio 支持的 Qwen3-ASR MLX 模型仓库完整内容，例如
 `mlx-community/Qwen3-ASR-1.7B-8bit`，原样放到
 `data/models/qwen3-asr-mlx/`。不要只复制某一个 safetensors 分片；
 `config.json`、tokenizer 文件、全部权重分片和索引必须在同一目录。
@@ -31,7 +44,7 @@ data/models/
 
 ## sherpa-onnx 说话人模型
 
-手动下载两个 ONNX 文件，并按代码读取的固定名称落盘：
+若自动脚本不可用，可手动下载两个 ONNX 文件，并按代码读取的固定名称落盘：
 
 1. Pyannote segmentation 3.0 的 `model.onnx`，改名为
    `data/models/sherpa-onnx/segmentation.onnx`。
@@ -39,10 +52,10 @@ data/models/
    `3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx`，改名为
    `data/models/sherpa-onnx/embedding.onnx`。
 
-文件来源见 sherpa-onnx 官方发布页：
+直接下载地址：
 
-- <https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models>
-- <https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models>
+- <https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2>
+- <https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx>
 
 ## 本机检查
 

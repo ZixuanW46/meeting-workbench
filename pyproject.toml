@@ -27,6 +27,7 @@ dev = [
 # 真实模型后端只在 Mac Mini 上安装（CI/Linux 开发机一律跑 fake）。
 # 不要在这里加任何会触发模型权重下载的包。
 mac = [
+    "huggingface-hub[cli]>=0.27,<1; sys_platform == 'darwin'",
     "mlx>=0.21; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "mlx-audio>=0.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "numpy>=2.0; sys_platform == 'darwin'",

@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      MW_ASR_BACKEND: fake
+      MW_DIARIZATION_BACKEND: fake
+      MW_EMBEDDING_BACKEND: fake
+      MW_MINUTES_BACKEND: fake
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: 安装 Python 开发依赖
+        run: python -m pip install -e ".[dev]"
+      - name: 安装前端依赖
+        run: npm ci --prefix apps/web
+      - name: 运行测试
+        run: make test
+      - name: 运行静态检查
+        run: make lint

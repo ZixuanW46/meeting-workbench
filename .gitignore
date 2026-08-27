@@ -6,6 +6,12 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
+# 本地配置、日志与备份
+.env
+.env.local
+*.log
+backups/
+
 # Node
 node_modules/
 apps/web/dist/

@@ -1,66 +1,71 @@
 # meeting-workbench 会议纪要工作台
 
-本地会议工作台：上传录音 → 本地转写 + 认人 → **人工确认说话人**（唯一必经停点）→ 用本机已登录的 Claude Code / Codex CLI 生成纪要。音频永不上云；只有纪要文本会经本机 CLI 发给 Claude/OpenAI。
+面向线下会议的本地工作台：上传录音、本地转写与说话人分析、人工确认说话人，再用本机已登录的 Claude Code 或 Codex CLI 生成纪要。身份确认始终由人完成，未知说话人也是合法结果。
 
-v1 目标机：**M4 Mac Mini（16GB 统一内存），原生 macOS，无 Docker**。默认使用 fake 后端；M12 起可在 Mac 上按 `scripts/download_models.md` 手动准备 Qwen3-ASR MLX 与 sherpa-onnx 模型后，通过环境变量启用真实后端。
+## 快速开始
 
-## 在 Mac Mini（macOS，Apple Silicon）上启动
-
-前置：Homebrew。**不要用 Docker**（Docker-on-Mac 吃不到 Metal，16GB 内存也经不起虚拟机开销）。
+运行环境为 macOS Apple Silicon，推荐 M4 Mac Mini。请先安装 [Homebrew](https://brew.sh/)；安装脚本会通过 Homebrew 补齐 Python 3.12、Node 和 ffmpeg，建立虚拟环境、安装前端、迁移数据库、准备模型并执行就绪检查。
 
 ```bash
-brew install python@3.12 node
-
-git clone <本仓库> && cd meeting-workbench
-
-# 后端：venv + 依赖
-python3.12 -m venv .venv
-.venv/bin/pip install -U pip
-.venv/bin/pip install -e ".[dev]"
-# Mac 上启用真实模型时再安装：.venv/bin/pip install -e ".[mac]"
-
-# 前端依赖
-cd apps/web && npm install && cd ../..
-
-# 建库（SQLite，落在 ./data/）
-make migrate
-
-# 起两个终端：
-make dev-api   # FastAPI  → http://localhost:8000（/healthz 自检）
-make dev-web   # 前端     → http://localhost:5173（/api 自动代理到 8000）
+git clone <repo> && cd meeting-workbench
+./scripts/mac_install.sh
 ```
 
-打开 http://localhost:5173 即可。开机自启（launchd）与一键安装脚本在 ROADMAP M13 交付。
+Qwen3-ASR 与 sherpa-onnx 都是公开模型；公开模型无需 Hugging Face token，也不要登录 Hugging Face。模型文件只保存在本机 `data/models/`。
 
-### 16GB 内存须知
-
-- 模型严格串行加载（代码里 `SingleModelSlot` 强制）：转写完卸载再做切分/声纹。
-- 一小时录音按会后批处理预估 15–30 分钟；处理期间少开 Chrome 标签，一旦 swap 时长会翻数倍。
-- 这些数字仅供自用，不构成对外性能承诺。
-
-## 开发（Linux / macOS 通用）
+纪要功能需要用户自己登录一个本机 CLI；安装脚本不会代登，也不会读取或保存登录 token：
 
 ```bash
-make setup   # venv + npm install
-make migrate # 真实运行前用 Alembic 建库或升级数据库
-make test    # 后端 pytest + 前端 vitest（验收命令）
-make lint    # ruff + tsc --noEmit
+claude /login
+# 或
+codex login
 ```
 
-测试不需要网络、不需要模型权重、不需要先跑迁移。环境里没有 `make` 时用 `./scripts/test.sh`（等效 `make test`）。
+需要开机自启时安装已有的 launchd 配置：
+
+```bash
+./scripts/launchd/install_launchd.sh
+```
+
+launchd 中的 API 只绑定 `127.0.0.1:8000`，不会监听局域网地址。安装完成后由同机浏览器访问工作台。
+
+## 数据与隐私
+
+- 音频、转写、说话人信息、声纹和数据库均留在 `data/`，音频不出本机。
+- 纪要只走用户已登录的本机 CLI：Claude 使用 `claude -p --output-format json`，Codex 使用 `codex exec`。禁止 `--bare`，也不读取 CLI token。
+- 使用云端 CLI 时，纪要生成所需的文本会由该 CLI 发送给相应服务；音频和模型权重不会随请求发送。
+- 模型在本机串行使用，以适应 16GB 统一内存；实际耗时取决于录音与机器负载，不作为对外性能承诺。
+
+## 开发
+
+Linux 与 macOS 开发环境都默认使用 fake 后端，测试不需要网络、模型权重或预先迁移数据库。
+
+```bash
+make setup      # 建立虚拟环境并安装 Python、前端依赖
+make test       # pytest + vitest
+make lint       # ruff + tsc --noEmit
+make migrate    # 本地运行前升级 SQLite 结构
+make dev-api    # API 开发服务
+make dev-web    # Web 开发服务
+```
+
+本机没有 `make` 时，使用 `./scripts/test.sh` 运行完整测试。API 和 Web 开发服务也可直接按 `Makefile` 中的等价命令启动。
 
 ## 目录结构
 
-```
-apps/api/       FastAPI + SQLAlchemy + Alembic（SQLite）
-apps/web/       Vite + React + TS + Ant Design
-packages/domain 纯领域逻辑（状态机、确认规则…），零框架依赖
-tests/          后端 + 领域 pytest
-scripts/        运维/启动脚本（逐步补齐）
-data/           本机数据（音频、SQLite、声纹），不入 git
+```text
+apps/api/        FastAPI + SQLAlchemy + Alembic（SQLite）
+apps/web/        Vite + React + TypeScript，Linear 气质的自绘界面
+packages/domain/ 纯领域逻辑（状态机、确认规则等），零框架依赖
+tests/           后端、领域与脚本 pytest
+scripts/         安装、模型、备份和 launchd 运维脚本
+data/            本机数据（音频、SQLite、声纹和模型），不入 git
 ```
 
-## 关键文档
+## 文档
 
-- `ROADMAP.md`：milestone 切分与每步的 TDD 清单（先读这个再动手）。
-- `AGENTS.md`：工程约定与红线。
+- `ROADMAP.md`：milestone 范围与 TDD 验收清单。
+- `AGENTS.md`：工程分层、开发流程与红线。
+- `scripts/download_models.md`：模型来源及手动准备说明。
+
+本项目采用 [MIT License](LICENSE)。

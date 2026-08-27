@@ -59,7 +59,7 @@ export function SpeakerCard({
         container,
         url: audioUrl(meetingId),
         height: 36,
-        waveColor: '#d4d5db',
+        waveColor: '#3e3e44',
         progressColor: '#5e6ad2',
         cursorColor: '#5e6ad2',
         cursorWidth: 1,

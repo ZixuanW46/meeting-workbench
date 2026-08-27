@@ -19,3 +19,8 @@ data/
 .DS_Store
 .idea/
 .vscode/
+
+# Codex/Claude 验收记录（走 cloud-jobs/，不入库）
+RESULT.md
+RED.txt
+GREEN.txt

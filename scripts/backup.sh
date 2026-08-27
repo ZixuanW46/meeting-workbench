@@ -40,4 +40,5 @@ fi
 
 ARCHIVE="$BACKUP_ROOT/meeting-workbench-$(date +%Y%m%d-%H%M%S).tar.gz"
 tar -C "$STAGING_DIR" -czf "$ARCHIVE" data
-echo "备份完成：$ARCHIVE（已排除 data/models 模型权重）"
+# ${} 花括号必须保留：macOS 系统 bash 3.2 会把紧跟的全角字符首字节并进变量名。
+echo "备份完成：${ARCHIVE}（已排除 data/models 模型权重）"

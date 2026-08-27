@@ -249,6 +249,7 @@ export function SpeakerCard({
           ...(people.length > 0
             ? [{ kind: 'REASSIGN' as DecisionKind, label: '换成其他人' }]
             : []),
+          { kind: 'NEAREST_CONFIRMED', label: '并入最近的已确认参会人' },
           { kind: 'KEEP_UNKNOWN', label: anonymousLabel },
         ]
       : [
@@ -257,6 +258,7 @@ export function SpeakerCard({
             ? [{ kind: 'LINK_EXISTING' as DecisionKind, label: '从声纹库选择' }]
             : []),
           { kind: 'MERGE_WITH_CLUSTER', label: '与其他说话人合并' },
+          { kind: 'NEAREST_CONFIRMED', label: '并入最近的已确认参会人' },
           { kind: 'UNDECIDED_UNKNOWN', label: anonymousLabel },
         ]
 
@@ -279,6 +281,9 @@ export function SpeakerCard({
         )}
         {draft !== undefined && ANONYMOUS_KINDS.has(draft.kind) && (
           <span className="speaker-chip">将标为：说话人 {anonymousIndex}</span>
+        )}
+        {draft?.kind === 'NEAREST_CONFIRMED' && (
+          <span className="speaker-chip">将按声纹并入最近的已确认参会人</span>
         )}
       </div>
 

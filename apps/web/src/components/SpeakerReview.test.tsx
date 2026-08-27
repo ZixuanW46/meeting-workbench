@@ -57,7 +57,80 @@ async function findCard(clusterId: string) {
   return await screen.findByTestId(`speaker-card-${clusterId}`)
 }
 
+const THREE_CARDS = {
+  cards: [
+    REVIEW.cards[0],
+    REVIEW.cards[1],
+    {
+      cluster_id: 'S3',
+      total_seconds: 2.0,
+      suggested_person_id: null,
+      suggested_display_name: null,
+      sample_clips: [{ start_seconds: 11, end_seconds: 12, text: '' }],
+      text: '',
+    },
+  ],
+  people: REVIEW.people,
+}
+
 describe('说话人确认卡', () => {
+  it('尾簇批量栏：一键就近归属，可再逐卡覆盖，提交带 NEAREST_CONFIRMED', async () => {
+    server.use(
+      http.get('/api/meetings/m1/review', () => HttpResponse.json(THREE_CARDS)),
+    )
+    let body: Record<string, unknown> | null = null
+    server.use(
+      http.post('/api/meetings/m1/review/decisions', async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({
+          state: 'GENERATING_MINUTES',
+          has_unconfirmed_speakers: false,
+        })
+      }),
+    )
+    const onSubmitted = vi.fn()
+    render(<SpeakerReview meetingId="m1" onSubmitted={onSubmitted} />)
+
+    await findCard('S3')
+    expect(screen.getByText('其余 3 张未决定：')).toBeInTheDocument()
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '并入已确认参会人（按声纹就近）' }),
+    )
+    // 批量后逐卡覆盖：S1 改为确认建议身份
+    fireEvent.click(within(await findCard('S1')).getByLabelText('确认建议身份'))
+    // 选中就近的卡头出现预览 chip；批量栏因无未决定卡而消失
+    expect(
+      within(await findCard('S2')).getByText('将按声纹并入最近的已确认参会人'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/张未决定：/)).not.toBeInTheDocument()
+
+    const submit = screen.getByRole('button', { name: '提交确认' })
+    expect(submit).toBeEnabled()
+    fireEvent.click(submit)
+    await waitFor(() => expect(onSubmitted).toHaveBeenCalled())
+    expect(body).toEqual({
+      decisions: [
+        { cluster_id: 'S1', kind: 'CONFIRM' },
+        { cluster_id: 'S2', kind: 'NEAREST_CONFIRMED' },
+        { cluster_id: 'S3', kind: 'NEAREST_CONFIRMED' },
+      ],
+    })
+  })
+
+  it('尾簇批量栏：全部保持匿名触发未确认提示', async () => {
+    server.use(
+      http.get('/api/meetings/m1/review', () => HttpResponse.json(THREE_CARDS)),
+    )
+    render(<SpeakerReview meetingId="m1" onSubmitted={() => {}} />)
+
+    await findCard('S3')
+    fireEvent.click(screen.getByRole('button', { name: '全部保持匿名' }))
+
+    expect(screen.getByText(/含未确认说话人/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '提交确认' })).toBeEnabled()
+  })
+
   it('卡片数多于预计人数时提示用「合并」归并', async () => {
     mockReview()
     render(

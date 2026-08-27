@@ -933,6 +933,30 @@ a {
   gap: 8px;
 }
 
+/* 尾簇批量处置栏 */
+.review-batch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  padding: 10px 12px;
+}
+
+.review-batch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.review-batch-hint {
+  font-size: 12px;
+  color: var(--ink-tertiary);
+}
+
 .review-footer {
   display: flex;
   align-items: center;

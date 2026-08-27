@@ -49,6 +49,7 @@ export type DecisionKind =
   | 'LINK_EXISTING'
   | 'MERGE_WITH_CLUSTER'
   | 'UNDECIDED_UNKNOWN'
+  | 'NEAREST_CONFIRMED'
 
 export interface SpeakerDecisionInput {
   cluster_id: string

@@ -75,6 +75,16 @@ export function SpeakerReview({
   }
 
   const allDecided = cards.every((card) => draftValid(drafts[card.cluster_id]))
+  const undecidedIds = cards
+    .filter((card) => !draftValid(drafts[card.cluster_id]))
+    .map((card) => card.cluster_id)
+
+  const batchSet = (kind: 'NEAREST_CONFIRMED' | 'UNDECIDED_UNKNOWN') => {
+    setDrafts((prev) => ({
+      ...prev,
+      ...Object.fromEntries(undecidedIds.map((id) => [id, { kind }])),
+    }))
+  }
   const hasUnknown = cards.some((card) => {
     const draft = drafts[card.cluster_id]
     return draft !== undefined && UNKNOWN_KINDS.has(draft.kind)
@@ -128,6 +138,22 @@ export function SpeakerReview({
           />
         ))}
       </div>
+      {undecidedIds.length >= 3 && (
+        <div className="review-batch">
+          <div className="review-batch-row">
+            <span className="form-hint">其余 {undecidedIds.length} 张未决定：</span>
+            <button type="button" className="btn" onClick={() => batchSet('NEAREST_CONFIRMED')}>
+              并入已确认参会人（按声纹就近）
+            </button>
+            <button type="button" className="btn" onClick={() => batchSet('UNDECIDED_UNKNOWN')}>
+              全部保持匿名
+            </button>
+          </div>
+          <div className="review-batch-hint">
+            就近归属按声纹相似度并入上面已确认的人；这些发言在转写与纪要中会标注（就近归属），且不进声纹库。
+          </div>
+        </div>
+      )}
       <div className="review-footer">
         <button
           type="button"

@@ -89,23 +89,24 @@ export function HotwordsPage() {
       {error !== null && <div className="notice notice-error">{error}</div>}
 
       <div className="card" style={{ marginBottom: 12 }}>
-        <label className="form-label" htmlFor="hotword-input">
-          添加词语
-        </label>
-        <input
-          id="hotword-input"
-          className="input"
-          value={input}
-          placeholder="输入后回车添加"
-          disabled={adding}
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              onAdd()
-            }
-          }}
-        />
+        {/* form-field：label 在上、输入框在下（6px 间距），与新建会议表单一致 */}
+        <div className="form-field" style={{ maxWidth: 360 }}>
+          <label htmlFor="hotword-input">添加词语</label>
+          <input
+            id="hotword-input"
+            className="input"
+            value={input}
+            placeholder="输入后回车添加"
+            disabled={adding}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                onAdd()
+              }
+            }}
+          />
+        </div>
       </div>
 
       {hotwords !== null && (

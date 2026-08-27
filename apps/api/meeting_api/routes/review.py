@@ -38,6 +38,8 @@ class ReviewCard(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     cluster_id: str
+    # 该簇的累计发言秒数（事实数据，非置信度）：确认页排序与「累计发言」展示用。
+    total_seconds: float
     suggested_person_id: str | None
     # 建议身份的显示名：定性表达，绝不附带数值置信度。
     suggested_display_name: str | None
@@ -113,10 +115,11 @@ def get_review(meeting_id: str, request: Request) -> ReviewResponse:
                 detail="会议当前不在说话人确认阶段",
             )
 
+        # 主要说话人排最前：几十簇的真实录音里，人工确认从时长大的簇开始才可用。
         clusters = session.scalars(
             select(SpeakerCluster)
             .where(SpeakerCluster.meeting_id == meeting_id)
-            .order_by(SpeakerCluster.cluster_id)
+            .order_by(SpeakerCluster.total_seconds.desc(), SpeakerCluster.cluster_id)
         ).all()
         segments = session.scalars(
             select(TranscriptSegment)
@@ -150,6 +153,7 @@ def get_review(meeting_id: str, request: Request) -> ReviewResponse:
             cards=[
                 ReviewCard(
                     cluster_id=cluster.cluster_id,
+                    total_seconds=cluster.total_seconds,
                     suggested_person_id=cluster.suggested_person_id,
                     suggested_display_name=name_by_id.get(cluster.suggested_person_id)
                     if cluster.suggested_person_id is not None

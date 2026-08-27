@@ -7,8 +7,10 @@ import pytest
 from sqlalchemy import select, text
 
 from meeting_api.models import Meeting, Person, SpeakerCluster, Voiceprint
+from meeting_api.pipeline.diarization import FakeDiarizationBackend, SpeakerSegment
 from meeting_api.pipeline.embedding import FakeEmbeddingBackend, embedding_to_bytes
 from meeting_api.pipeline.serial import SingleModelSlot
+from meeting_api.worker import Worker
 
 
 def _seed_s1_voiceprint(client) -> None:
@@ -75,6 +77,45 @@ def test_get_review_returns_cards_with_samples_and_text_without_fake_precision(c
 
     forbidden = {"score", "percent", "confidence"}
     assert not ({key.lower() for key in _all_keys(body)} & forbidden)
+
+
+class _UnevenDiarization(FakeDiarizationBackend):
+    """三个主簇时长悬殊，外加一个 0.7s 碎簇（时间上贴着 S2 尾部）。"""
+
+    def diarize(self, audio_path, expected_speakers=None):
+        del audio_path, expected_speakers
+        return [
+            SpeakerSegment(0.0, 2.0, "S1"),
+            SpeakerSegment(2.0, 20.0, "S2"),
+            SpeakerSegment(20.0, 20.7, "S9"),
+            SpeakerSegment(21.0, 31.0, "S3"),
+            SpeakerSegment(31.0, 32.5, "S1"),
+        ]
+
+
+def test_review_cards_sorted_by_speaking_time_and_carry_total_seconds(client):
+    # 真实录音动辄几十簇：主要说话人必须排最前，卡片要标累计发言时长，
+    # 时长以切分产物为准（粗粒度转写求和会失真），碎簇秒数计入吸收它的主簇。
+    _seed_s1_voiceprint(client)
+    created = client.post("/api/meetings", json={"title": "时长排序"})
+    meeting_id = created.json()["id"]
+    uploaded = client.post(
+        f"/api/meetings/{meeting_id}/upload",
+        files={"file": ("meeting.wav", b"fake audio bytes", "audio/wav")},
+    )
+    assert uploaded.status_code == 200
+    worker = Worker(
+        client.app.state.session_factory,
+        client.app.state.settings,
+        diarization_backend=_UnevenDiarization(),
+    )
+    assert worker.process_next() == meeting_id
+
+    body = client.get(f"/api/meetings/{meeting_id}/review").json()
+
+    assert [card["cluster_id"] for card in body["cards"]] == ["S2", "S3", "S1"]
+    totals = [card["total_seconds"] for card in body["cards"]]
+    assert totals == pytest.approx([18.7, 10.0, 3.5])
 
 
 def test_get_review_clips_carry_transcript_and_people_directory(client):

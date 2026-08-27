@@ -95,6 +95,8 @@ class SpeakerCluster(Base):
         ForeignKey("meetings.id", ondelete="CASCADE"), index=True
     )
     cluster_id: Mapped[str] = mapped_column(String(32))
+    # 该簇在切分产物里的累计发言秒数（碎簇合并后口径），供确认停点排序与展示。
+    total_seconds: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
     suggested_person_id: Mapped[str | None] = mapped_column(String(32), default=None)
     sample_clips_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]")
     # M10 fake 质量：默认合格；测试可显式降分，不引入真实 VAD。

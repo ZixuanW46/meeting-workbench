@@ -53,6 +53,14 @@ function formatSeconds(value: number): string {
   return `${minutes}:${seconds.toFixed(1).padStart(4, '0')}`
 }
 
+/** 累计时长不需要亚秒精度，向下取整到秒展示（不夸大发言量） */
+function formatTotalSeconds(value: number): string {
+  const whole = Math.floor(value)
+  const minutes = Math.floor(whole / 60)
+  const seconds = whole - minutes * 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
 /** 从整段解码峰值里切出片段的条形波形（48 根柱，0–1 振幅） */
 function clipBars(
   peaks: number[],
@@ -256,6 +264,9 @@ export function SpeakerCard({
     <div className="speaker-card" data-testid={`speaker-card-${card.cluster_id}`}>
       <div className="speaker-card-head">
         <span className="speaker-card-name">说话人 {card.cluster_id}</span>
+        <span className="speaker-chip">
+          {`累计发言 ${formatTotalSeconds(card.total_seconds)}`}
+        </span>
         {card.suggested_person_id !== null ? (
           // 建议身份只有「较高 / 需判断」的定性表达，绝不显示百分比
           <span className="speaker-chip suggested">

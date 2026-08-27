@@ -21,6 +21,7 @@ const REVIEW = {
   cards: [
     {
       cluster_id: 'S1',
+      total_seconds: 450.1,
       suggested_person_id: 'fake-person-1',
       suggested_display_name: '王芳',
       sample_clips: [
@@ -31,6 +32,7 @@ const REVIEW = {
     },
     {
       cluster_id: 'S2',
+      total_seconds: 3.5,
       suggested_person_id: null,
       suggested_display_name: null,
       sample_clips: [
@@ -140,6 +142,19 @@ describe('说话人确认卡', () => {
       target: { value: '张三' },
     })
     expect(submit).toBeEnabled()
+  })
+
+  it('卡头显示该簇累计发言时长', async () => {
+    // 几十张卡时，人工靠累计时长判断哪些卡值得细听。
+    mockReview()
+    render(<SpeakerReview meetingId="m1" onSubmitted={() => {}} />)
+
+    expect(
+      within(await findCard('S1')).getByText('累计发言 7:30'),
+    ).toBeInTheDocument()
+    expect(
+      within(await findCard('S2')).getByText('累计发言 0:03'),
+    ).toBeInTheDocument()
   })
 
   it('试听子卡展示该片段的逐段转写与建议人名', async () => {

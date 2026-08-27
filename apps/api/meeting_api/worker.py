@@ -347,10 +347,18 @@ class Worker:
         if not speaker_segments:
             raise ValueError("切分未产出说话人片段")
 
-        cluster_ids = sorted({segment.cluster_id for segment in speaker_segments})
+        totals: dict[str, float] = {}
+        for segment in speaker_segments:
+            totals[segment.cluster_id] = (
+                totals.get(segment.cluster_id, 0.0) + segment.end - segment.start
+            )
         session.add_all(
-            SpeakerCluster(meeting_id=meeting_id, cluster_id=cluster_id)
-            for cluster_id in cluster_ids
+            SpeakerCluster(
+                meeting_id=meeting_id,
+                cluster_id=cluster_id,
+                total_seconds=total,
+            )
+            for cluster_id, total in sorted(totals.items())
         )
         session.add_all(
             TranscriptSegment(

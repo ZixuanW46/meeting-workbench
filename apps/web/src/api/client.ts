@@ -25,6 +25,8 @@ export interface ReviewSample {
 
 export interface ReviewCard {
   cluster_id: string
+  /** 该簇累计发言秒数（切分产物口径），卡片按它降序返回 */
+  total_seconds: number
   suggested_person_id: string | null
   /** 建议身份显示名：定性表达，后端绝不附带数值置信度 */
   suggested_display_name: string | null

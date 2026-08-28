@@ -493,7 +493,8 @@ def _orthogonal_vector() -> tuple[float, ...]:
 
 def test_enrollment_appends_template_when_voice_differs(client):
     # 换了环境（候选与既有模板近似正交）：追加为第二条模板而不是覆盖。
-    # 不用跨文件 import tests.*：pythonpath 只有 domain/api，CI 的 python -m pytest 找不到 tests 包。
+    # 不用跨文件 import tests.*：pythonpath 只有 domain/api。
+    # CI 的 python -m pytest 找不到 tests 包。
     with client.app.state.session_factory() as session:
         session.add(Person(id="fake-person-1", display_name="已知用户 1"))
         session.add(

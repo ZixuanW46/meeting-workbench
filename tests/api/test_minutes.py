@@ -144,8 +144,12 @@ class MarkdownAdapter:
 
 
 def test_minutes_prompt_instructions_match_authoritative_data_file():
-    expected = Path("data/minutes_prompt.md").read_text(encoding="utf-8")
-
+    # data/ 整目录 gitignore；本机 Mini 可放权威模板与常量逐字同步。
+    # CI checkout 无此文件。缺文件时跳过，避免把本机同步检查当成仓库必有资产。
+    prompt_path = Path(__file__).resolve().parents[2] / "data" / "minutes_prompt.md"
+    if not prompt_path.is_file():
+        pytest.skip("data/minutes_prompt.md 是本机权威模板，不入 git")
+    expected = prompt_path.read_text(encoding="utf-8")
     assert minutes_prompt.MINUTES_PROMPT_INSTRUCTIONS == expected
 
 

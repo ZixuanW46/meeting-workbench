@@ -57,7 +57,7 @@ async function findCard(clusterId: string) {
   return await screen.findByTestId(`speaker-card-${clusterId}`)
 }
 
-const THREE_CARDS = {
+const TAIL_CARDS = {
   cards: [
     REVIEW.cards[0],
     REVIEW.cards[1],
@@ -69,6 +69,15 @@ const THREE_CARDS = {
       sample_clips: [{ start_seconds: 11, end_seconds: 12, text: '' }],
       text: '',
     },
+    {
+      cluster_id: 'S4',
+      total_seconds: 1.2,
+      suggested_person_id: null,
+      suggested_display_name: null,
+      suggested_tier: null,
+      sample_clips: [{ start_seconds: 13, end_seconds: 14, text: '' }],
+      text: '',
+    },
   ],
   people: REVIEW.people,
 }
@@ -76,7 +85,7 @@ const THREE_CARDS = {
 describe('说话人确认卡', () => {
   it('尾簇批量栏：一键就近归属，可再逐卡覆盖，提交带 NEAREST_CONFIRMED', async () => {
     server.use(
-      http.get('/api/meetings/m1/review', () => HttpResponse.json(THREE_CARDS)),
+      http.get('/api/meetings/m1/review', () => HttpResponse.json(TAIL_CARDS)),
     )
     let body: Record<string, unknown> | null = null
     server.use(
@@ -91,7 +100,8 @@ describe('说话人确认卡', () => {
     const onSubmitted = vi.fn()
     render(<SpeakerReview meetingId="m1" onSubmitted={onSubmitted} />)
 
-    await findCard('S3')
+    await findCard('S4')
+    // S1 的「较高」建议已默认选中确认，未决定的只有 3 张尾卡
     expect(screen.getByText('其余 3 张未决定：')).toBeInTheDocument()
 
     fireEvent.click(
@@ -114,42 +124,46 @@ describe('说话人确认卡', () => {
         { cluster_id: 'S1', kind: 'CONFIRM' },
         { cluster_id: 'S2', kind: 'NEAREST_CONFIRMED' },
         { cluster_id: 'S3', kind: 'NEAREST_CONFIRMED' },
+        { cluster_id: 'S4', kind: 'NEAREST_CONFIRMED' },
       ],
     })
   })
 
   it('尾簇批量栏：全部保持匿名触发未确认提示', async () => {
     server.use(
-      http.get('/api/meetings/m1/review', () => HttpResponse.json(THREE_CARDS)),
+      http.get('/api/meetings/m1/review', () => HttpResponse.json(TAIL_CARDS)),
     )
     render(<SpeakerReview meetingId="m1" onSubmitted={() => {}} />)
 
-    await findCard('S3')
+    await findCard('S4')
     fireEvent.click(screen.getByRole('button', { name: '全部保持匿名' }))
 
     expect(screen.getByText(/含未确认说话人/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '提交确认' })).toBeEnabled()
   })
 
-  it('卡片数多于预计人数时提示用「合并」归并', async () => {
-    mockReview()
-    render(
-      <SpeakerReview meetingId="m1" expectedSpeakers={1} onSubmitted={() => {}} />,
-    )
-
-    await findCard('S1')
-    expect(
-      screen.getByText(/切分聚出 2 位说话人，多于预计的 1/),
-    ).toBeInTheDocument()
-    expect(screen.getByText(/「与其他说话人合并」归并/)).toBeInTheDocument()
-  })
-
-  it('未填预计人数或卡片不超时不出现过分聚类提示', async () => {
+  it('卡片按显示顺序编号为说话人 1、2……而非簇代号', async () => {
     mockReview()
     render(<SpeakerReview meetingId="m1" onSubmitted={() => {}} />)
 
-    await findCard('S1')
-    expect(screen.queryByText(/多于预计的/)).not.toBeInTheDocument()
+    expect(within(await findCard('S1')).getByText('说话人 1')).toBeInTheDocument()
+    expect(within(await findCard('S2')).getByText('说话人 2')).toBeInTheDocument()
+    expect(screen.queryByText('说话人 S1')).not.toBeInTheDocument()
+  })
+
+  it('「较高」建议默认选中确认建议身份，卡片带降噪样式', async () => {
+    mockReview()
+    render(<SpeakerReview meetingId="m1" onSubmitted={() => {}} />)
+
+    const cardS1 = await findCard('S1')
+    expect(within(cardS1).getByLabelText('确认建议身份')).toBeChecked()
+    expect(cardS1.className).toContain('suggested-high')
+
+    const cardS2 = await findCard('S2')
+    expect(cardS2.className).not.toContain('suggested-high')
+    // 无建议的卡不预选任何决定
+    const radios = within(cardS2).getAllByRole('radio')
+    expect(radios.some((r) => (r as HTMLInputElement).checked)).toBe(false)
   })
 
   it('每卡必须选择一个决定后「提交」才可点', async () => {

@@ -844,6 +844,12 @@ a {
   box-shadow: var(--edge-highlight);
 }
 
+/* 较高置信建议已默认选中确认：整卡降噪成"大概不用管"，留边色可辨认 */
+.speaker-card.suggested-high {
+  border-color: rgba(94, 106, 210, 0.45);
+  background: rgba(94, 106, 210, 0.06);
+}
+
 .speaker-card-head {
   display: flex;
   align-items: center;

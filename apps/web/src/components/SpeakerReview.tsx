@@ -14,7 +14,6 @@ const UNKNOWN_KINDS = new Set(['KEEP_UNKNOWN', 'UNDECIDED_UNKNOWN'])
 
 interface SpeakerReviewProps {
   meetingId: string
-  expectedSpeakers?: number | null
   onSubmitted: (result: ReviewSubmitResult) => void
 }
 
@@ -32,11 +31,7 @@ function toDecision(clusterId: string, draft: DecisionDraft): SpeakerDecisionInp
   return decision
 }
 
-export function SpeakerReview({
-  meetingId,
-  expectedSpeakers = null,
-  onSubmitted,
-}: SpeakerReviewProps) {
+export function SpeakerReview({ meetingId, onSubmitted }: SpeakerReviewProps) {
   const [cards, setCards] = useState<ReviewCard[] | null>(null)
   const [people, setPeople] = useState<ReviewPerson[]>([])
   const [drafts, setDrafts] = useState<Record<string, DecisionDraft>>({})
@@ -50,6 +45,20 @@ export function SpeakerReview({
         if (!stale) {
           setCards(review.cards)
           setPeople(review.people ?? [])
+          // 「较高」建议默认选中「确认建议身份」；仍由用户过目并提交，可随时改选
+          setDrafts((prev) => {
+            const seeded = { ...prev }
+            for (const card of review.cards) {
+              if (
+                seeded[card.cluster_id] === undefined &&
+                card.suggested_person_id !== null &&
+                card.suggested_tier === 'high'
+              ) {
+                seeded[card.cluster_id] = { kind: 'CONFIRM' }
+              }
+            }
+            return seeded
+          })
         }
       })
       .catch((e: unknown) => {
@@ -104,22 +113,12 @@ export function SpeakerReview({
     }
   }
 
-  // 嘈杂录音常被过分聚类；多出的卡由人工合并，先验人数只用来提示。
-  const overClustered =
-    expectedSpeakers !== null && cards.length > expectedSpeakers
-
   return (
     <section className="section">
       <h2 className="section-title">说话人确认</h2>
       <p className="section-desc">
         为每位说话人试听片段并做一个决定；系统只提供建议，最终身份由你确认，「暂不确定」也是合法决定。
       </p>
-      {overClustered && (
-        <div className="notice notice-warn" style={{ marginBottom: 12 }}>
-          切分聚出 {cards.length} 位说话人，多于预计的 {expectedSpeakers}
-          {' '}位：同一人的多张卡请用「与其他说话人合并」归并。
-        </div>
-      )}
       <div className="review-cards">
         {cards.map((card, index) => (
           <SpeakerCard
@@ -131,6 +130,9 @@ export function SpeakerReview({
               .filter((clusterId) => clusterId !== card.cluster_id)}
             people={people}
             anonymousIndex={index + 1}
+            clusterLabels={Object.fromEntries(
+              cards.map((c, i) => [c.cluster_id, i + 1]),
+            )}
             draft={drafts[card.cluster_id]}
             onChange={(draft) =>
               setDrafts((prev) => ({ ...prev, [card.cluster_id]: draft }))

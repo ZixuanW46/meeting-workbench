@@ -41,8 +41,10 @@ interface SpeakerCardProps {
   otherClusterIds: string[]
   /** 全局人员清单，给「换成其他人 / 从声纹库选择」下拉用 */
   people: ReviewPerson[]
-  /** 保持匿名时的编号：纪要与转写会以「说话人 N」引用 */
+  /** 卡片按页面顺序的展示编号（1 起）；保持匿名时转写也以「说话人 N」引用 */
   anonymousIndex: number
+  /** 其他簇代号 → 展示编号，给合并下拉显示顺序编号用 */
+  clusterLabels: Record<string, number>
   draft: DecisionDraft | undefined
   onChange: (draft: DecisionDraft) => void
 }
@@ -138,6 +140,7 @@ export function SpeakerCard({
   otherClusterIds,
   people,
   anonymousIndex,
+  clusterLabels,
   draft,
   onChange,
 }: SpeakerCardProps) {
@@ -262,10 +265,17 @@ export function SpeakerCard({
           { kind: 'UNDECIDED_UNKNOWN', label: anonymousLabel },
         ]
 
+  // 「较高」建议默认选中确认，卡片同时降噪展示：这些卡通常无需用户再判断
+  const highSuggestion =
+    card.suggested_person_id !== null && card.suggested_tier === 'high'
+
   return (
-    <div className="speaker-card" data-testid={`speaker-card-${card.cluster_id}`}>
+    <div
+      className={`speaker-card${highSuggestion ? ' suggested-high' : ''}`}
+      data-testid={`speaker-card-${card.cluster_id}`}
+    >
       <div className="speaker-card-head">
-        <span className="speaker-card-name">说话人 {card.cluster_id}</span>
+        <span className="speaker-card-name">说话人 {anonymousIndex}</span>
         <span className="speaker-chip">
           {`累计发言 ${formatTotalSeconds(card.total_seconds)}`}
         </span>
@@ -330,7 +340,7 @@ export function SpeakerCard({
       <div
         className="decision-options"
         role="radiogroup"
-        aria-label={`说话人 ${card.cluster_id} 的决定`}
+        aria-label={`说话人 ${anonymousIndex} 的决定`}
       >
         {options.map((option) => (
           <label key={option.kind} className="decision-option">
@@ -394,7 +404,7 @@ export function SpeakerCard({
             <option value="">选择合并目标</option>
             {otherClusterIds.map((clusterId) => (
               <option key={clusterId} value={clusterId}>
-                说话人 {clusterId}
+                说话人 {clusterLabels[clusterId] ?? clusterId}
               </option>
             ))}
           </select>

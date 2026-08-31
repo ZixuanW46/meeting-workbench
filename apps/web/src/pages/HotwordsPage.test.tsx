@@ -4,8 +4,8 @@ import { server } from '../test/server'
 import { HotwordsPage } from './HotwordsPage'
 
 const ITEMS = [
-  { id: 'h1', word: 'Qwen3' },
-  { id: 'h2', word: '声纹库' },
+  { id: 'h1', word: 'Qwen3', note: '本机转写模型' },
+  { id: 'h2', word: '声纹库', note: null },
 ]
 
 describe('词库页', () => {
@@ -76,5 +76,75 @@ describe('词库页', () => {
     render(<HotwordsPage />)
 
     expect(await screen.findByText('词库是空的')).toBeInTheDocument()
+  })
+
+  it('展示词语注解；无注解的词提供添加入口', async () => {
+    server.use(
+      http.get('/api/hotwords', () => HttpResponse.json({ items: ITEMS })),
+    )
+
+    render(<HotwordsPage />)
+
+    expect(await screen.findByText('本机转写模型')).toBeInTheDocument()
+    // 两行都有注解编辑入口（有注解的显示「编辑注解」，没有的显示「添加注解」）。
+    expect(
+      screen.getByRole('button', { name: '编辑注解 Qwen3' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '添加注解 声纹库' }),
+    ).toBeInTheDocument()
+  })
+
+  it('就地编辑注解并保存：PATCH 生效、列表即时更新', async () => {
+    let patched: { id: string; note: unknown } | null = null
+    server.use(
+      http.get('/api/hotwords', () => HttpResponse.json({ items: ITEMS })),
+      http.patch('/api/hotwords/:id', async ({ params, request }) => {
+        const body = (await request.json()) as { note: string | null }
+        patched = { id: String(params.id), note: body.note }
+        return HttpResponse.json({ id: params.id, word: 'Qwen3', note: body.note })
+      }),
+    )
+
+    render(<HotwordsPage />)
+    await screen.findByText('本机转写模型')
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑注解 Qwen3' }))
+    const noteInput = screen.getByLabelText('注解内容 Qwen3')
+    expect((noteInput as HTMLInputElement).value).toBe('本机转写模型')
+
+    fireEvent.change(noteInput, { target: { value: '本机 ASR 模型（Qwen3-ASR）' } })
+    fireEvent.keyDown(noteInput, { key: 'Enter' })
+
+    expect(
+      await screen.findByText('本机 ASR 模型（Qwen3-ASR）'),
+    ).toBeInTheDocument()
+    expect(patched).toEqual({ id: 'h1', note: '本机 ASR 模型（Qwen3-ASR）' })
+  })
+
+  it('添加词语可以顺带填注解，一起提交', async () => {
+    let posted: { word: string; note?: string | null } | null = null
+    server.use(
+      http.get('/api/hotwords', () => HttpResponse.json({ items: [] })),
+      http.post('/api/hotwords', async ({ request }) => {
+        posted = (await request.json()) as { word: string; note?: string | null }
+        return HttpResponse.json(
+          { id: 'h9', word: posted.word, note: posted.note ?? null },
+          { status: 201 },
+        )
+      }),
+    )
+
+    render(<HotwordsPage />)
+    const wordInput = await screen.findByLabelText('添加词语')
+    const noteInput = screen.getByLabelText('注解（选填，喂给纪要 LLM）')
+
+    fireEvent.change(wordInput, { target: { value: 'CUES' } })
+    fireEvent.change(noteInput, { target: { value: '剑桥工程社团简称' } })
+    fireEvent.keyDown(noteInput, { key: 'Enter' })
+
+    expect(await screen.findByText('CUES')).toBeInTheDocument()
+    expect(screen.getByText('剑桥工程社团简称')).toBeInTheDocument()
+    expect(posted).toEqual({ word: 'CUES', note: '剑桥工程社团简称' })
   })
 })

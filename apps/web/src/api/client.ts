@@ -283,6 +283,8 @@ export function voiceprintAudioUrl(voiceprintId: string): string {
 export interface Hotword {
   id: string
   word: string
+  // 注解只喂给纪要 LLM 当术语参考，转写热词仍只用词本身。
+  note: string | null
 }
 
 export async function listHotwords(): Promise<Hotword[]> {
@@ -290,8 +292,22 @@ export async function listHotwords(): Promise<Hotword[]> {
   return data.items
 }
 
-export function createHotword(word: string): Promise<Hotword> {
-  return postJson<Hotword>('/api/hotwords', { word })
+export function createHotword(word: string, note?: string): Promise<Hotword> {
+  return postJson<Hotword>(
+    '/api/hotwords',
+    note === undefined ? { word } : { word, note },
+  )
+}
+
+export function updateHotwordNote(
+  hotwordId: string,
+  note: string | null,
+): Promise<Hotword> {
+  return apiFetch<Hotword>(`/api/hotwords/${hotwordId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ note }),
+  })
 }
 
 export function deleteHotword(hotwordId: string): Promise<void> {

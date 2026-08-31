@@ -49,6 +49,8 @@ class MeetingResponse(BaseModel):
     expected_speakers: int | None
     hotwords: list[str]
     created_at: datetime
+    speakers: list[str]
+    unknown_speaker_count: int
 
 
 class MeetingListResponse(BaseModel):

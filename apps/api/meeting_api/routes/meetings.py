@@ -4,8 +4,9 @@ import json
 
 from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
 
-from meeting_api.models import HotwordEntry, Meeting, SpeakerCluster, TranscriptSegment
+from meeting_api.models import HotwordEntry, Meeting, Person, SpeakerCluster, TranscriptSegment
 from meeting_api.schemas import (
     MeetingCreate,
     MeetingListResponse,
@@ -18,7 +19,66 @@ from meeting_domain import RETRANSCRIBABLE_STATES, MeetingState, snapshot, trans
 router = APIRouter(prefix="/api/meetings")
 
 
-def _to_response(meeting: Meeting) -> MeetingResponse:
+type SpeakerSummary = tuple[list[str], int]
+
+
+def _speaker_summaries(
+    session: Session, meeting_ids: list[str]
+) -> dict[str, SpeakerSummary]:
+    if not meeting_ids:
+        return {}
+
+    rows = session.execute(
+        select(
+            SpeakerCluster.meeting_id,
+            SpeakerCluster.person_id,
+            SpeakerCluster.total_seconds,
+            Person.display_name,
+        )
+        .outerjoin(Person, Person.id == SpeakerCluster.person_id)
+        .where(SpeakerCluster.meeting_id.in_(meeting_ids))
+    ).all()
+    by_meeting: dict[str, list[tuple[str | None, float, str | None]]] = {}
+    for meeting_id, person_id, total_seconds, display_name in rows:
+        by_meeting.setdefault(meeting_id, []).append(
+            (person_id, total_seconds, display_name)
+        )
+
+    summaries: dict[str, SpeakerSummary] = {}
+    for meeting_id, clusters in by_meeting.items():
+        confirmed = [
+            (person_id, total_seconds, display_name)
+            for person_id, total_seconds, display_name in clusters
+            if person_id is not None and display_name is not None
+        ]
+        if not confirmed:
+            summaries[meeting_id] = ([], 0)
+            continue
+
+        seconds_by_person: dict[str, float] = {}
+        names_by_person: dict[str, str] = {}
+        for person_id, total_seconds, display_name in confirmed:
+            seconds_by_person[person_id] = (
+                seconds_by_person.get(person_id, 0.0) + total_seconds
+            )
+            names_by_person[person_id] = display_name
+        speakers = [
+            names_by_person[person_id]
+            for person_id in sorted(
+                seconds_by_person,
+                key=lambda value: seconds_by_person[value],
+                reverse=True,
+            )
+        ]
+        unknown_count = sum(1 for person_id, _, _ in clusters if person_id is None)
+        summaries[meeting_id] = (speakers, unknown_count)
+    return summaries
+
+
+def _to_response(
+    meeting: Meeting, speaker_summary: SpeakerSummary = ([], 0)
+) -> MeetingResponse:
+    speakers, unknown_speaker_count = speaker_summary
     return MeetingResponse(
         id=meeting.id,
         title=meeting.title,
@@ -26,6 +86,8 @@ def _to_response(meeting: Meeting) -> MeetingResponse:
         expected_speakers=meeting.expected_speakers,
         hotwords=json.loads(meeting.hotwords_json),
         created_at=meeting.created_at,
+        speakers=speakers,
+        unknown_speaker_count=unknown_speaker_count,
     )
 
 
@@ -51,7 +113,10 @@ def list_meetings(request: Request) -> MeetingListResponse:
         rows = session.scalars(
             select(Meeting).order_by(Meeting.created_at.desc(), Meeting.id.desc())
         ).all()
-        return MeetingListResponse(items=[_to_response(meeting) for meeting in rows])
+        summaries = _speaker_summaries(session, [meeting.id for meeting in rows])
+        return MeetingListResponse(
+            items=[_to_response(meeting, summaries.get(meeting.id, ([], 0))) for meeting in rows]
+        )
 
 
 @router.get("/{meeting_id}", response_model=MeetingResponse)
@@ -61,7 +126,9 @@ def get_meeting(meeting_id: str, request: Request) -> MeetingResponse:
         meeting = session.get(Meeting, meeting_id)
         if meeting is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会议不存在")
-        return _to_response(meeting)
+        return _to_response(
+            meeting, _speaker_summaries(session, [meeting.id]).get(meeting.id, ([], 0))
+        )
 
 
 @router.patch("/{meeting_id}", response_model=MeetingResponse)

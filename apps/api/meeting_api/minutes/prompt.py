@@ -4,6 +4,9 @@
 指令固定输出结构与边界。磁盘上的 transcript.txt 始终保存纯逐字稿。
 """
 
+# data/minutes_prompt.md 是权威模板；这里保持物理文本逐字同步。
+# ruff: noqa: E501
+
 from __future__ import annotations
 
 from collections.abc import Sequence

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import re
 from io import BytesIO
 
 from docx import Document
+from docx.document import Document as DocumentObject
+from docx.shared import Pt
+from docx.text.paragraph import Paragraph
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -31,6 +35,9 @@ MINUTES_EXPORT_STATES = {
     MeetingState.READY.value,
     MeetingState.PARTIAL_READY.value,
 }
+INLINE_BOLD_PATTERN = re.compile(r"(\*\*[^*]+\*\*)")
+LIST_ITEM_PATTERN = re.compile(r"^(?P<nested>  )?- (?P<content>.*)$")
+TASK_PATTERN = re.compile(r"^\[(?P<checked>[ xX])\] (?P<content>.*)$")
 
 
 def _get_meeting(session: Session, meeting_id: str) -> Meeting:
@@ -83,6 +90,47 @@ def _require_export_state(meeting: Meeting, allowed_states: set[str]) -> None:
         )
 
 
+def _add_markdown_runs(paragraph: Paragraph, text: str) -> None:
+    for part in INLINE_BOLD_PATTERN.split(text):
+        if not part:
+            continue
+        if part.startswith("**") and part.endswith("**"):
+            paragraph.add_run(part[2:-2]).bold = True
+        else:
+            paragraph.add_run(part)
+
+
+def _render_minutes_docx(document: DocumentObject, markdown: str) -> None:
+    previous: Paragraph | None = None
+    for line in markdown.splitlines():
+        if not line.strip():
+            if previous is not None:
+                previous.paragraph_format.space_after = Pt(8)
+            continue
+
+        if line.startswith("## "):
+            paragraph = document.add_paragraph(style="Heading 2")
+            content = line[3:]
+        elif line.startswith("# "):
+            paragraph = document.add_paragraph(style="Heading 1")
+            content = line[2:]
+        elif match := LIST_ITEM_PATTERN.match(line):
+            paragraph = document.add_paragraph(
+                style="List Bullet 2" if match.group("nested") else "List Bullet"
+            )
+            content = match.group("content")
+            if task := TASK_PATTERN.match(content):
+                checkbox = "☑" if task.group("checked").lower() == "x" else "☐"
+                paragraph.add_run(f"{checkbox} ")
+                content = task.group("content")
+        else:
+            paragraph = document.add_paragraph()
+            content = line
+
+        _add_markdown_runs(paragraph, content)
+        previous = paragraph
+
+
 @router.get("/{meeting_id}/export/transcript.md")
 def export_transcript(meeting_id: str, request: Request) -> Response:
     with request.app.state.session_factory() as session:
@@ -117,8 +165,7 @@ def export_minutes_docx(meeting_id: str, request: Request) -> Response:
     markdown = _read_minutes(request, meeting_id)
 
     document = Document()
-    for line in markdown.split("\n"):
-        document.add_paragraph(line)
+    _render_minutes_docx(document, markdown)
     output = BytesIO()
     document.save(output)
     return Response(

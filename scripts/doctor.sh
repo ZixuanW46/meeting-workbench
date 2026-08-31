@@ -31,10 +31,10 @@ check_file() {
   local label=$1
   local path=$2
   if [[ -f "$path" ]]; then
-    ok "$label已就绪"
+    ok "${label}已就绪"
     return 0
   fi
-  missing "$label缺失：$path"
+  missing "${label}缺失：$path"
   return 1
 }
 
@@ -83,7 +83,7 @@ check_migrations() {
     if [[ -n "$current_revision" ]]; then
       current_label="当前 $current_revision"
     fi
-    echo "警告：数据库迁移未应用（$current_label，最新 $head_revision），请运行 make migrate。"
+    echo "警告：数据库迁移未应用（${current_label}，最新 ${head_revision}），请运行 make migrate。"
     return 0
   fi
   ok "数据库迁移已应用到最新版本 $head_revision"

@@ -86,8 +86,8 @@ export function MeetingListPage() {
                 <span className="list-row-main">
                   <span className="list-row-title">{meeting.title}</span>
                   <span className="list-row-meta">
-                    {meeting.expected_speakers !== null
-                      ? `预计 ${meeting.expected_speakers} 人 · `
+                    {meeting.speakers.length + meeting.unknown_speaker_count > 0
+                      ? `参会 ${meeting.speakers.length + meeting.unknown_speaker_count} 人 · `
                       : ''}
                     {formatCreatedAt(meeting.created_at)}
                   </span>

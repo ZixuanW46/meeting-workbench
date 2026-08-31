@@ -9,9 +9,11 @@ const MEETINGS = [
     id: 'm1',
     title: '产品周会',
     state: 'AWAITING_SPEAKER_REVIEW',
-    expected_speakers: 4,
+    expected_speakers: null,
     hotwords: ['声纹'],
     created_at: '2026-08-26T08:00:00Z',
+    speakers: [],
+    unknown_speaker_count: 0,
   },
   {
     id: 'm2',
@@ -20,6 +22,8 @@ const MEETINGS = [
     expected_speakers: null,
     hotwords: [],
     created_at: '2026-08-25T02:30:00Z',
+    speakers: ['Will', 'Leo', 'Eddie'],
+    unknown_speaker_count: 1,
   },
 ]
 
@@ -51,8 +55,8 @@ describe('会议列表页', () => {
     await screen.findByText('产品周会')
     // 副标题：总数 + 等确认数
     expect(screen.getByText('2 场会议 · 1 场等你确认说话人')).toBeInTheDocument()
-    // 行内第二行：预计人数 + 创建时间（人数未填的行只有时间）
-    expect(screen.getByText(/预计 4 人 · /)).toBeInTheDocument()
+    // 行内第二行：确认后的实际参会人数 + 创建时间（未确认的行只有时间）
+    expect(screen.getByText(/参会 4 人 · /)).toBeInTheDocument()
     const rows = screen.getAllByRole('link', { name: /评审|周会/ })
     expect(rows).toHaveLength(2)
   })

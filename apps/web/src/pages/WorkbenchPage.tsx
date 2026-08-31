@@ -152,13 +152,17 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
           )}
           <div className="meta-row" style={{ marginTop: 4 }}>
             <StateBadge state={meeting.state} />
-            <span className="divider-dot" />
-            <span>
-              预计人数：
-              {meeting.expected_speakers === null
-                ? '不确定'
-                : `${meeting.expected_speakers} 人`}
-            </span>
+            {meeting.speakers.length + meeting.unknown_speaker_count > 0 && (
+              <>
+                <span className="divider-dot" />
+                <span>
+                  参会 {meeting.speakers.length + meeting.unknown_speaker_count} 人：
+                  {meeting.speakers.join('、')}
+                  {meeting.unknown_speaker_count > 0 &&
+                    `${meeting.speakers.length > 0 ? '、' : ''}未知说话人 ×${meeting.unknown_speaker_count}`}
+                </span>
+              </>
+            )}
             {meeting.hotwords.length > 0 && (
               <>
                 <span className="divider-dot" />
@@ -202,7 +206,6 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
       {meeting.state === 'AWAITING_SPEAKER_REVIEW' && (
         <SpeakerReview
           meetingId={meetingId}
-          expectedSpeakers={meeting.expected_speakers}
           onSubmitted={(result) => {
             if (result.has_unconfirmed_speakers) {
               setNotice('本场含未确认说话人，纪要会带「含未确认说话人」标记')

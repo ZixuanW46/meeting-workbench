@@ -8,11 +8,14 @@ export interface Meeting {
   expected_speakers: number | null
   hotwords: string[]
   created_at: string
+  /** 已确认身份的参会人显示名，按累计发言时长降序；未完成确认时为空 */
+  speakers: string[]
+  /** 确认后仍未落名的说话人簇数 */
+  unknown_speaker_count: number
 }
 
 export interface MeetingCreateInput {
   title: string
-  expected_speakers: number | null
   hotwords: string[]
 }
 

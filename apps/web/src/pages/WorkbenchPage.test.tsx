@@ -11,6 +11,8 @@ const MEETING = {
   expected_speakers: null,
   hotwords: [],
   created_at: '2026-08-26T08:00:00Z',
+  speakers: [],
+  unknown_speaker_count: 0,
 }
 
 beforeEach(() => {
@@ -104,6 +106,29 @@ describe('工作台页', () => {
     expect(screen.getByRole('heading', { name: '产品周会' })).toBeInTheDocument()
     expect(screen.queryByLabelText('会议标题')).not.toBeInTheDocument()
     expect(patchCalled).toBe(false)
+  })
+
+  it('确认后的会议展示实际参会人数与人名', async () => {
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json({
+          ...MEETING,
+          state: 'READY',
+          speakers: ['Will', 'Leo', 'Eddie'],
+          unknown_speaker_count: 1,
+        }),
+      ),
+      http.get('/api/meetings/m1/minutes', () =>
+        HttpResponse.json({ markdown: '# 会议纪要', note: '' }),
+      ),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    expect(
+      await screen.findByText(/参会 4 人：Will、Leo、Eddie、未知说话人 ×1/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/预计人数/)).not.toBeInTheDocument()
   })
 
   it('READY 提供「重新确认说话人」，点击后回到确认停点', async () => {

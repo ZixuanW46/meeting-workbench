@@ -29,7 +29,7 @@ describe('api client', () => {
     expect(meetings[0].title).toBe('周会')
   })
 
-  it('createMeeting 发送标题、人数与热词', async () => {
+  it('createMeeting 发送标题与热词', async () => {
     let body: unknown = null
     server.use(
       http.post('/api/meetings', async ({ request }) => {
@@ -38,9 +38,9 @@ describe('api client', () => {
       }),
     )
 
-    await createMeeting({ title: '周会', expected_speakers: null, hotwords: ['声纹'] })
+    await createMeeting({ title: '周会', hotwords: ['声纹'] })
 
-    expect(body).toEqual({ title: '周会', expected_speakers: null, hotwords: ['声纹'] })
+    expect(body).toEqual({ title: '周会', hotwords: ['声纹'] })
   })
 
   it('409 缺卡错误带 missing_cluster_ids 并渲染成缺卡提示', async () => {

@@ -2,12 +2,9 @@ import { useState, type KeyboardEvent } from 'react'
 import { createMeeting, formatApiError } from '../api/client'
 import { Icon } from '../components/Icon'
 
-const SPEAKER_CHOICES = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-
 export function NewMeetingPage() {
   const [title, setTitle] = useState('')
   const [titleError, setTitleError] = useState<string | null>(null)
-  const [expectedSpeakers, setExpectedSpeakers] = useState('')
   const [hotwords, setHotwords] = useState<string[]>([])
   const [hotwordInput, setHotwordInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -42,7 +39,6 @@ export function NewMeetingPage() {
     try {
       const meeting = await createMeeting({
         title: title.trim(),
-        expected_speakers: expectedSpeakers === '' ? null : Number(expectedSpeakers),
         hotwords,
       })
       window.location.hash = `#/meetings/${meeting.id}`
@@ -89,24 +85,6 @@ export function NewMeetingPage() {
             }}
           />
           {titleError !== null && <span className="form-error">{titleError}</span>}
-        </div>
-
-        <div className="form-field">
-          <label htmlFor="meeting-speakers">预计人数</label>
-          <select
-            id="meeting-speakers"
-            className="select"
-            value={expectedSpeakers}
-            onChange={(event) => setExpectedSpeakers(event.target.value)}
-          >
-            <option value="">不确定</option>
-            {SPEAKER_CHOICES.map((count) => (
-              <option key={count} value={count}>
-                {count} 人
-              </option>
-            ))}
-          </select>
-          <span className="form-hint">只是先验参考，不确定完全合法</span>
         </div>
 
         <div className="form-field">

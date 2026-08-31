@@ -140,7 +140,10 @@ def test_worker_wraps_transcript_with_minutes_instructions(client):
     (prompt,) = adapter.prompts
     assert "会议纪要" in prompt
     assert "只输出纪要正文" in prompt
-    assert "不要编造" in prompt
+    assert "议程时间轴" in prompt
+    assert "后续跟进" in prompt
+    assert "@待认领" in prompt
+    assert "不得编造" in prompt
     assert "假转写第一段" in prompt  # 逐字稿本体在指令之后
     assert "王芳 00:00-00:05\n这是 meeting.wav 的假转写第一段" in prompt
     assert "[0.00" not in prompt
@@ -185,7 +188,7 @@ def test_blank_minutes_template_falls_back_to_default(client):
     assert client.app.state.worker.process_next() == meeting_id
 
     (prompt,) = adapter.prompts
-    assert "只输出纪要正文" in prompt
+    assert "议程时间轴" in prompt
 
 
 def test_auto_adapter_falls_back_to_codex_when_claude_fails(tmp_path):

@@ -117,7 +117,7 @@ export function SpeakerReview({ meetingId, onSubmitted }: SpeakerReviewProps) {
     <section className="section">
       <h2 className="section-title">说话人确认</h2>
       <p className="section-desc">
-        为每位说话人试听片段并做一个决定；系统只提供建议，最终身份由你确认，「暂不确定」也是合法决定。
+        为每位说话人试听片段并做一个决定；较高匹配已预选，过目后提交即可；系统只提供建议，「暂不确定」也合法。
       </p>
       <div className="review-cards">
         {cards.map((card, index) => (
@@ -152,7 +152,7 @@ export function SpeakerReview({ meetingId, onSubmitted }: SpeakerReviewProps) {
             </button>
           </div>
           <div className="review-batch-hint">
-            就近归属按声纹相似度并入上面已确认的人；这些发言在转写与纪要中会标注（就近归属），且不进声纹库。
+            就近归属按声纹并入已确认的人，不进声纹库；转写与纪要不再另标。
           </div>
         </div>
       )}

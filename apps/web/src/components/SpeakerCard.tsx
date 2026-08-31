@@ -7,6 +7,7 @@ import {
   type ReviewPerson,
 } from '../api/client'
 import { Icon } from './Icon'
+import { claimPlayback, releasePlayback } from './clipPlayback'
 
 /** 前端的决定草稿：只做体验层拦截，最终合法性以后端为准。 */
 export interface DecisionDraft {
@@ -94,10 +95,12 @@ function ClipWave({
   bars,
   progress,
   clipId,
+  onSeek,
 }: {
   bars: number[]
   progress: number
   clipId: string
+  onSeek: (ratio: number) => void
 }) {
   const rects = bars.map((value, index) => {
     const height = Math.max(2, value * 22)
@@ -118,6 +121,13 @@ function ClipWave({
       viewBox="0 0 192 24"
       preserveAspectRatio="none"
       aria-hidden="true"
+      onClick={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect()
+        if (rect.width <= 0) {
+          return
+        }
+        onSeek((event.clientX - rect.left) / rect.width)
+      }}
     >
       <defs>
         <clipPath id={clipId}>
@@ -147,10 +157,26 @@ export function SpeakerCard({
   const containerRef = useRef<HTMLDivElement>(null)
   const surferRef = useRef<WaveSurfer | null>(null)
   const activeRef = useRef<{ key: string; start: number; end: number } | null>(null)
+  // 独占总线里代表本卡的身份；stop 回调只暂停、保留播放头，方便回头续播
+  const ownerRef = useRef<symbol | null>(null)
+  if (ownerRef.current === null) {
+    ownerRef.current = Symbol('speaker-card')
+  }
+  const owner = ownerRef.current
   const [peaks, setPeaks] = useState<number[] | null>(null)
   const [decodedDuration, setDecodedDuration] = useState(0)
   const [activeKey, setActiveKey] = useState<string | null>(null)
+  const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
+
+  const pauseFromBus = () => {
+    try {
+      surferRef.current?.pause()
+    } catch {
+      // 忽略暂停失败
+    }
+    setPlaying(false)
+  }
 
   useEffect(() => {
     const container = containerRef.current
@@ -200,17 +226,28 @@ export function SpeakerCard({
       setProgress(span > 0 ? Math.min(1, Math.max(0, (time - active.start) / span)) : 0)
       if (time >= active.end) {
         activeRef.current = null
+        releasePlayback(owner)
         setActiveKey(null)
+        setPlaying(false)
         setProgress(0)
         ws.pause()
       }
     })
     return () => {
       activeRef.current = null
+      releasePlayback(owner)
       surferRef.current = null
       ws.destroy()
     }
-  }, [meetingId])
+  }, [meetingId, owner])
+
+  const stopSelf = () => {
+    activeRef.current = null
+    releasePlayback(owner)
+    setActiveKey(null)
+    setPlaying(false)
+    setProgress(0)
+  }
 
   const toggleClip = (key: string, start: number, end: number) => {
     const ws = surferRef.current
@@ -218,25 +255,56 @@ export function SpeakerCard({
       return
     }
     if (activeRef.current?.key === key) {
-      activeRef.current = null
-      setActiveKey(null)
-      setProgress(0)
+      if (playing) {
+        // 暂停保留播放头，再点播放从原位置续播
+        releasePlayback(owner)
+        setPlaying(false)
+        try {
+          ws.pause()
+        } catch {
+          // 忽略暂停失败
+        }
+        return
+      }
+      claimPlayback(owner, pauseFromBus)
+      setPlaying(true)
       try {
-        ws.pause()
+        void ws.play()
       } catch {
-        // 忽略暂停失败
+        stopSelf()
       }
       return
     }
+    claimPlayback(owner, pauseFromBus)
+    activeRef.current = { key, start, end }
+    setActiveKey(key)
+    setPlaying(true)
+    setProgress(0)
     try {
-      activeRef.current = { key, start, end }
-      setActiveKey(key)
-      setProgress(0)
       ws.setTime(start)
       void ws.play()
     } catch {
-      activeRef.current = null
-      setActiveKey(null)
+      stopSelf()
+    }
+  }
+
+  /** 点波形跳到片段内相对位置并从那里播放；点的是别的片段则切换过去 */
+  const seekClip = (key: string, start: number, end: number, ratio: number) => {
+    const ws = surferRef.current
+    if (ws === null) {
+      return
+    }
+    const clamped = Math.min(1, Math.max(0, ratio))
+    claimPlayback(owner, pauseFromBus)
+    activeRef.current = { key, start, end }
+    setActiveKey(key)
+    setPlaying(true)
+    setProgress(clamped)
+    try {
+      ws.setTime(start + clamped * (end - start))
+      void ws.play()
+    } catch {
+      stopSelf()
     }
   }
 
@@ -301,7 +369,9 @@ export function SpeakerCard({
       <div className="speaker-clips">
         {card.sample_clips.map((clip) => {
           const key = `${clip.start_seconds}-${clip.end_seconds}`
-          const playing = activeKey === key
+          const active = activeKey === key
+          const clipPlaying = active && playing
+          const span = clip.end_seconds - clip.start_seconds
           const bars =
             peaks !== null
               ? clipBars(peaks, decodedDuration, clip.start_seconds, clip.end_seconds)
@@ -313,21 +383,29 @@ export function SpeakerCard({
                 <button
                   type="button"
                   className="clip-play"
-                  aria-label={playing ? `暂停 ${range}` : `试听 ${range}`}
+                  aria-label={clipPlaying ? `暂停 ${range}` : `试听 ${range}`}
                   onClick={() =>
                     toggleClip(key, clip.start_seconds, clip.end_seconds)
                   }
                 >
-                  <Icon name={playing ? 'pause' : 'play'} size={10} />
+                  <Icon name={clipPlaying ? 'pause' : 'play'} size={10} />
                 </button>
                 {bars.length > 0 ? (
                   <ClipWave
                     bars={bars}
-                    progress={playing ? progress : 0}
+                    progress={active ? progress : 0}
                     clipId={`clip-${card.cluster_id}-${key}`}
+                    onSeek={(ratio) =>
+                      seekClip(key, clip.start_seconds, clip.end_seconds, ratio)
+                    }
                   />
                 ) : (
                   <span className="clip-wave" />
+                )}
+                {active && (
+                  <span className="clip-elapsed">
+                    {`${formatSeconds(progress * span)} / ${formatSeconds(span)}`}
+                  </span>
                 )}
                 <span className="clip-time">{range}</span>
               </div>

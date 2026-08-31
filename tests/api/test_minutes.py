@@ -141,6 +141,8 @@ def test_worker_wraps_transcript_with_minutes_instructions(client):
     assert "会议纪要" in prompt
     assert "只输出纪要正文" in prompt
     assert "议程时间轴" in prompt
+    assert "3～6 条要点" in prompt
+    assert "不堆砌直接引语" in prompt
     assert "后续跟进" in prompt
     assert "@待认领" in prompt
     assert "不得编造" in prompt

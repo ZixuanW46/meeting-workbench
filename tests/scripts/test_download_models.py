@@ -128,7 +128,7 @@ def test_dry_run_prefers_configured_hf_cli_candidate_when_executable(tmp_path):
     assert not data_dir.exists()
 
 
-def test_dry_run_falls_back_to_bare_hf_when_configured_candidate_is_missing(tmp_path):
+def test_dry_run_resolves_hf_from_path_when_configured_candidate_is_missing(tmp_path):
     data_dir = tmp_path / "data"
     calls_file = tmp_path / "network-calls"
     bin_dir = tmp_path / "bin"
@@ -145,8 +145,30 @@ def test_dry_run_falls_back_to_bare_hf_when_configured_candidate_is_missing(tmp_
     )
 
     assert result.returncode == 0, result.stderr
-    assert "[DRY RUN] hf download mlx-community/Qwen3-ASR-1.7B-8bit" in result.stdout
+    # 候选缺失时按 command -v 解析 PATH 上的 hf，干跑展示真实会执行的二进制。
+    assert (
+        f"{bin_dir / 'hf'} download mlx-community/Qwen3-ASR-1.7B-8bit"
+        in result.stdout
+    )
     assert not calls_file.exists()
+    assert not data_dir.exists()
+
+
+def test_dry_run_falls_back_to_bare_hf_when_nothing_is_available(tmp_path):
+    data_dir = tmp_path / "data"
+
+    result = _run(
+        env={
+            "DRY_RUN": "1",
+            "MW_DATA_DIR": str(data_dir),
+            "MW_HF_CLI": str(tmp_path / "missing-hf"),
+            # 只留系统基础目录：既无候选也无 PATH 上的 hf，走最后的裸 hf 分支。
+            "PATH": "/usr/bin:/bin",
+        }
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "[DRY RUN] hf download mlx-community/Qwen3-ASR-1.7B-8bit" in result.stdout
     assert not data_dir.exists()
 
 

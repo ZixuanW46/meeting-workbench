@@ -44,7 +44,11 @@ else
     # MW_HF_CLI 仅供测试或运维覆写候选路径；候选不可执行时仍回退裸 hf。
     HF_CLI="${MW_HF_CLI:-$REPO_ROOT/.venv/bin/hf}"
     if [[ ! -x "$HF_CLI" ]]; then
-        HF_CLI="hf"
+        if RESOLVED_HF_CLI="$(command -v hf 2>/dev/null)"; then
+            HF_CLI="$RESOLVED_HF_CLI"
+        else
+            HF_CLI="hf"
+        fi
     fi
     if [[ "$DRY_RUN" != "1" ]] && ! command -v "$HF_CLI" >/dev/null 2>&1; then
         echo "未找到 hf CLI（huggingface-hub 1.x），请先安装仓库的 mac 依赖。" >&2

@@ -222,6 +222,14 @@ export function createMeeting(input: MeetingCreateInput): Promise<Meeting> {
   return postJson<Meeting>('/api/meetings', input)
 }
 
+export function updateMeetingTitle(meetingId: string, title: string): Promise<Meeting> {
+  return apiFetch<Meeting>(`/api/meetings/${meetingId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  })
+}
+
 export function uploadAudio(
   meetingId: string,
   file: File,

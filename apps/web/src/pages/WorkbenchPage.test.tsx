@@ -56,6 +56,56 @@ describe('工作台页', () => {
     expect(screen.getByText(/本机 Claude 或 Codex CLI/)).toBeInTheDocument()
   })
 
+  it('标题可就地编辑，保存后展示新标题', async () => {
+    let patchedTitle: string | null = null
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json(
+          patchedTitle === null ? MEETING : { ...MEETING, title: patchedTitle },
+        ),
+      ),
+      http.patch('/api/meetings/m1', async ({ request }) => {
+        const body = (await request.json()) as { title: string }
+        patchedTitle = body.title
+        return HttpResponse.json({ ...MEETING, title: body.title })
+      }),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑标题' }))
+    const input = screen.getByLabelText('会议标题')
+    fireEvent.change(input, { target: { value: '08-30 团队战略会' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(
+      await screen.findByRole('heading', { name: '08-30 团队战略会' }),
+    ).toBeInTheDocument()
+    expect(patchedTitle).toBe('08-30 团队战略会')
+  })
+
+  it('编辑标题按 Esc 取消，不发请求', async () => {
+    let patchCalled = false
+    server.use(
+      http.get('/api/meetings/m1', () => HttpResponse.json(MEETING)),
+      http.patch('/api/meetings/m1', () => {
+        patchCalled = true
+        return HttpResponse.json(MEETING)
+      }),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '编辑标题' }))
+    const input = screen.getByLabelText('会议标题')
+    fireEvent.change(input, { target: { value: '不想要的标题' } })
+    fireEvent.keyDown(input, { key: 'Escape' })
+
+    expect(screen.getByRole('heading', { name: '产品周会' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('会议标题')).not.toBeInTheDocument()
+    expect(patchCalled).toBe(false)
+  })
+
   it('READY 提供「重新确认说话人」，点击后回到确认停点', async () => {
     let meetingState = 'READY'
     let reopenCalled = false

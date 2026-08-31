@@ -4,6 +4,7 @@ import {
   formatApiError,
   getMeeting,
   reopenReview,
+  updateMeetingTitle,
   type Meeting,
 } from '../api/client'
 import { DoctorBanner } from '../components/DoctorBanner'
@@ -29,6 +30,10 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
   const [meeting, setMeeting] = useState<Meeting | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  // 标题就地编辑：与词库注解同一套交互（Enter 保存 / Esc 取消）。
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
+  const [savingTitle, setSavingTitle] = useState(false)
   const meetingStateRef = useRef<string | null>(null)
   meetingStateRef.current = meeting?.state ?? null
 
@@ -44,6 +49,27 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  const saveTitle = async () => {
+    if (meeting === null) return
+    const trimmed = titleDraft.trim()
+    if (trimmed === '') return
+    if (trimmed === meeting.title) {
+      setEditingTitle(false)
+      return
+    }
+    setSavingTitle(true)
+    try {
+      const updated = await updateMeetingTitle(meetingId, trimmed)
+      setMeeting(updated)
+      setEditingTitle(false)
+      setError(null)
+    } catch (e: unknown) {
+      setError(formatApiError(e))
+    } finally {
+      setSavingTitle(false)
+    }
+  }
 
   if (meeting === null) {
     return (
@@ -68,8 +94,62 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
         返回会议列表
       </a>
       <div className="page-header">
-        <div>
-          <h1 className="page-title">{meeting.title}</h1>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {editingTitle ? (
+            <div className="title-edit-row">
+              <input
+                className="input input-title"
+                aria-label="会议标题"
+                value={titleDraft}
+                maxLength={200}
+                disabled={savingTitle}
+                autoFocus
+                onChange={(event) => setTitleDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    void saveTitle()
+                  }
+                  if (event.key === 'Escape') {
+                    setEditingTitle(false)
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="btn"
+                disabled={savingTitle || titleDraft.trim() === ''}
+                onClick={() => {
+                  void saveTitle()
+                }}
+              >
+                保存
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={savingTitle}
+                onClick={() => setEditingTitle(false)}
+              >
+                取消
+              </button>
+            </div>
+          ) : (
+            <div className="page-title-row">
+              <h1 className="page-title">{meeting.title}</h1>
+              <button
+                type="button"
+                className="btn btn-ghost title-edit-btn"
+                aria-label="编辑标题"
+                onClick={() => {
+                  setTitleDraft(meeting.title)
+                  setEditingTitle(true)
+                }}
+              >
+                <Icon name="edit" size={13} />
+              </button>
+            </div>
+          )}
           <div className="meta-row" style={{ marginTop: 4 }}>
             <StateBadge state={meeting.state} />
             <span className="divider-dot" />

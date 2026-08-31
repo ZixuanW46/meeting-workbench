@@ -185,6 +185,38 @@ a {
 }
 
 /* 页面标题走 card-title：22px / 600 / 负字距 */
+.page-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 编辑入口安静存在：悬停标题行才浮现，不与标题争视觉 */
+.title-edit-btn {
+  opacity: 0;
+  padding: 4px 6px;
+}
+
+.page-title-row:hover .title-edit-btn,
+.title-edit-btn:focus-visible {
+  opacity: 1;
+}
+
+.title-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.input-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+
 .page-title {
   font-size: 22px;
   font-weight: 600;

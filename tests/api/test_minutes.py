@@ -13,6 +13,7 @@ from meeting_api.minutes.adapter import (
     MinutesCliError,
     resolve_minutes_adapter,
 )
+from meeting_api.minutes.prompt import build_minutes_prompt, load_minutes_glossary
 from meeting_api.worker import Worker
 
 NOTE = "纪要文本会发送到 Claude/OpenAI 云端，音频不会上传"
@@ -159,6 +160,63 @@ def test_worker_wraps_transcript_with_minutes_instructions(client):
     assert "王芳 00:00-00:05\n这是 meeting.wav 的假转写第一段" in text
     assert "[0.00" not in text
     assert "只输出纪要正文" not in text
+
+
+def test_build_minutes_prompt_inserts_glossary_before_transcript_after_nearest_note():
+    prompt = build_minutes_prompt(
+        "王芳 00:00-00:05\n剑山项目进展",
+        nearest_assigned=True,
+        glossary="- 见山：教育项目品牌\n\n",
+    )
+
+    glossary_block = (
+        "公司术语表（逐字稿为语音识别产物，其中的近音误写请按下表纠正为标准写法；"
+        "注解仅供理解，不要照抄进纪要）：\n- 见山：教育项目品牌\n"
+    )
+    assert glossary_block in prompt
+    assert prompt.index("就近归属") < prompt.index("公司术语表")
+    assert prompt.index("公司术语表") < prompt.index("\n会议逐字稿：\n")
+
+
+def test_build_minutes_prompt_without_glossary_keeps_legacy_bytes():
+    transcript = "王芳 00:00-00:05\n普通逐字稿"
+
+    legacy_prompt = build_minutes_prompt(transcript)
+    prompt_with_none = build_minutes_prompt(transcript, glossary=None)
+
+    assert prompt_with_none == legacy_prompt
+    assert "公司术语表" not in prompt_with_none
+
+
+def test_load_minutes_glossary_matches_template_empty_file_behavior(tmp_path):
+    assert load_minutes_glossary(tmp_path) is None
+
+    glossary_path = tmp_path / "minutes_glossary.md"
+    glossary_path.write_text("   \n", encoding="utf-8")
+
+    assert load_minutes_glossary(tmp_path) is None
+
+
+def test_worker_passes_minutes_glossary_to_prompt_without_polluting_transcript(client):
+    meeting_id = _prepare_generating_minutes(client)
+    glossary_line = "- 见山：教育项目品牌"
+    (client.app.state.settings.data_dir / "minutes_glossary.md").write_text(
+        f"{glossary_line}\n", encoding="utf-8"
+    )
+    adapter = RecordingAdapter()
+    client.app.state.worker.minutes_adapter = adapter
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    (prompt,) = adapter.prompts
+    assert glossary_line in prompt
+    assert prompt.index(glossary_line) < prompt.index("会议逐字稿：")
+
+    transcript_path = (
+        client.app.state.settings.data_dir / "meetings" / meeting_id / "transcript.txt"
+    )
+    transcript = transcript_path.read_text(encoding="utf-8")
+    assert glossary_line not in transcript
 
 
 def test_custom_minutes_template_overrides_default_instructions(client):

@@ -65,6 +65,7 @@ def build_minutes_prompt(
     *,
     template: str | None = None,
     nearest_assigned: bool = False,
+    glossary: str | None = None,
 ) -> str:
     """template 非空时覆盖默认指令头；逐字稿始终附在指令之后。
 
@@ -74,7 +75,13 @@ def build_minutes_prompt(
         f"{template.rstrip()}\n" if template is not None else MINUTES_PROMPT_INSTRUCTIONS
     )
     note = NEAREST_NOTE if nearest_assigned else ""
-    return f"{instructions}{note}\n会议逐字稿：\n{transcript}"
+    glossary_block = (
+        "公司术语表（逐字稿为语音识别产物，其中的近音误写请按下表纠正为标准写法；"
+        f"注解仅供理解，不要照抄进纪要）：\n{glossary.rstrip()}\n"
+        if glossary
+        else ""
+    )
+    return f"{instructions}{note}{glossary_block}\n会议逐字稿：\n{transcript}"
 
 
 def load_minutes_template(data_dir: Path) -> str | None:
@@ -84,6 +91,18 @@ def load_minutes_template(data_dir: Path) -> str | None:
     """
     try:
         text = (data_dir / "minutes_prompt.md").read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return text or None
+
+
+def load_minutes_glossary(data_dir: Path) -> str | None:
+    """读取 data_dir/minutes_glossary.md 作为公司术语表；不存在或为空返回 None。
+
+    用户借此维护专有名词与注解；文件属本机数据，不入 git。
+    """
+    try:
+        text = (data_dir / "minutes_glossary.md").read_text(encoding="utf-8").strip()
     except OSError:
         return None
     return text or None

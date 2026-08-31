@@ -20,7 +20,11 @@ from meeting_api.minutes.adapter import (
     MinutesCliError,
     resolve_minutes_adapter,
 )
-from meeting_api.minutes.prompt import build_minutes_prompt, load_minutes_template
+from meeting_api.minutes.prompt import (
+    build_minutes_prompt,
+    load_minutes_glossary,
+    load_minutes_template,
+)
 from meeting_api.models import (
     ASSIGNED_VIA_VOICEPRINT_NEAREST,
     HotwordEntry,
@@ -258,6 +262,7 @@ class Worker:
                     transcript,
                     template=load_minutes_template(self.settings.data_dir),
                     nearest_assigned=nearest_assigned,
+                    glossary=load_minutes_glossary(self.settings.data_dir),
                 )
             )
             if nearest_assigned:

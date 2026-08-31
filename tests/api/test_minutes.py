@@ -144,6 +144,11 @@ def test_worker_wraps_transcript_with_minutes_instructions(client):
     assert "只输出纪要正文" in prompt
     assert "议程时间轴" in prompt
     assert "3～6 条要点" in prompt
+    assert "待决问题与风险" in prompt
+    assert "5～8 个" in prompt
+    assert "以会议最终认定的口径" in prompt
+    assert "换算成绝对日期" in prompt
+    assert "不要泛化成「某资源」" in prompt
     assert "不堆砌直接引语" in prompt
     assert "近音错词" in prompt
     assert "后续跟进" in prompt
@@ -278,6 +283,11 @@ def test_blank_minutes_template_falls_back_to_default(client):
     assert "议程时间轴" in prompt
     assert "每人只列一次" in prompt
     assert "更不要把几套条款挤进同一条要点" in prompt
+    assert "待决问题与风险" in prompt
+    assert "5～8 个" in prompt
+    assert "以会议最终认定的口径" in prompt
+    assert "换算成绝对日期" in prompt
+    assert "不要泛化成「某资源」" in prompt
 
 
 def test_auto_adapter_falls_back_to_codex_when_claude_fails(tmp_path):

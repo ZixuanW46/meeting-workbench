@@ -15,8 +15,7 @@ MINUTES_PROMPT_INSTRUCTIONS = (
     "一、一级标题：从内容提炼的会议主题（一行，不写「会议纪要」四个字本身；"
     "逐字稿内能确认日期时可用「MM-DD 会议：主题」格式，确认不了就只写主题）。\n"
     "\n"
-    "二、`**参会人员：**` 一行：罗列逐字稿中实际发言的人，每人只列一次——"
-    "同一人名带不带「（就近归属）」都算同一个人，名字后不要带任何标注。"
+    "二、`**参会人员：**` 一行：罗列逐字稿中实际发言的人，每人只列一次；"
     "未确认身份的按原样引用（如「未知说话人（S2）」），不得猜测或改名；"
     "只被提及而未发言的人名后加「（提及）」。\n"
     "\n"
@@ -57,12 +56,6 @@ MINUTES_PROMPT_INSTRUCTIONS = (
     "- 说话人身份未确认时一律按逐字稿中的标签引用，不要猜测真实姓名。\n"
 )
 
-# 就近归属的发言署名可信度低于人工确认：让模型对出自这些行的关键内容标（待核）。
-NEAREST_NOTE = (
-    "逐字稿中署名带「（就近归属）」的发言，其身份来自声纹就近归属、可信度低于"
-    "人工确认；关键结论或行动项若出自这些发言，请在其后标注（待核）。\n"
-)
-
 # 兼容旧引用：完整默认头 = 指令 + 逐字稿引导行。
 MINUTES_PROMPT_HEADER = f"{MINUTES_PROMPT_INSTRUCTIONS}\n会议逐字稿：\n"
 
@@ -71,24 +64,19 @@ def build_minutes_prompt(
     transcript: str,
     *,
     template: str | None = None,
-    nearest_assigned: bool = False,
     glossary: str | None = None,
 ) -> str:
-    """template 非空时覆盖默认指令头；逐字稿始终附在指令之后。
-
-    nearest_assigned 表示逐字稿含「（就近归属）」署名，补一条措辞指令。
-    """
+    """template 非空时覆盖默认指令头；逐字稿始终附在指令之后。"""
     instructions = (
         f"{template.rstrip()}\n" if template is not None else MINUTES_PROMPT_INSTRUCTIONS
     )
-    note = NEAREST_NOTE if nearest_assigned else ""
     glossary_block = (
         "公司术语表（逐字稿为语音识别产物，其中的近音误写请按下表纠正为标准写法；"
         f"注解仅供理解，不要照抄进纪要）：\n{glossary.rstrip()}\n"
         if glossary
         else ""
     )
-    return f"{instructions}{note}{glossary_block}\n会议逐字稿：\n{transcript}"
+    return f"{instructions}{glossary_block}\n会议逐字稿：\n{transcript}"
 
 
 def load_minutes_template(data_dir: Path) -> str | None:

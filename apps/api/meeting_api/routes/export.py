@@ -8,7 +8,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from meeting_api.models import (
-    ASSIGNED_VIA_VOICEPRINT_NEAREST,
     Meeting,
     Person,
     SpeakerCluster,
@@ -67,12 +66,6 @@ def _build_export_transcript(session: Session, meeting_id: str) -> str:
     labels: dict[str, str] = {}
     for cluster in clusters:
         label = people.get(cluster.person_id) or f"说话人{cluster.cluster_id}（未确认）"
-        if (
-            cluster.assigned_via == ASSIGNED_VIA_VOICEPRINT_NEAREST
-            and cluster.person_id is not None
-        ):
-            # 就近归属的署名如实标注，与纪要口径一致。
-            label = f"{label}（就近归属）"
         labels[cluster.cluster_id] = label
     transcript = format_transcript_blocks(
         [

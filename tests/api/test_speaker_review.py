@@ -698,7 +698,7 @@ def test_nearest_confirmed_with_missing_embedding_returns_422(client):
     assert "重转写" in str(response.json()["detail"])
 
 
-def test_nearest_assignment_marks_minutes_and_transcript(client):
+def test_nearest_assignment_does_not_mark_minutes_and_transcript(client):
     meeting_id = _prepare_three_cluster_review(client)
     _copy_cluster_embedding(client, meeting_id, "S1", "S3")
     response = client.post(
@@ -712,7 +712,7 @@ def test_nearest_assignment_marks_minutes_and_transcript(client):
         },
     )
     assert response.status_code == 200
-    # 给 S3 插一条转写行，验证逐字稿署名带「（就近归属）」标注。
+    # 给 S3 插一条转写行，验证逐字稿署名不暴露归属方式。
     from meeting_api.models import TranscriptSegment
 
     with client.app.state.session_factory() as session:
@@ -731,7 +731,7 @@ def test_nearest_assignment_marks_minutes_and_transcript(client):
 
     minutes = client.get(f"/api/meetings/{meeting_id}/minutes")
     assert minutes.status_code == 200
-    assert minutes.json()["markdown"].startswith("部分次要发言按声纹就近归属")
+    assert "部分次要发言按声纹就近归属" not in minutes.json()["markdown"]
     transcript = client.get(f"/api/meetings/{meeting_id}/export/transcript.md").text
-    assert "（就近归属）" in transcript
-    assert "已知用户 1（就近归属） 01:30-01:32\n补一句。" in transcript
+    assert "（就近归属）" not in transcript
+    assert "已知用户 1 01:30-01:32\n补一句。" in transcript

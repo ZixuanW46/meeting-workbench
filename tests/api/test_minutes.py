@@ -162,10 +162,9 @@ def test_worker_wraps_transcript_with_minutes_instructions(client):
     assert "只输出纪要正文" not in text
 
 
-def test_build_minutes_prompt_inserts_glossary_before_transcript_after_nearest_note():
+def test_build_minutes_prompt_inserts_glossary_before_transcript_without_nearest_note():
     prompt = build_minutes_prompt(
         "王芳 00:00-00:05\n剑山项目进展",
-        nearest_assigned=True,
         glossary="- 见山：教育项目品牌\n\n",
     )
 
@@ -174,7 +173,8 @@ def test_build_minutes_prompt_inserts_glossary_before_transcript_after_nearest_n
         "注解仅供理解，不要照抄进纪要）：\n- 见山：教育项目品牌\n"
     )
     assert glossary_block in prompt
-    assert prompt.index("就近归属") < prompt.index("公司术语表")
+    assert "就近归属" not in prompt
+    assert "（待核）" not in prompt
     assert prompt.index("公司术语表") < prompt.index("\n会议逐字稿：\n")
 
 

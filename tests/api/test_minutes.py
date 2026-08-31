@@ -249,6 +249,8 @@ def test_blank_minutes_template_falls_back_to_default(client):
 
     (prompt,) = adapter.prompts
     assert "议程时间轴" in prompt
+    assert "每人只列一次" in prompt
+    assert "更不要把几套条款挤进同一条要点" in prompt
 
 
 def test_auto_adapter_falls_back_to_codex_when_claude_fails(tmp_path):

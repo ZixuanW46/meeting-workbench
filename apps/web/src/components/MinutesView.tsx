@@ -1,4 +1,6 @@
 import { Fragment, useEffect, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
   ApiError,
   formatApiError,
@@ -15,43 +17,10 @@ interface MinutesViewProps {
   onRetried: () => void
 }
 
-// 极简 markdown 渲染：标题 / 列表 / 段落，纪要内容不需要更多
+// 纪要由本机 LLM 产出，构件不可控（粗体、嵌套列表、checkbox、表格都可能
+// 出现），交给 react-markdown + GFM 完整渲染，避免把标记符号漏给用户。
 function renderMarkdown(markdown: string) {
-  const blocks: Array<{ type: 'heading' | 'paragraph'; text: string } | { type: 'list'; items: string[] }> = []
-  for (const rawLine of markdown.split('\n')) {
-    const line = rawLine.trim()
-    if (line === '') {
-      continue
-    }
-    if (line.startsWith('#')) {
-      blocks.push({ type: 'heading', text: line.replace(/^#+\s*/, '') })
-    } else if (line.startsWith('- ') || line.startsWith('* ')) {
-      const last = blocks[blocks.length - 1]
-      const item = line.slice(2)
-      if (last !== undefined && last.type === 'list') {
-        last.items.push(item)
-      } else {
-        blocks.push({ type: 'list', items: [item] })
-      }
-    } else {
-      blocks.push({ type: 'paragraph', text: line })
-    }
-  }
-  return blocks.map((block, index) => {
-    if (block.type === 'heading') {
-      return <h3 key={index}>{block.text}</h3>
-    }
-    if (block.type === 'list') {
-      return (
-        <ul key={index}>
-          {block.items.map((item, itemIndex) => (
-            <li key={itemIndex}>{item}</li>
-          ))}
-        </ul>
-      )
-    }
-    return <p key={index}>{block.text}</p>
-  })
+  return <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
 }
 
 export function MinutesView({ meetingId, canRetry, onRetried }: MinutesViewProps) {

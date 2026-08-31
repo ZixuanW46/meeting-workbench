@@ -1198,3 +1198,26 @@ a {
     transform: none;
   }
 }
+
+/* GFM 任务列表（纪要「后续跟进」）：去掉原生圆点，复选框与文字对齐 */
+.minutes-body ul.contains-task-list {
+  padding-left: 2px;
+}
+
+.minutes-body li.task-list-item {
+  list-style: none;
+}
+
+.minutes-body li.task-list-item input[type='checkbox'] {
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+
+.minutes-body strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.minutes-body ul ul {
+  margin: 2px 0;
+}

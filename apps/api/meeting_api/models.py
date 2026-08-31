@@ -32,6 +32,9 @@ class Meeting(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
     title: Mapped[str] = mapped_column(String(200))
+    title_user_edited: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0"
+    )
     state: Mapped[str] = mapped_column(String(32), default=MeetingState.DRAFT.value)
     # 预计人数是先验，不是硬约束；None = 不确定
     expected_speakers: Mapped[int | None] = mapped_column(default=None)

@@ -355,10 +355,14 @@ def test_minutes_generation_updates_title_from_h1_with_cleaned_date_prefix(clien
         assert meeting.title == f"{expected_date}：见山社团落地与升学辅导试点"
 
 
-def test_minutes_generation_keeps_existing_title_when_markdown_has_no_h1(client):
+def test_minutes_generation_keeps_user_edited_title_when_markdown_has_h1(client):
     meeting_id = _prepare_generating_minutes(client)
     client.patch(f"/api/meetings/{meeting_id}", json={"title": "人工标题"})
-    adapter = MarkdownAdapter("## 不是一级标题\n\n正文")
+    with client.app.state.session_factory() as session:
+        meeting = session.get(Meeting, meeting_id)
+        assert meeting is not None
+        assert meeting.title_user_edited is True
+    adapter = MarkdownAdapter("# 模型生成标题\n\n正文")
     client.app.state.worker.minutes_adapter = adapter
 
     assert client.app.state.worker.process_next() == meeting_id
@@ -367,6 +371,25 @@ def test_minutes_generation_keeps_existing_title_when_markdown_has_no_h1(client)
         meeting = session.get(Meeting, meeting_id)
         assert meeting is not None
         assert meeting.title == "人工标题"
+
+
+def test_minutes_retry_keeps_user_edited_title_locked(client):
+    meeting_id = _prepare_generating_minutes(client)
+    client.patch(f"/api/meetings/{meeting_id}", json={"title": "重试也保留的标题"})
+    client.app.state.worker.minutes_adapter = FakeMinutesAdapter(
+        error=MinutesCliError("模拟首次生成失败")
+    )
+
+    assert client.app.state.worker.process_next() == meeting_id
+    assert client.post(f"/api/meetings/{meeting_id}/minutes/retry").status_code == 200
+
+    client.app.state.worker.minutes_adapter = MarkdownAdapter("# 重试生成的新标题\n\n正文")
+    assert client.app.state.worker.process_next() == meeting_id
+
+    with client.app.state.session_factory() as session:
+        meeting = session.get(Meeting, meeting_id)
+        assert meeting is not None
+        assert meeting.title == "重试也保留的标题"
 
 
 def test_minutes_generation_truncates_auto_title_to_200_chars(client):

@@ -142,6 +142,7 @@ def update_meeting_title(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会议不存在")
 
         meeting.title = payload.title
+        meeting.title_user_edited = True
         session.commit()
         session.refresh(meeting)
         summary = _speaker_summaries(session, [meeting.id]).get(meeting.id, ([], 0))

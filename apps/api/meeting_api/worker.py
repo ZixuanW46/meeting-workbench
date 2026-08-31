@@ -296,7 +296,7 @@ class Worker:
                 )
             )
             auto_title = _auto_title_from_minutes(markdown, meeting.created_at)
-            if auto_title is not None:
+            if auto_title is not None and not meeting.title_user_edited:
                 meeting.title = auto_title
             if meeting.has_unconfirmed_speakers:
                 markdown = f"含未确认说话人\n\n{markdown}"

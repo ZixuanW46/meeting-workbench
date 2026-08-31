@@ -129,6 +129,25 @@ describe('说话人确认卡', () => {
     })
   })
 
+  it('文案：预选说明诚实、批量提示不再提「（就近归属）」标注', async () => {
+    server.use(
+      http.get('/api/meetings/m1/review', () => HttpResponse.json(TAIL_CARDS)),
+    )
+    render(<SpeakerReview meetingId="m1" onSubmitted={() => {}} />)
+
+    await findCard('S4')
+    expect(
+      screen.getByText(
+        /较高匹配已预选，过目后提交即可；系统只提供建议，「暂不确定」也合法/,
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('就近归属按声纹并入已确认的人，不进声纹库；转写与纪要不再另标。'),
+    ).toBeInTheDocument()
+    // 标签已移除，任何文案不得再承诺「（就近归属）」标注
+    expect(screen.queryByText(/（就近归属）/)).not.toBeInTheDocument()
+  })
+
   it('尾簇批量栏：全部保持匿名触发未确认提示', async () => {
     server.use(
       http.get('/api/meetings/m1/review', () => HttpResponse.json(TAIL_CARDS)),

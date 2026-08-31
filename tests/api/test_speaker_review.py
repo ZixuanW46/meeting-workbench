@@ -734,4 +734,4 @@ def test_nearest_assignment_marks_minutes_and_transcript(client):
     assert minutes.json()["markdown"].startswith("部分次要发言按声纹就近归属")
     transcript = client.get(f"/api/meetings/{meeting_id}/export/transcript.md").text
     assert "（就近归属）" in transcript
-    assert "已知用户 1（就近归属）：补一句。" in transcript
+    assert "已知用户 1（就近归属） 01:30-01:32\n补一句。" in transcript

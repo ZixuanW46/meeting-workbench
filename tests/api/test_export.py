@@ -83,6 +83,9 @@ def test_transcript_export_is_time_ordered_and_uses_final_speaker_labels(client)
     assert "已知用户 1" in response.text
     assert "说话人S2（未确认）" in response.text
     assert "未知说话人" not in response.text
+    assert "[0.00" not in response.text
+    assert "已知用户 1 00:00-00:05\n这是 meeting.wav 的假转写第一段" in response.text
+    assert "说话人S2（未确认） 00:05-00:10\n这是假转写第二段" in response.text
     assert str(client.app.state.settings.data_dir) not in response.text
     assert str(client.app.state.settings.data_dir) not in str(response.headers)
 

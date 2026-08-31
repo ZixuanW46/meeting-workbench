@@ -15,6 +15,7 @@ from meeting_api.models import (
     TranscriptSegment,
 )
 from meeting_api.storage import meeting_dir
+from meeting_api.transcript_format import format_transcript_blocks
 from meeting_domain import MeetingState
 
 router = APIRouter(prefix="/api/meetings")
@@ -73,14 +74,18 @@ def _build_export_transcript(session: Session, meeting_id: str) -> str:
             # 就近归属的署名如实标注，与纪要口径一致。
             label = f"{label}（就近归属）"
         labels[cluster.cluster_id] = label
-    lines = ["# 会议转写", ""]
-    lines.extend(
-        f"[{segment.start_seconds:.2f}-{segment.end_seconds:.2f}] "
-        f"{labels.get(segment.cluster_id, f'说话人{segment.cluster_id}（未确认）')}："
-        f"{segment.text}"
-        for segment in segments
+    transcript = format_transcript_blocks(
+        [
+            (
+                segment.start_seconds,
+                segment.end_seconds,
+                labels.get(segment.cluster_id, f"说话人{segment.cluster_id}（未确认）"),
+                segment.text,
+            )
+            for segment in segments
+        ]
     )
-    return "\n".join(lines)
+    return "\n".join(["# 会议转写", "", transcript])
 
 
 def _read_minutes(request: Request, meeting_id: str) -> str:

@@ -47,6 +47,7 @@ from meeting_api.pipeline.embedding import (
 )
 from meeting_api.pipeline.serial import SingleModelSlot
 from meeting_api.storage import meeting_dir
+from meeting_api.transcript_format import format_transcript_blocks
 from meeting_domain import (
     MeetingState,
     SpeakerDecision,
@@ -321,10 +322,16 @@ class Worker:
                 label = f"{label}（就近归属）"
                 nearest_assigned = True
             labels[cluster.cluster_id] = label
-        transcript = "\n".join(
-            f"[{segment.start_seconds:.2f}-{segment.end_seconds:.2f}] "
-            f"{labels.get(segment.cluster_id, segment.cluster_id)}: {segment.text}"
-            for segment in segments
+        transcript = format_transcript_blocks(
+            [
+                (
+                    segment.start_seconds,
+                    segment.end_seconds,
+                    labels.get(segment.cluster_id, segment.cluster_id),
+                    segment.text,
+                )
+                for segment in segments
+            ]
         )
         return transcript, nearest_assigned
 

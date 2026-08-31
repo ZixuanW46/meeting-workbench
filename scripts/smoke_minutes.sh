@@ -20,9 +20,14 @@ from meeting_api.minutes.prompt import build_minutes_prompt
 
 transcript = "\n".join(
     [
-        "[0.00-6.00] 王芳: 今天确认两件事，上线时间和负责人分工。",
-        "[6.00-12.00] 李雷: 上线定在周五；我负责发布，回滚预案周四给出。",
-        "[12.00-18.00] 王芳: 好，会后我把纪要发给大家。",
+        "王芳 00:00-00:06",
+        "今天确认两件事，上线时间和负责人分工。",
+        "",
+        "李雷 00:06-00:12",
+        "上线定在周五；我负责发布，回滚预案周四给出。",
+        "",
+        "王芳 00:12-00:18",
+        "好，会后我把纪要发给大家。",
     ]
 )
 markdown = AutoMinutesAdapter().generate(build_minutes_prompt(transcript))

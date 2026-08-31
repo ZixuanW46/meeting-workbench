@@ -82,7 +82,10 @@ def test_fake_adapter_success_makes_meeting_ready_and_exposes_minutes(client):
         / "transcript.txt"
     )
     assert transcript_path.is_file()
-    assert "假转写第一段" in transcript_path.read_text(encoding="utf-8")
+    transcript = transcript_path.read_text(encoding="utf-8")
+    assert "王芳 00:00-00:05\n这是 meeting.wav 的假转写第一段" in transcript
+    assert "李雷 00:05-00:10\n这是假转写第二段" in transcript
+    assert "[0.00" not in transcript
     assert str(client.app.state.settings.data_dir) not in response.text
 
 
@@ -139,6 +142,8 @@ def test_worker_wraps_transcript_with_minutes_instructions(client):
     assert "只输出纪要正文" in prompt
     assert "不要编造" in prompt
     assert "假转写第一段" in prompt  # 逐字稿本体在指令之后
+    assert "王芳 00:00-00:05\n这是 meeting.wav 的假转写第一段" in prompt
+    assert "[0.00" not in prompt
     assert prompt.index("只输出纪要正文") < prompt.index("假转写第一段")
 
     # 磁盘上的 transcript.txt 仍是纯逐字稿，不掺指令。
@@ -146,7 +151,8 @@ def test_worker_wraps_transcript_with_minutes_instructions(client):
         client.app.state.settings.data_dir / "meetings" / meeting_id / "transcript.txt"
     )
     text = transcript_path.read_text(encoding="utf-8")
-    assert "假转写第一段" in text
+    assert "王芳 00:00-00:05\n这是 meeting.wav 的假转写第一段" in text
+    assert "[0.00" not in text
     assert "只输出纪要正文" not in text
 
 

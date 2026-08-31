@@ -5,6 +5,10 @@
 """
 
 from meeting_domain.fake_pipeline import FakeMeetingPipeline
+from meeting_domain.fragment_absorption import (
+    FRAGMENT_ABSORB_MAX_DISTANCE,
+    plan_fragment_absorption,
+)
 from meeting_domain.hotwords import snapshot
 from meeting_domain.sampling import REVIEW_CLIP_LIMIT, select_spread_windows
 from meeting_domain.speaker_review import (
@@ -44,6 +48,7 @@ from meeting_domain.voiceprint import (
 
 __all__ = [
     "ACTIVE_STATES",
+    "FRAGMENT_ABSORB_MAX_DISTANCE",
     "REOPENABLE_REVIEW_STATES",
     "RETRANSCRIBABLE_STATES",
     "REVIEW_CLIP_LIMIT",
@@ -71,6 +76,7 @@ __all__ = [
     "has_unconfirmed_speakers",
     "match_voiceprint",
     "plan_enrollment",
+    "plan_fragment_absorption",
     "review_complete",
     "select_spread_windows",
     "snapshot",

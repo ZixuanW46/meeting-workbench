@@ -58,6 +58,7 @@ from meeting_domain import (
     eligible_for_enrollment,
     match_voiceprint,
     plan_enrollment,
+    plan_fragment_absorption,
     select_spread_windows,
     snapshot,
     transition,
@@ -224,6 +225,7 @@ class Worker:
                 )
 
                 self._set_step(session, meeting, STEP_PREPARING_REVIEW)
+                turns = self._absorb_fragment_clusters(session, meeting_id, turns)
                 self._prepare_review_samples(session, meeting_id, turns)
 
                 meeting.state = transition(
@@ -478,6 +480,64 @@ class Worker:
                     cluster.suggested_person_id = match.person_id
                     cluster.suggested_tier = match.tier.value
         session.commit()
+
+    def _absorb_fragment_clusters(
+        self,
+        session: Session,
+        meeting_id: str,
+        turns: Sequence[SpeakerSegment],
+    ) -> list[SpeakerSegment]:
+        """出卡前把超短碎簇按簇声纹并入最相近的主簇，压掉确认卡噪声。
+
+        只重标簇标签（转写段、时长、发言轮次），不碰任何身份字段；
+        并入的归属随目标簇的卡走人工确认。主簇声纹保持匹配阶段原值，
+        不掺碎片片段，入库复用时口径更纯。
+        """
+        clusters = session.scalars(
+            select(SpeakerCluster)
+            .where(SpeakerCluster.meeting_id == meeting_id)
+            .order_by(SpeakerCluster.cluster_id)
+        ).all()
+        plan = plan_fragment_absorption(
+            [
+                (
+                    cluster.cluster_id,
+                    cluster.total_seconds,
+                    embedding_from_bytes(cluster.embedding)
+                    if cluster.embedding is not None
+                    else None,
+                )
+                for cluster in clusters
+            ],
+            max_fragment_seconds=self.settings.fragment_merge_max_seconds,
+        )
+        if not plan:
+            return list(turns)
+
+        cluster_by_id = {cluster.cluster_id: cluster for cluster in clusters}
+        for fragment_id, target_id in plan.items():
+            fragment = cluster_by_id[fragment_id]
+            target = cluster_by_id[target_id]
+            target.total_seconds += fragment.total_seconds
+            session.delete(fragment)
+
+        segments = session.scalars(
+            select(TranscriptSegment).where(
+                TranscriptSegment.meeting_id == meeting_id,
+                TranscriptSegment.cluster_id.in_(list(plan)),
+            )
+        ).all()
+        for segment in segments:
+            segment.cluster_id = plan[segment.cluster_id]
+
+        session.commit()
+        relabeled_turns = [
+            turn
+            if turn.cluster_id not in plan
+            else SpeakerSegment(turn.start, turn.end, plan[turn.cluster_id])
+            for turn in turns
+        ]
+        return merge_adjacent_turns(relabeled_turns)
 
     def enroll_voiceprints(
         self,

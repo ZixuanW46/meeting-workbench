@@ -7,26 +7,28 @@ interface TranscriptRow {
   text: string
 }
 
-// 后端导出行形如：[12.00-15.50] 张三：今天先对齐进度
-const LINE_PATTERN = /^\[(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)\]\s*(.+?)：(.*)$/
-
-function formatSeconds(value: string): string {
-  const total = Number(value)
-  const minutes = Math.floor(total / 60)
-  const seconds = Math.floor(total % 60)
-  return `${minutes}:${String(seconds).padStart(2, '0')}`
-}
+// 后端导出为 PLAUD 风格段落块：标签行「{说话人} {mm:ss}-{mm:ss}」（超一小时为
+// h:mm:ss）+ 合并文本行，块间空行；时间戳已格式化，前端不再换算。
+const HEADER_PATTERN = /^(.+?)\s+(\d+:\d{2}(?::\d{2})?)-(\d+:\d{2}(?::\d{2})?)$/
 
 function parseTranscript(markdown: string): TranscriptRow[] {
   const rows: TranscriptRow[] = []
-  for (const line of markdown.split('\n')) {
-    const match = LINE_PATTERN.exec(line.trim())
+  let current: TranscriptRow | null = null
+  for (const raw of markdown.split('\n')) {
+    const line = raw.trim()
+    if (line === '' || line.startsWith('#')) {
+      continue
+    }
+    const match = HEADER_PATTERN.exec(line)
     if (match !== null) {
-      rows.push({
-        time: `${formatSeconds(match[1])} – ${formatSeconds(match[2])}`,
-        speaker: match[3],
-        text: match[4],
-      })
+      current = {
+        time: `${match[2]} – ${match[3]}`,
+        speaker: match[1],
+        text: '',
+      }
+      rows.push(current)
+    } else if (current !== null) {
+      current.text = current.text === '' ? line : `${current.text} ${line}`
     }
   }
   return rows

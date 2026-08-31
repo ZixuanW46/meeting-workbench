@@ -43,7 +43,7 @@ describe('工作台页', () => {
         HttpResponse.json({ ...MEETING, state: 'PARTIAL_READY' }),
       ),
       http.get('/api/meetings/m1/export/transcript.md', () =>
-        HttpResponse.text('[0.00-1.50] 张三：先对齐进度'),
+        HttpResponse.text('张三 00:00-00:01\n先对齐进度'),
       ),
     )
 

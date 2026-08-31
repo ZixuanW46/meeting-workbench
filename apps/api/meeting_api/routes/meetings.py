@@ -144,7 +144,8 @@ def update_meeting_title(
         meeting.title = payload.title
         session.commit()
         session.refresh(meeting)
-        return _to_response(meeting)
+        summary = _speaker_summaries(session, [meeting.id]).get(meeting.id, ([], 0))
+        return _to_response(meeting, summary)
 
 
 @router.post("/{meeting_id}/retranscribe", response_model=MeetingResponse)

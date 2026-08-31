@@ -5,14 +5,20 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from alembic.config import Config
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
+from sqlalchemy.engine import Engine
 
 from meeting_api.config import Settings
+from meeting_api.db import make_engine
 
 router = APIRouter(prefix="/api")
 
 _GIB = 1024**3
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 class ModelsStatus(BaseModel):
@@ -26,6 +32,13 @@ class CliStatus(BaseModel):
     codex_available: bool
 
 
+class MigrationsStatus(BaseModel):
+    current_revision: str | None
+    head_revision: str
+    pending: bool
+    warning: str | None
+
+
 class DoctorResponse(BaseModel):
     ffmpeg: bool
     models: ModelsStatus
@@ -33,6 +46,7 @@ class DoctorResponse(BaseModel):
     disk_gb_free: float
     transcription_ready: bool
     minutes_ready: bool
+    migrations: MigrationsStatus
 
 
 def cli_available(name: str) -> bool:
@@ -60,7 +74,37 @@ def probe_cli_status() -> CliStatus:
     )
 
 
-def build_doctor_report(settings: Settings) -> DoctorResponse:
+def probe_migrations(engine: Engine) -> MigrationsStatus:
+    """只读比较数据库当前 revision 与仓库 Alembic head。"""
+    config = Config(str(_REPO_ROOT / "alembic.ini"))
+    config.set_main_option(
+        "script_location", str(_REPO_ROOT / "apps/api/migrations")
+    )
+    head_revision = ScriptDirectory.from_config(config).get_current_head()
+    if head_revision is None:
+        raise RuntimeError("Alembic 未找到 head revision")
+    with engine.connect() as connection:
+        current_revision = MigrationContext.configure(connection).get_current_revision()
+    pending = current_revision != head_revision
+    current_label = f"当前 {current_revision}" if current_revision else "当前未初始化"
+    warning = (
+        f"数据库迁移未应用（{current_label}，最新 {head_revision}），请运行 make migrate。"
+        if pending
+        else None
+    )
+    return MigrationsStatus(
+        current_revision=current_revision,
+        head_revision=head_revision,
+        pending=pending,
+        warning=warning,
+    )
+
+
+def build_doctor_report(
+    settings: Settings, engine: Engine | None = None
+) -> DoctorResponse:
+    owned_engine = engine is None
+    engine = engine or make_engine(settings.resolved_database_url())
     models = probe_models(settings.data_dir / "models")
     cli = probe_cli_status()
     ffmpeg = shutil.which("ffmpeg") is not None
@@ -69,16 +113,22 @@ def build_doctor_report(settings: Settings) -> DoctorResponse:
         (models.asr, models.segmentation, models.embedding)
     )
     minutes_ready = cli.claude_available or cli.codex_available
-    return DoctorResponse(
-        ffmpeg=ffmpeg,
-        models=models,
-        cli=cli,
-        disk_gb_free=disk_gb_free,
-        transcription_ready=transcription_ready,
-        minutes_ready=minutes_ready,
-    )
+    try:
+        migrations = probe_migrations(engine)
+        return DoctorResponse(
+            ffmpeg=ffmpeg,
+            models=models,
+            cli=cli,
+            disk_gb_free=disk_gb_free,
+            transcription_ready=transcription_ready,
+            minutes_ready=minutes_ready,
+            migrations=migrations,
+        )
+    finally:
+        if owned_engine:
+            engine.dispose()
 
 
 @router.get("/doctor", response_model=DoctorResponse)
 def get_doctor(request: Request) -> DoctorResponse:
-    return build_doctor_report(request.app.state.settings)
+    return build_doctor_report(request.app.state.settings, request.app.state.engine)

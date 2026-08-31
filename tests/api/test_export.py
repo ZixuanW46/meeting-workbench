@@ -3,8 +3,10 @@ from __future__ import annotations
 from io import BytesIO
 
 import pytest
+from sqlalchemy import select
 
 from meeting_api.minutes.adapter import FakeMinutesAdapter, MinutesCliError
+from meeting_api.models import SpeakerCluster
 
 
 def _prepare_speaker_review(client, *, title: str = "导出测试会议") -> str:
@@ -81,11 +83,13 @@ def test_transcript_export_is_time_ordered_and_uses_final_speaker_labels(client)
     _assert_attachment(response, "-transcript.md")
     assert response.text.index("假转写第一段") < response.text.index("假转写第二段")
     assert "已知用户 1" in response.text
-    assert "说话人S2（未确认）" in response.text
+    assert "说话人 2" in response.text
     assert "未知说话人" not in response.text
+    assert "S1" not in response.text
+    assert "S2" not in response.text
     assert "[0.00" not in response.text
     assert "已知用户 1 00:00-00:05\n这是 meeting.wav 的假转写第一段" in response.text
-    assert "说话人S2（未确认） 00:05-00:10\n这是假转写第二段" in response.text
+    assert "说话人 2 00:05-00:10\n这是假转写第二段" in response.text
     assert str(client.app.state.settings.data_dir) not in response.text
     assert str(client.app.state.settings.data_dir) not in str(response.headers)
 
@@ -96,8 +100,34 @@ def test_transcript_can_be_exported_while_awaiting_speaker_review(client):
     response = client.get(f"/api/meetings/{meeting_id}/export/transcript.md")
 
     assert response.status_code == 200
-    assert "说话人S1（未确认）" in response.text
-    assert "说话人S2（未确认）" in response.text
+    assert "说话人 1" in response.text
+    assert "说话人 2" in response.text
+    assert "S1" not in response.text
+    assert "S2" not in response.text
+
+
+def test_anonymous_export_labels_follow_review_card_duration_order(client):
+    meeting_id = _prepare_speaker_review(client)
+    session_factory = client.app.state.session_factory
+    with session_factory() as session:
+        clusters = {
+            cluster.cluster_id: cluster
+            for cluster in session.scalars(
+                select(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
+            )
+        }
+        clusters["S1"].total_seconds = 5.0
+        clusters["S2"].total_seconds = 20.0
+        session.commit()
+
+    review = client.get(f"/api/meetings/{meeting_id}/review").json()
+    response = client.get(f"/api/meetings/{meeting_id}/export/transcript.md")
+
+    assert [card["cluster_id"] for card in review["cards"]] == ["S2", "S1"]
+    assert "说话人 2 00:00-00:05\n这是 meeting.wav 的假转写第一段" in response.text
+    assert "说话人 1 00:05-00:10\n这是假转写第二段" in response.text
+    assert "S1" not in response.text
+    assert "S2" not in response.text
 
 
 def test_partial_ready_can_still_export_transcript(client):
@@ -107,7 +137,7 @@ def test_partial_ready_can_still_export_transcript(client):
 
     assert response.status_code == 200
     assert "假转写第一段" in response.text
-    assert "说话人S2（未确认）" in response.text
+    assert "说话人 2" in response.text
 
 
 def test_ready_minutes_markdown_export_matches_minutes_endpoint(client):

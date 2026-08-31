@@ -9,10 +9,9 @@ from sqlalchemy.orm import Session
 
 from meeting_api.models import (
     Meeting,
-    Person,
-    SpeakerCluster,
     TranscriptSegment,
 )
+from meeting_api.speaker_labels import public_speaker_labels
 from meeting_api.storage import meeting_dir
 from meeting_api.transcript_format import format_transcript_blocks
 from meeting_domain import MeetingState
@@ -51,28 +50,13 @@ def _build_export_transcript(session: Session, meeting_id: str) -> str:
         .where(TranscriptSegment.meeting_id == meeting_id)
         .order_by(TranscriptSegment.start_seconds, TranscriptSegment.id)
     ).all()
-    clusters = session.scalars(
-        select(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
-    ).all()
-    person_ids = {cluster.person_id for cluster in clusters if cluster.person_id}
-    people = (
-        {
-            person.id: person.display_name
-            for person in session.scalars(select(Person).where(Person.id.in_(person_ids)))
-        }
-        if person_ids
-        else {}
-    )
-    labels: dict[str, str] = {}
-    for cluster in clusters:
-        label = people.get(cluster.person_id) or f"说话人{cluster.cluster_id}（未确认）"
-        labels[cluster.cluster_id] = label
+    labels = public_speaker_labels(session, meeting_id)
     transcript = format_transcript_blocks(
         [
             (
                 segment.start_seconds,
                 segment.end_seconds,
-                labels.get(segment.cluster_id, f"说话人{segment.cluster_id}（未确认）"),
+                labels.get(segment.cluster_id, "说话人"),
                 segment.text,
             )
             for segment in segments

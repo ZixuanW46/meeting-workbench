@@ -15,6 +15,7 @@ from meeting_api.models import (
     TranscriptSegment,
 )
 from meeting_api.pipeline.embedding import embedding_from_bytes
+from meeting_api.speaker_labels import review_ordered_clusters
 from meeting_domain import (
     REOPENABLE_REVIEW_STATES,
     DecisionKind,
@@ -127,11 +128,7 @@ def get_review(meeting_id: str, request: Request) -> ReviewResponse:
             )
 
         # 主要说话人排最前：几十簇的真实录音里，人工确认从时长大的簇开始才可用。
-        clusters = session.scalars(
-            select(SpeakerCluster)
-            .where(SpeakerCluster.meeting_id == meeting_id)
-            .order_by(SpeakerCluster.total_seconds.desc(), SpeakerCluster.cluster_id)
-        ).all()
+        clusters = review_ordered_clusters(session, meeting_id)
         segments = session.scalars(
             select(TranscriptSegment)
             .where(TranscriptSegment.meeting_id == meeting_id)

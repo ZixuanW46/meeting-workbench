@@ -144,6 +144,7 @@ def test_worker_wraps_transcript_with_minutes_instructions(client):
     assert "议程时间轴" in prompt
     assert "3～6 条要点" in prompt
     assert "不堆砌直接引语" in prompt
+    assert "近音错词" in prompt
     assert "后续跟进" in prompt
     assert "@待认领" in prompt
     assert "不得编造" in prompt
@@ -185,7 +186,8 @@ def test_build_minutes_prompt_without_glossary_keeps_legacy_bytes():
     prompt_with_none = build_minutes_prompt(transcript, glossary=None)
 
     assert prompt_with_none == legacy_prompt
-    assert "公司术语表" not in prompt_with_none
+    # 指令头里可以提到「公司术语表（如有）」；这里断言的是术语表块本身不存在。
+    assert "公司术语表（逐字稿为语音识别产物" not in prompt_with_none
 
 
 def test_load_minutes_glossary_matches_template_empty_file_behavior(tmp_path):

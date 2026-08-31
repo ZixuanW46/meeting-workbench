@@ -251,9 +251,10 @@ def test_list_carries_template_provenance_for_manual_audit(client):
     _submit_new_person_and_unknown(client, meeting_id)
 
     items = client.get("/api/voiceprints").json()["items"]
+    meeting = client.get(f"/api/meetings/{meeting_id}").json()
 
     assert len(items) == 1
-    assert items[0]["source_meeting_title"] == "出处核对"
+    assert items[0]["source_meeting_title"] == meeting["title"]
     assert "假转写第一段" in items[0]["snippet_text"]
     assert items[0]["created_at"] is not None
     # fake 字节音频切不出片：如实报 False，端点返回 409。

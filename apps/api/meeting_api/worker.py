@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import threading
 import wave
@@ -74,6 +75,10 @@ STEP_GENERATING_MINUTES = "GENERATING_MINUTES"
 
 # 声纹模板的代表性试听切片上限（秒）：够人听出是谁，又不臃肿。
 VOICEPRINT_CLIP_MAX_SECONDS = 10.0
+TITLE_MAX_LENGTH = 200
+MODEL_DATE_PREFIX_RE = re.compile(
+    r"^(?:(?:\d{2}|\d{4})-\d{2}-\d{2}\s*[：:]?\s*|\d{2}-\d{2}\s*会议\s*[：:]?\s*)+"
+)
 
 
 def _best_clip_window(cluster: SpeakerCluster) -> TimeWindow | None:
@@ -99,6 +104,15 @@ def _cluster_windows(
     return select_spread_windows(
         [(turn.start, turn.end) for turn in turns if turn.cluster_id == cluster_id]
     )
+
+
+def _auto_title_from_minutes(markdown: str, created_at: datetime) -> str | None:
+    for line in markdown.splitlines():
+        if line.startswith("# "):
+            topic = MODEL_DATE_PREFIX_RE.sub("", line[2:].strip()).strip()
+            meeting_date = meeting_date_from_created_at(created_at).strftime("%y-%m-%d")
+            return f"{meeting_date}：{topic}"[:TITLE_MAX_LENGTH]
+    return None
 
 
 def recover_interrupted_meetings(session_factory: sessionmaker[Session]) -> int:
@@ -280,6 +294,9 @@ class Worker:
                     meeting_date=meeting_date_from_created_at(meeting.created_at),
                 )
             )
+            auto_title = _auto_title_from_minutes(markdown, meeting.created_at)
+            if auto_title is not None:
+                meeting.title = auto_title
             if meeting.has_unconfirmed_speakers:
                 markdown = f"含未确认说话人\n\n{markdown}"
             (target_dir / "minutes.md").write_text(markdown, encoding="utf-8")

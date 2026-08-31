@@ -134,6 +134,21 @@ class RecordingAdapter:
         return "# 会议纪要\n\n- 已生成"
 
 
+class MarkdownAdapter:
+    def __init__(self, markdown: str) -> None:
+        self.markdown = markdown
+
+    def generate(self, transcript: str) -> str:
+        del transcript
+        return self.markdown
+
+
+def test_minutes_prompt_instructions_match_authoritative_data_file():
+    expected = Path("data/minutes_prompt.md").read_text(encoding="utf-8")
+
+    assert minutes_prompt.MINUTES_PROMPT_INSTRUCTIONS == expected
+
+
 def test_worker_wraps_transcript_with_minutes_instructions(client):
     # 裸逐字稿会让 CLI 自由发挥（解释、评论环境）；必须带明确任务指令。
     meeting_id = _prepare_generating_minutes(client)
@@ -195,7 +210,10 @@ def test_build_minutes_prompt_inserts_meeting_date_anchor_before_glossary():
         meeting_date=date(2026, 8, 31),
     )
 
-    assert "会议日期：2026-08-31（周一）" in prompt
+    assert (
+        "会议日期：2026-08-31（周一）。标题日期与「明天」「下周二」等相对时间换算以此为锚点。"
+        "若该日期与逐字稿内容明显矛盾，以逐字稿为准。"
+    ) in prompt
     assert "明天" in prompt
     assert (
         prompt.index("说话人身份未确认时")
@@ -295,6 +313,52 @@ def test_worker_passes_meeting_date_anchor_to_prompt_without_polluting_transcrip
     )
     transcript = transcript_path.read_text(encoding="utf-8")
     assert "会议日期：" not in transcript
+
+
+def test_minutes_generation_updates_title_from_h1_with_cleaned_date_prefix(client):
+    meeting_id = _prepare_generating_minutes(client)
+    adapter = MarkdownAdapter(
+        "# 2026-08-31：26-08-31：见山社团落地与升学辅导试点\n\n正文"
+    )
+    client.app.state.worker.minutes_adapter = adapter
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    with client.app.state.session_factory() as session:
+        meeting = session.get(Meeting, meeting_id)
+        assert meeting is not None
+        expected_date = minutes_prompt.meeting_date_from_created_at(
+            meeting.created_at
+        ).strftime("%y-%m-%d")
+        assert meeting.title == f"{expected_date}：见山社团落地与升学辅导试点"
+
+
+def test_minutes_generation_keeps_existing_title_when_markdown_has_no_h1(client):
+    meeting_id = _prepare_generating_minutes(client)
+    client.patch(f"/api/meetings/{meeting_id}", json={"title": "人工标题"})
+    adapter = MarkdownAdapter("## 不是一级标题\n\n正文")
+    client.app.state.worker.minutes_adapter = adapter
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    with client.app.state.session_factory() as session:
+        meeting = session.get(Meeting, meeting_id)
+        assert meeting is not None
+        assert meeting.title == "人工标题"
+
+
+def test_minutes_generation_truncates_auto_title_to_200_chars(client):
+    meeting_id = _prepare_generating_minutes(client)
+    adapter = MarkdownAdapter(f"# 08-31 会议：{'长' * 260}\n\n正文")
+    client.app.state.worker.minutes_adapter = adapter
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    with client.app.state.session_factory() as session:
+        meeting = session.get(Meeting, meeting_id)
+        assert meeting is not None
+        assert len(meeting.title) == 200
+        assert meeting.title.startswith("26-")
 
 
 def test_worker_omits_glossary_block_when_hotwords_and_file_are_empty(client):

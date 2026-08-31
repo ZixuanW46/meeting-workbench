@@ -1,4 +1,4 @@
-from meeting_api.models import Meeting
+from meeting_api.models import Meeting, Person, SpeakerCluster
 from meeting_domain import MeetingState
 
 
@@ -82,6 +82,42 @@ def test_update_meeting_title_persists(client):
         stored = session.get(Meeting, created["id"])
         assert stored.title == "新标题"
         assert stored.state == MeetingState.PROCESSING.value
+
+
+def test_update_meeting_title_keeps_get_speaker_summary(client):
+    created = client.post("/api/meetings", json={"title": "旧标题"}).json()
+    session_factory = client.app.state.session_factory
+    with session_factory() as session:
+        person = Person(display_name="王芳")
+        session.add(person)
+        session.flush()
+        session.add_all(
+            [
+                SpeakerCluster(
+                    meeting_id=created["id"],
+                    cluster_id="S1",
+                    person_id=person.id,
+                    total_seconds=20.0,
+                ),
+                SpeakerCluster(
+                    meeting_id=created["id"],
+                    cluster_id="S2",
+                    person_id=None,
+                    total_seconds=10.0,
+                ),
+            ]
+        )
+        session.commit()
+
+    before = client.get(f"/api/meetings/{created['id']}").json()
+    response = client.patch(
+        f"/api/meetings/{created['id']}", json={"title": "新标题"}
+    )
+
+    assert before["speakers"] == ["王芳"]
+    assert before["unknown_speaker_count"] == 1
+    assert response.status_code == 200
+    assert response.json() == {**before, "title": "新标题"}
 
 
 def test_update_meeting_title_missing_meeting(client):

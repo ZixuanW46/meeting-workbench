@@ -153,6 +153,11 @@ def test_minutes_prompt_instructions_match_authoritative_data_file():
     assert minutes_prompt.MINUTES_PROMPT_INSTRUCTIONS == expected
 
 
+def test_minutes_prompt_uses_public_anonymous_speaker_example():
+    assert "说话人 2" in minutes_prompt.MINUTES_PROMPT_INSTRUCTIONS
+    assert "未知说话人（S2）" not in minutes_prompt.MINUTES_PROMPT_INSTRUCTIONS
+
+
 def test_worker_wraps_transcript_with_minutes_instructions(client):
     # 裸逐字稿会让 CLI 自由发挥（解释、评论环境）；必须带明确任务指令。
     meeting_id = _prepare_generating_minutes(client)
@@ -189,6 +194,19 @@ def test_worker_wraps_transcript_with_minutes_instructions(client):
     assert "王芳 00:00-00:05\n这是 meeting.wav 的假转写第一段" in text
     assert "[0.00" not in text
     assert "只输出纪要正文" not in text
+
+
+def test_worker_prompt_uses_review_order_label_for_unknown_speaker(client):
+    meeting_id = _prepare_generating_minutes(client, keep_unknown=True)
+    adapter = RecordingAdapter()
+    client.app.state.worker.minutes_adapter = adapter
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    (prompt,) = adapter.prompts
+    assert "说话人 2 00:05-00:10\n这是假转写第二段" in prompt
+    assert "未知说话人" not in prompt
+    assert "S2" not in prompt
 
 
 def test_build_minutes_prompt_inserts_glossary_before_transcript_without_nearest_note():

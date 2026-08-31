@@ -52,6 +52,7 @@ from meeting_api.pipeline.embedding import (
     get_embedding_backend,
 )
 from meeting_api.pipeline.serial import SingleModelSlot
+from meeting_api.speaker_labels import public_speaker_labels
 from meeting_api.storage import meeting_dir
 from meeting_api.transcript_format import format_transcript_blocks
 from meeting_domain import (
@@ -337,24 +338,13 @@ class Worker:
         if not segments:
             raise ValueError("会议没有逐字稿片段")
 
-        clusters = session.scalars(
-            select(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
-        ).all()
-        person_ids = {cluster.person_id for cluster in clusters if cluster.person_id}
-        people = {
-            person.id: person.display_name
-            for person in session.scalars(select(Person).where(Person.id.in_(person_ids)))
-        }
-        labels: dict[str, str] = {}
-        for cluster in clusters:
-            label = people.get(cluster.person_id) or f"未知说话人（{cluster.cluster_id}）"
-            labels[cluster.cluster_id] = label
+        labels = public_speaker_labels(session, meeting_id)
         transcript = format_transcript_blocks(
             [
                 (
                     segment.start_seconds,
                     segment.end_seconds,
-                    labels.get(segment.cluster_id, segment.cluster_id),
+                    labels.get(segment.cluster_id, "说话人"),
                     segment.text,
                 )
                 for segment in segments

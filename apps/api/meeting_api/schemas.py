@@ -30,6 +30,18 @@ class MeetingCreate(BaseModel):
         return cleaned
 
 
+class MeetingTitleUpdate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+
+    @field_validator("title")
+    @classmethod
+    def title_not_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("标题不能为空")
+        return stripped
+
+
 class MeetingResponse(BaseModel):
     id: str
     title: str

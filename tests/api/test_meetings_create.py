@@ -1,3 +1,7 @@
+from meeting_api.models import Meeting
+from meeting_domain import MeetingState
+
+
 def test_create_meeting(client):
     response = client.post(
         "/api/meetings",
@@ -48,6 +52,68 @@ def test_get_meeting_detail_and_missing_meeting(client):
 
     missing = client.get("/api/meetings/does-not-exist")
     assert missing.status_code == 404
+
+
+def test_update_meeting_title_persists(client):
+    created = client.post(
+        "/api/meetings",
+        json={"title": "旧标题", "hotwords": ["复盘"]},
+    ).json()
+    session_factory = client.app.state.session_factory
+    with session_factory() as session:
+        meeting = session.get(Meeting, created["id"])
+        meeting.state = MeetingState.PROCESSING.value
+        session.commit()
+
+    response = client.patch(
+        f"/api/meetings/{created['id']}",
+        json={"title": "  新标题  "},
+    )
+
+    assert response.status_code == 200
+    updated = response.json()
+    assert updated == {
+        **created,
+        "title": "新标题",
+        "state": MeetingState.PROCESSING.value,
+    }
+    assert client.get(f"/api/meetings/{created['id']}").json() == updated
+    with session_factory() as session:
+        stored = session.get(Meeting, created["id"])
+        assert stored.title == "新标题"
+        assert stored.state == MeetingState.PROCESSING.value
+
+
+def test_update_meeting_title_missing_meeting(client):
+    response = client.patch(
+        "/api/meetings/does-not-exist",
+        json={"title": "新标题"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "会议不存在"
+
+
+def test_update_meeting_title_rejects_empty_title(client):
+    created = client.post("/api/meetings", json={"title": "旧标题"}).json()
+
+    response = client.patch(
+        f"/api/meetings/{created['id']}",
+        json={"title": ""},
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_meeting_title_rejects_too_long_title(client):
+    created = client.post("/api/meetings", json={"title": "旧标题"}).json()
+
+    response = client.patch(
+        f"/api/meetings/{created['id']}",
+        json={"title": "会" * 201},
+    )
+
+    assert response.status_code == 422
 
 
 def test_list_meetings_in_reverse_creation_order(client):
@@ -113,4 +179,3 @@ def test_create_meeting_normalizes_hotwords(client):
     assert created["hotwords"] == ["声纹", "MLX"]
     detail = client.get(f"/api/meetings/{created['id']}").json()
     assert detail["hotwords"] == ["声纹", "MLX"]
-

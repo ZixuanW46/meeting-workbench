@@ -6,7 +6,12 @@ from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import delete, select
 
 from meeting_api.models import HotwordEntry, Meeting, SpeakerCluster, TranscriptSegment
-from meeting_api.schemas import MeetingCreate, MeetingListResponse, MeetingResponse
+from meeting_api.schemas import (
+    MeetingCreate,
+    MeetingListResponse,
+    MeetingResponse,
+    MeetingTitleUpdate,
+)
 from meeting_api.storage import meeting_dir
 from meeting_domain import RETRANSCRIBABLE_STATES, MeetingState, snapshot, transition
 
@@ -56,6 +61,22 @@ def get_meeting(meeting_id: str, request: Request) -> MeetingResponse:
         meeting = session.get(Meeting, meeting_id)
         if meeting is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会议不存在")
+        return _to_response(meeting)
+
+
+@router.patch("/{meeting_id}", response_model=MeetingResponse)
+def update_meeting_title(
+    meeting_id: str, payload: MeetingTitleUpdate, request: Request
+) -> MeetingResponse:
+    session_factory = request.app.state.session_factory
+    with session_factory() as session:
+        meeting = session.get(Meeting, meeting_id)
+        if meeting is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会议不存在")
+
+        meeting.title = payload.title
+        session.commit()
+        session.refresh(meeting)
         return _to_response(meeting)
 
 

@@ -74,14 +74,21 @@ def _all_strings(value: object) -> list[str]:
 
 
 def test_global_hotword_crud_is_sorted_validated_and_does_not_expose_paths(client):
-    second = client.post("/api/hotwords", json={"word": "  术语乙  "})
+    second = client.post(
+        "/api/hotwords", json={"word": "  术语乙  ", "note": "  乙的注解  "}
+    )
     first = client.post("/api/hotwords", json={"word": "术语甲"})
 
     assert second.status_code == 201
     assert first.status_code == 201
+    assert second.json()["note"] == "乙的注解"
+    assert first.json()["note"] is None
     listed = client.get("/api/hotwords")
     assert listed.status_code == 200
     assert [item["word"] for item in listed.json()["items"]] == sorted(["术语甲", "术语乙"])
+    assert {
+        item["word"]: item["note"] for item in listed.json()["items"]
+    } == {"术语甲": None, "术语乙": "乙的注解"}
     assert not any(
         str(client.app.state.settings.data_dir) in value
         for value in _all_strings(listed.json())
@@ -215,6 +222,37 @@ def test_retranscribe_allowed_states_resnapshot_clear_artifacts_and_requeue(
     assert not (target_dir / "transcript.txt").exists()
     assert not (target_dir / "minutes.md").exists()
     assert (target_dir / "raw" / meeting.audio_filename).is_file()
+
+
+def test_hotword_note_can_be_set_cleared_validated_and_404(client):
+    created = client.post("/api/hotwords", json={"word": "术语甲", "note": "旧注解"})
+    assert created.status_code == 201
+    entry_id = created.json()["id"]
+
+    updated = client.patch(f"/api/hotwords/{entry_id}", json={"note": "  新注解  "})
+
+    assert updated.status_code == 200
+    assert updated.json() == {"id": entry_id, "word": "术语甲", "note": "新注解"}
+
+    cleared = client.patch(f"/api/hotwords/{entry_id}", json={"note": "   "})
+    assert cleared.status_code == 200
+    assert cleared.json()["note"] is None
+
+    cleared_with_null = client.patch(f"/api/hotwords/{entry_id}", json={"note": None})
+    assert cleared_with_null.status_code == 200
+    assert cleared_with_null.json()["note"] is None
+
+    too_long = client.patch(f"/api/hotwords/{entry_id}", json={"note": "字" * 501})
+    assert too_long.status_code == 422
+
+    # 创建入口与 PATCH 同一上限，不给超长注解留后门。
+    too_long_create = client.post(
+        "/api/hotwords", json={"word": "超长注解词", "note": "字" * 501}
+    )
+    assert too_long_create.status_code == 422
+
+    missing = client.patch("/api/hotwords/missing-entry", json={"note": "新注解"})
+    assert missing.status_code == 404
 
 
 @pytest.mark.parametrize(

@@ -55,6 +55,7 @@ class HotwordEntry(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
     word: Mapped[str] = mapped_column(String(200), unique=True)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
 
 
 class Person(Base):

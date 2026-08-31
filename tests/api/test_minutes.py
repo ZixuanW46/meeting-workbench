@@ -14,6 +14,7 @@ from meeting_api.minutes.adapter import (
     resolve_minutes_adapter,
 )
 from meeting_api.minutes.prompt import build_minutes_prompt, load_minutes_glossary
+from meeting_api.models import HotwordEntry
 from meeting_api.worker import Worker
 
 NOTE = "纪要文本会发送到 Claude/OpenAI 云端，音频不会上传"
@@ -199,11 +200,19 @@ def test_load_minutes_glossary_matches_template_empty_file_behavior(tmp_path):
     assert load_minutes_glossary(tmp_path) is None
 
 
-def test_worker_passes_minutes_glossary_to_prompt_without_polluting_transcript(client):
+def test_worker_passes_hotword_notes_and_minutes_glossary_to_prompt_without_polluting_transcript(
+    client,
+):
     meeting_id = _prepare_generating_minutes(client)
+    with client.app.state.session_factory() as session:
+        session.add(HotwordEntry(word="裸词"))
+        session.add(HotwordEntry(word="见山", note="教育项目品牌"))
+        session.commit()
+    hotword_note_line = "- 见山：教育项目品牌"
+    bare_hotword_line = "- 裸词"
     glossary_line = "- 见山：教育项目品牌"
     (client.app.state.settings.data_dir / "minutes_glossary.md").write_text(
-        f"{glossary_line}\n", encoding="utf-8"
+        f"{glossary_line}\n- 文件补充内容\n", encoding="utf-8"
     )
     adapter = RecordingAdapter()
     client.app.state.worker.minutes_adapter = adapter
@@ -211,14 +220,30 @@ def test_worker_passes_minutes_glossary_to_prompt_without_polluting_transcript(c
     assert client.app.state.worker.process_next() == meeting_id
 
     (prompt,) = adapter.prompts
+    assert hotword_note_line in prompt
+    assert bare_hotword_line in prompt
     assert glossary_line in prompt
-    assert prompt.index(glossary_line) < prompt.index("会议逐字稿：")
+    assert "- 文件补充内容" in prompt
+    assert prompt.index(hotword_note_line) < prompt.index("- 文件补充内容")
+    assert prompt.index("- 文件补充内容") < prompt.index("会议逐字稿：")
 
     transcript_path = (
         client.app.state.settings.data_dir / "meetings" / meeting_id / "transcript.txt"
     )
     transcript = transcript_path.read_text(encoding="utf-8")
-    assert glossary_line not in transcript
+    assert hotword_note_line not in transcript
+    assert "- 文件补充内容" not in transcript
+
+
+def test_worker_omits_glossary_block_when_hotwords_and_file_are_empty(client):
+    meeting_id = _prepare_generating_minutes(client)
+    adapter = RecordingAdapter()
+    client.app.state.worker.minutes_adapter = adapter
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    (prompt,) = adapter.prompts
+    assert "公司术语表（逐字稿为语音识别产物" not in prompt
 
 
 def test_custom_minutes_template_overrides_default_instructions(client):

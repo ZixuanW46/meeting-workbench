@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 MINUTES_PROMPT_INSTRUCTIONS = (
@@ -80,6 +81,19 @@ def build_minutes_prompt(
         else ""
     )
     return f"{instructions}{glossary_block}\n会议逐字稿：\n{transcript}"
+
+
+def build_minutes_glossary(
+    hotword_entries: Sequence[tuple[str, str | None]],
+    file_glossary: str | None,
+) -> str | None:
+    """组合词库注解与用户自由补充；两者都空时不渲染术语表块。"""
+    hotword_lines = [
+        f"- {word}：{note.strip()}" if note and note.strip() else f"- {word}"
+        for word, note in hotword_entries
+    ]
+    parts = [part for part in ["\n".join(hotword_lines), file_glossary] if part]
+    return "\n\n".join(parts) if parts else None
 
 
 def load_minutes_template(data_dir: Path) -> str | None:

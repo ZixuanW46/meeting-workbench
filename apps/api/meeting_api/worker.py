@@ -21,6 +21,7 @@ from meeting_api.minutes.adapter import (
     resolve_minutes_adapter,
 )
 from meeting_api.minutes.prompt import (
+    build_minutes_glossary,
     build_minutes_prompt,
     load_minutes_glossary,
     load_minutes_template,
@@ -255,12 +256,24 @@ class Worker:
             target_dir = meeting_dir(self.settings, meeting_id)
             target_dir.mkdir(parents=True, exist_ok=True)
             (target_dir / "transcript.txt").write_text(transcript, encoding="utf-8")
+            hotword_entries = [
+                tuple(row)
+                for row in session.execute(
+                    select(HotwordEntry.word, HotwordEntry.note).order_by(
+                        HotwordEntry.word, HotwordEntry.id
+                    )
+                )
+            ]
+            glossary = build_minutes_glossary(
+                hotword_entries,
+                load_minutes_glossary(self.settings.data_dir),
+            )
 
             markdown = self.minutes_adapter.generate(
                 build_minutes_prompt(
                     transcript,
                     template=load_minutes_template(self.settings.data_dir),
-                    glossary=load_minutes_glossary(self.settings.data_dir),
+                    glossary=glossary,
                 )
             )
             if meeting.has_unconfirmed_speakers:

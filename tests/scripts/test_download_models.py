@@ -83,13 +83,13 @@ def test_dry_run_prints_all_downloads_without_network_or_writes(tmp_path):
         env={
             "DRY_RUN": "1",
             "MW_DATA_DIR": str(data_dir),
+            "MW_HF_CLI": str(bin_dir / "hf"),
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
         }
     )
 
     assert result.returncode == 0, result.stderr
-    assert "/hf" in result.stdout
-    assert "mlx-community/Qwen3-ASR-1.7B-8bit" in result.stdout
+    assert "hf download mlx-community/Qwen3-ASR-1.7B-8bit" in result.stdout
     assert SEGMENTATION_URL in result.stdout
     assert EMBEDDING_URL in result.stdout
     assert "segmentation.onnx" in result.stdout
@@ -98,6 +98,54 @@ def test_dry_run_prints_all_downloads_without_network_or_writes(tmp_path):
     # DRY RUN 与真实路径一致：find 定位归档子目录里的 model.onnx。
     assert "find" in result.stdout
     assert "sherpa-onnx-pyannote-segmentation-3-0/model.onnx" in result.stdout
+    assert not calls_file.exists()
+    assert not data_dir.exists()
+
+
+def test_dry_run_prefers_configured_hf_cli_candidate_when_executable(tmp_path):
+    data_dir = tmp_path / "data"
+    calls_file = tmp_path / "network-calls"
+    bin_dir = tmp_path / "bin"
+    configured_bin_dir = tmp_path / "configured-bin"
+    bin_dir.mkdir()
+    configured_bin_dir.mkdir()
+    _write_command_stub(bin_dir, "hf", calls_file)
+    _write_command_stub(configured_bin_dir, "hf", calls_file)
+    configured_hf = configured_bin_dir / "hf"
+
+    result = _run(
+        env={
+            "DRY_RUN": "1",
+            "MW_DATA_DIR": str(data_dir),
+            "MW_HF_CLI": str(configured_hf),
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        }
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"{configured_hf} download mlx-community/Qwen3-ASR-1.7B-8bit" in result.stdout
+    assert not calls_file.exists()
+    assert not data_dir.exists()
+
+
+def test_dry_run_falls_back_to_bare_hf_when_configured_candidate_is_missing(tmp_path):
+    data_dir = tmp_path / "data"
+    calls_file = tmp_path / "network-calls"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_command_stub(bin_dir, "hf", calls_file)
+
+    result = _run(
+        env={
+            "DRY_RUN": "1",
+            "MW_DATA_DIR": str(data_dir),
+            "MW_HF_CLI": str(tmp_path / "missing-hf"),
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        }
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "[DRY RUN] hf download mlx-community/Qwen3-ASR-1.7B-8bit" in result.stdout
     assert not calls_file.exists()
     assert not data_dir.exists()
 

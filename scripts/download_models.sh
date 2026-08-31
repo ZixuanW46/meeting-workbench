@@ -41,7 +41,8 @@ if [[ -f "$ASR_DIR/config.json" ]]; then
     echo "ASR 模型已存在，跳过下载：$ASR_DIR"
 else
     # huggingface-hub 1.x 的 CLI 叫 hf；老的 huggingface-cli 在 1.x 只剩废弃提示、不能下载。
-    HF_CLI="$REPO_ROOT/.venv/bin/hf"
+    # MW_HF_CLI 仅供测试或运维覆写候选路径；候选不可执行时仍回退裸 hf。
+    HF_CLI="${MW_HF_CLI:-$REPO_ROOT/.venv/bin/hf}"
     if [[ ! -x "$HF_CLI" ]]; then
         HF_CLI="hf"
     fi

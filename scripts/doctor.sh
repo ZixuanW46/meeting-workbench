@@ -14,6 +14,7 @@ if [[ ${DRY:-0} == "1" || ${DRY_RUN:-0} == "1" ]]; then
   echo "- 声纹模型：$MODELS_DIR/sherpa-onnx/embedding.onnx"
   echo "- Claude CLI 是否在 PATH（登录状态以生成纪要时为准）"
   echo "- Codex CLI 是否在 PATH（登录状态以生成纪要时为准）"
+  echo "- Alembic 数据库迁移是否已应用到 head"
   echo "- 数据目录所在磁盘的剩余空间"
   exit 0
 fi
@@ -51,6 +52,43 @@ check_cli() {
   return 1
 }
 
+check_migrations() {
+  local python_bin=${MW_PYTHON_BIN:-"$REPO_ROOT/.venv/bin/python"}
+  if [[ ! -x "$python_bin" ]]; then
+    echo "警告：无法检查数据库迁移；未找到项目 Python：$python_bin"
+    return 0
+  fi
+
+  local current_output
+  local head_output
+  if ! current_output=$(cd "$REPO_ROOT" && "$python_bin" -m alembic current 2>/dev/null); then
+    echo "警告：无法读取数据库当前迁移版本，请手动运行 make migrate。"
+    return 0
+  fi
+  if ! head_output=$(cd "$REPO_ROOT" && "$python_bin" -m alembic heads 2>/dev/null); then
+    echo "警告：无法读取 Alembic head，请检查迁移配置。"
+    return 0
+  fi
+
+  local current_revision
+  local head_revision
+  current_revision=$(awk 'NF {print $1; exit}' <<<"$current_output")
+  head_revision=$(awk 'NF {print $1; exit}' <<<"$head_output")
+  if [[ -z "$head_revision" ]]; then
+    echo "警告：Alembic 没有可用的 head revision。"
+    return 0
+  fi
+  if [[ "$current_revision" != "$head_revision" ]]; then
+    local current_label=当前未初始化
+    if [[ -n "$current_revision" ]]; then
+      current_label="当前 $current_revision"
+    fi
+    echo "警告：数据库迁移未应用（$current_label，最新 $head_revision），请运行 make migrate。"
+    return 0
+  fi
+  ok "数据库迁移已应用到最新版本 $head_revision"
+}
+
 transcription_ready=1
 minutes_ready=1
 
@@ -65,6 +103,8 @@ fi
 check_file "ASR 模型" "$MODELS_DIR/qwen3-asr-mlx/config.json" || transcription_ready=0
 check_file "说话人切分模型" "$MODELS_DIR/sherpa-onnx/segmentation.onnx" || transcription_ready=0
 check_file "声纹模型" "$MODELS_DIR/sherpa-onnx/embedding.onnx" || transcription_ready=0
+
+check_migrations
 
 claude_ready=0
 codex_ready=0

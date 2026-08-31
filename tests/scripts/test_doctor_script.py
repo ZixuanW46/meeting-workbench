@@ -65,6 +65,6 @@ def test_doctor_script_warns_about_pending_migrations(tmp_path):
         text=True,
     )
 
-    assert "警告：数据库迁移未应用（当前 0010，最新 0011），请运行 make migrate。" in (
+    assert "警告：数据库迁移未应用（当前 0010，最新 0012），请运行 make migrate。" in (
         result.stdout
     )

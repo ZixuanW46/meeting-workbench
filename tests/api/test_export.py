@@ -156,9 +156,25 @@ def test_ready_minutes_markdown_export_matches_minutes_endpoint(client):
     assert str(client.app.state.settings.data_dir) not in str(response.headers)
 
 
-def test_ready_minutes_docx_export_contains_minutes_body(client):
+def test_ready_minutes_docx_export_renders_plaud_markdown(client):
     meeting_id = _prepare_ready(client)
-    markdown = client.get(f"/api/meetings/{meeting_id}/minutes").json()["markdown"]
+    markdown = """含未确认说话人
+
+# 项目例会
+
+**参会人员：** 张三、李四
+
+## 议程时间轴
+
+- 第一项包含 **重点**
+  - 子项由 **@Will** 负责
+- [ ] **@负责人** 跟进报价
+- [x] 已完成会前准备
+"""
+    minutes_path = (
+        client.app.state.settings.data_dir / "meetings" / meeting_id / "minutes.md"
+    )
+    minutes_path.write_text(markdown, encoding="utf-8")
 
     response = client.get(f"/api/meetings/{meeting_id}/export/minutes.docx")
 
@@ -170,7 +186,21 @@ def test_ready_minutes_docx_export_contains_minutes_body(client):
     )
     _assert_attachment(response, "-minutes.docx")
     document = Document(BytesIO(response.content))
-    assert "\n".join(paragraph.text for paragraph in document.paragraphs) == markdown
+    paragraphs = document.paragraphs
+    by_text = {paragraph.text: paragraph for paragraph in paragraphs}
+    assert by_text["项目例会"].style.name == "Heading 1"
+    assert by_text["议程时间轴"].style.name == "Heading 2"
+    assert by_text["含未确认说话人"].style.name == "Normal"
+    assert by_text["第一项包含 重点"].style.name == "List Bullet"
+    assert by_text["子项由 @Will 负责"].style.name == "List Bullet 2"
+    assert by_text["☐ @负责人 跟进报价"].style.name == "List Bullet"
+    assert by_text["☑ 已完成会前准备"].style.name == "List Bullet"
+    assert by_text["参会人员： 张三、李四"].runs[0].bold is True
+    assert by_text["第一项包含 重点"].runs[1].bold is True
+    assert by_text["子项由 @Will 负责"].runs[1].bold is True
+    assert by_text["☐ @负责人 跟进报价"].runs[1].bold is True
+    assert all(not paragraph.text.startswith(("# ", "## ", "- ")) for paragraph in paragraphs)
+    assert all(paragraph.text for paragraph in paragraphs)
     assert str(client.app.state.settings.data_dir) not in str(response.headers)
 
 

@@ -25,6 +25,7 @@ from meeting_api.minutes.prompt import (
     build_minutes_prompt,
     load_minutes_glossary,
     load_minutes_template,
+    meeting_date_from_created_at,
 )
 from meeting_api.models import (
     HotwordEntry,
@@ -274,6 +275,7 @@ class Worker:
                     transcript,
                     template=load_minutes_template(self.settings.data_dir),
                     glossary=glossary,
+                    meeting_date=meeting_date_from_created_at(meeting.created_at),
                 )
             )
             if meeting.has_unconfirmed_speakers:

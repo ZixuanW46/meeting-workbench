@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from meeting_api.config import Settings
+from meeting_api.minutes import prompt as minutes_prompt
 from meeting_api.minutes.adapter import (
     AutoMinutesAdapter,
     ClaudeCliAdapter,
@@ -14,7 +17,7 @@ from meeting_api.minutes.adapter import (
     resolve_minutes_adapter,
 )
 from meeting_api.minutes.prompt import build_minutes_prompt, load_minutes_glossary
-from meeting_api.models import HotwordEntry
+from meeting_api.models import HotwordEntry, Meeting
 from meeting_api.worker import Worker
 
 NOTE = "纪要文本会发送到 Claude/OpenAI 云端，音频不会上传"
@@ -185,6 +188,26 @@ def test_build_minutes_prompt_inserts_glossary_before_transcript_without_nearest
     assert prompt.index("公司术语表") < prompt.index("\n会议逐字稿：\n")
 
 
+def test_build_minutes_prompt_inserts_meeting_date_anchor_before_glossary():
+    prompt = build_minutes_prompt(
+        "王芳 00:00-00:05\n明天继续看报价",
+        glossary="- 见山：教育项目品牌\n",
+        meeting_date=date(2026, 8, 31),
+    )
+
+    assert "会议日期：2026-08-31（周一）" in prompt
+    assert "明天" in prompt
+    assert (
+        prompt.index("说话人身份未确认时")
+        < prompt.index("会议日期：2026-08-31（周一）")
+        < prompt.index("公司术语表（逐字稿为语音识别产物")
+        < prompt.index("\n会议逐字稿：\n")
+    )
+
+    prompt_without_date = build_minutes_prompt("王芳 00:00-00:05\n明天继续看报价")
+    assert "会议日期：" not in prompt_without_date
+
+
 def test_build_minutes_prompt_without_glossary_keeps_legacy_bytes():
     transcript = "王芳 00:00-00:05\n普通逐字稿"
 
@@ -194,6 +217,16 @@ def test_build_minutes_prompt_without_glossary_keeps_legacy_bytes():
     assert prompt_with_none == legacy_prompt
     # 指令头里可以提到「公司术语表（如有）」；这里断言的是术语表块本身不存在。
     assert "公司术语表（逐字稿为语音识别产物" not in prompt_with_none
+    assert "会议日期：" not in prompt_with_none
+
+
+def test_meeting_date_from_created_at_treats_naive_datetime_as_utc():
+    meeting_date = minutes_prompt.meeting_date_from_created_at(
+        datetime(2026, 8, 30, 20, 0),
+        target_tz=ZoneInfo("Asia/Shanghai"),
+    )
+
+    assert meeting_date == date(2026, 8, 31)
 
 
 def test_load_minutes_glossary_matches_template_empty_file_behavior(tmp_path):
@@ -238,6 +271,30 @@ def test_worker_passes_hotword_notes_and_minutes_glossary_to_prompt_without_poll
     transcript = transcript_path.read_text(encoding="utf-8")
     assert hotword_note_line not in transcript
     assert "- 文件补充内容" not in transcript
+
+
+def test_worker_passes_meeting_date_anchor_to_prompt_without_polluting_transcript(client):
+    meeting_id = _prepare_generating_minutes(client)
+    adapter = RecordingAdapter()
+    client.app.state.worker.minutes_adapter = adapter
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    with client.app.state.session_factory() as session:
+        meeting = session.get(Meeting, meeting_id)
+        assert meeting is not None
+        expected_date = minutes_prompt.meeting_date_from_created_at(meeting.created_at)
+
+    (prompt,) = adapter.prompts
+    expected_line_prefix = f"会议日期：{expected_date.isoformat()}"
+    assert expected_line_prefix in prompt
+    assert prompt.index(expected_line_prefix) < prompt.index("\n会议逐字稿：\n")
+
+    transcript_path = (
+        client.app.state.settings.data_dir / "meetings" / meeting_id / "transcript.txt"
+    )
+    transcript = transcript_path.read_text(encoding="utf-8")
+    assert "会议日期：" not in transcript
 
 
 def test_worker_omits_glossary_block_when_hotwords_and_file_are_empty(client):

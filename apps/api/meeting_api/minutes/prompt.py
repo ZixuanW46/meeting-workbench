@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import UTC, date, datetime, tzinfo
 from pathlib import Path
 
 MINUTES_PROMPT_INSTRUCTIONS = (
@@ -85,10 +86,17 @@ def build_minutes_prompt(
     *,
     template: str | None = None,
     glossary: str | None = None,
+    meeting_date: date | None = None,
 ) -> str:
     """template 非空时覆盖默认指令头；逐字稿始终附在指令之后。"""
     instructions = (
         f"{template.rstrip()}\n" if template is not None else MINUTES_PROMPT_INSTRUCTIONS
+    )
+    date_block = (
+        f"会议日期：{meeting_date.isoformat()}（{_weekday_label(meeting_date)}）。"
+        "标题日期与「明天」「下周二」等相对时间换算以此为锚点。\n"
+        if meeting_date is not None
+        else ""
     )
     glossary_block = (
         "公司术语表（逐字稿为语音识别产物，其中的近音误写请按下表纠正为标准写法；"
@@ -96,7 +104,23 @@ def build_minutes_prompt(
         if glossary
         else ""
     )
-    return f"{instructions}{glossary_block}\n会议逐字稿：\n{transcript}"
+    return f"{instructions}{date_block}{glossary_block}\n会议逐字稿：\n{transcript}"
+
+
+def meeting_date_from_created_at(
+    created_at: datetime,
+    *,
+    target_tz: tzinfo | None = None,
+) -> date:
+    """从会议创建时间取会议日期；SQLite 读回 naive 时按 UTC 解释。"""
+    aware_created_at = (
+        created_at.replace(tzinfo=UTC) if created_at.tzinfo is None else created_at
+    )
+    return aware_created_at.astimezone(target_tz).date()
+
+
+def _weekday_label(value: date) -> str:
+    return ("周一", "周二", "周三", "周四", "周五", "周六", "周日")[value.weekday()]
 
 
 def build_minutes_glossary(

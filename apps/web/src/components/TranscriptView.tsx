@@ -194,17 +194,6 @@ export function TranscriptView({
   }
   return (
     <div className="card">
-      <audio
-        ref={audioRef}
-        src={audioUrl(meetingId)}
-        preload="none"
-        data-testid="transcript-audio"
-        onTimeUpdate={handleTimeUpdate}
-        onEnded={() => {
-          stopPlayback()
-          releasePlayback(owner)
-        }}
-      />
       {rows.map((row, index) => (
         <div key={index} className="transcript-row">
           <button
@@ -224,6 +213,18 @@ export function TranscriptView({
           <span className="transcript-text">{row.text}</span>
         </div>
       ))}
+      {/* 隐藏元素放行列表之后：首行仍是 first-child，别抢掉它的去上边线规则 */}
+      <audio
+        ref={audioRef}
+        src={audioUrl(meetingId)}
+        preload="none"
+        data-testid="transcript-audio"
+        onTimeUpdate={handleTimeUpdate}
+        onEnded={() => {
+          stopPlayback()
+          releasePlayback(owner)
+        }}
+      />
     </div>
   )
 }

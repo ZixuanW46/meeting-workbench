@@ -1,13 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   deleteVoiceprint,
   formatApiError,
   listVoiceprints,
-  voiceprintAudioUrl,
   type Voiceprint,
   type VoiceprintLibrary,
 } from '../api/client'
 import { Icon } from '../components/Icon'
+import { VoiceprintClip } from '../components/VoiceprintClip'
 
 function formatEnrolledAt(value: string | null): string {
   if (value === null) {
@@ -30,8 +30,6 @@ export function VoiceprintsPage() {
   const [library, setLibrary] = useState<VoiceprintLibrary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [playingId, setPlayingId] = useState<string | null>(null)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
 
   useEffect(() => {
     let stale = false
@@ -48,29 +46,8 @@ export function VoiceprintsPage() {
       })
     return () => {
       stale = true
-      audioRef.current?.pause()
     }
   }, [])
-
-  const togglePlay = (voiceprintId: string) => {
-    try {
-      if (playingId === voiceprintId) {
-        audioRef.current?.pause()
-        setPlayingId(null)
-        return
-      }
-      if (audioRef.current === null) {
-        audioRef.current = new Audio()
-        audioRef.current.onended = () => setPlayingId(null)
-      }
-      audioRef.current.src = voiceprintAudioUrl(voiceprintId)
-      void audioRef.current.play()?.catch?.(() => setPlayingId(null))
-      setPlayingId(voiceprintId)
-    } catch {
-      // 环境不支持音频（如测试）时静默降级
-      setPlayingId(null)
-    }
-  }
 
   const onDelete = (voiceprintId: string) => {
     setDeletingId(voiceprintId)
@@ -85,10 +62,6 @@ export function VoiceprintsPage() {
                 items: current.items.filter((item) => item.id !== voiceprintId),
               },
         )
-        if (playingId === voiceprintId) {
-          audioRef.current?.pause()
-          setPlayingId(null)
-        }
       })
       .catch((e: unknown) => {
         setError(formatApiError(e))
@@ -148,18 +121,10 @@ export function VoiceprintsPage() {
                 {group.templates.map((template) => (
                   <div key={template.id} className="list-row voiceprint-template">
                     {template.has_clip ? (
-                      <button
-                        type="button"
-                        className="clip-play"
-                        aria-label={
-                          playingId === template.id
-                            ? `暂停 ${group.displayName} 的模板试听`
-                            : `试听 ${group.displayName} 的模板`
-                        }
-                        onClick={() => togglePlay(template.id)}
-                      >
-                        <Icon name={playingId === template.id ? 'pause' : 'play'} size={10} />
-                      </button>
+                      <VoiceprintClip
+                        voiceprintId={template.id}
+                        ownerName={group.displayName}
+                      />
                     ) : (
                       <span className="clip-play voiceprint-no-clip" aria-hidden="true">
                         <Icon name="mic" size={10} />

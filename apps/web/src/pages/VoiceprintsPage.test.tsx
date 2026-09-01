@@ -98,7 +98,7 @@ describe('声纹库页', () => {
     ).toBeInTheDocument()
   })
 
-  it('某人超过 5 条模板时提示试听后手动删除', async () => {
+  it('超限组只显示计数，不再出现人工裁决横幅', async () => {
     const many = Array.from({ length: 6 }, (_, index) => ({
       id: `vp-many-${index}`,
       person_id: 'p9',
@@ -121,11 +121,8 @@ describe('声纹库页', () => {
 
     await screen.findByText('陈默')
     expect(screen.getByText('6 条模板')).toBeInTheDocument()
-    expect(
-      screen.getByText(/超出上限：请试听后删掉一条/),
-    ).toBeInTheDocument()
-    // 未超限的组不出现提示
-    expect(screen.getAllByText(/超出上限/)).toHaveLength(1)
+    // 超限收敛由后端自动完成，页面不再出现裁决横幅
+    expect(screen.queryByText(/超出上限/)).not.toBeInTheDocument()
   })
 
   it('声纹库为空时保留空态引导', async () => {

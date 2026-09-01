@@ -82,3 +82,15 @@ export function extractDecisions(structure: MinutesStructure): MinutesDecision[]
 function stripEmphasis(text: string): string {
   return text.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1')
 }
+
+/** 应用内展示用：intro 去掉一级标题与参会人员行——页头已有同信息。 */
+export function stripIntroHeader(intro: string): string {
+  return intro
+    .split('\n')
+    .filter(
+      (line) =>
+        !/^#\s/.test(line) && !line.trimStart().startsWith('**参会人员'),
+    )
+    .join('\n')
+    .trim()
+}

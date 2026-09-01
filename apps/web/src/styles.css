@@ -176,6 +176,11 @@ a {
   padding: 32px 40px 64px;
 }
 
+/* 工作台结果页吃满更多宽度：目录 + 正文双栏需要横向空间 */
+.page-wide {
+  max-width: 1320px;
+}
+
 .page-header {
   display: flex;
   align-items: center;
@@ -1261,8 +1266,14 @@ svg.clip-wave {
 .minutes-layout {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
-  gap: 40px;
+  gap: 48px;
   align-items: start;
+}
+
+/* 正文不进卡片、直接落画布；限宽保住阅读行长 */
+.minutes-content {
+  max-width: 900px;
+  min-width: 0;
 }
 
 .minutes-toc {
@@ -1330,13 +1341,11 @@ svg.clip-wave {
   }
 }
 
+/* 决议一览：与议题同一套发丝线分隔的平面节奏，不做卡片 */
 .minutes-decisions {
-  margin: 16px 0 8px;
-  background: var(--surface-2);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-lg);
-  padding: 16px 18px;
-  box-shadow: var(--edge-highlight);
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1453,6 +1462,49 @@ svg.clip-wave {
 .minutes-section input[type='checkbox']:checked {
   background: var(--primary);
   border-color: var(--primary);
+}
+
+/* ---------- 折叠操作菜单（Radix DropdownMenu，Linear 皮） ---------- */
+
+.menu {
+  min-width: 200px;
+  background: var(--surface-3);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), var(--edge-highlight);
+  z-index: 50;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-muted);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+}
+
+.menu-item:hover,
+.menu-item[data-highlighted] {
+  background: var(--hover-wash);
+  color: var(--ink);
+  outline: none;
+}
+
+.menu-separator {
+  height: 1px;
+  background: var(--hairline);
+  margin: 4px 6px;
 }
 
 .meta-row {

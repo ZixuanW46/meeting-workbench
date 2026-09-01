@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  exportUrls,
   formatApiError,
   getMeeting,
   reopenReview,
@@ -8,6 +7,7 @@ import {
   type Meeting,
   type TranscriptVariant,
 } from '../api/client'
+import { ResultActionsMenu } from '../components/ResultActionsMenu'
 import { DoctorBanner } from '../components/DoctorBanner'
 import { Icon } from '../components/Icon'
 import { Skeleton } from '../components/Skeleton'
@@ -82,7 +82,7 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
 
   if (meeting === null) {
     return (
-      <div className="page">
+      <div className="page page-wide">
         <a className="back-link" href="#/">
           <Icon name="chevron-left" size={12} />
           返回会议列表
@@ -102,7 +102,7 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
   }
 
   return (
-    <div className="page">
+    <div className="page page-wide">
       <a className="back-link" href="#/">
         <Icon name="chevron-left" size={12} />
         返回会议列表
@@ -325,36 +325,15 @@ function ResultPanel({
               {transcriptVariant === 'cleaned' ? '查看原文' : '查看清洗版'}
             </button>
           )}
-          <button
-            type="button"
-            className="btn"
-            disabled={reopening}
-            onClick={() => {
+          <ResultActionsMenu
+            meetingId={meetingId}
+            state={state}
+            transcriptVariant={transcriptVariant}
+            reopening={reopening}
+            onReopen={() => {
               void handleReopen()
             }}
-          >
-            重新确认说话人
-          </button>
-          <a
-            className="btn"
-            href={exportUrls.transcriptMd(meetingId, transcriptVariant)}
-            download
-          >
-            <Icon name="download" size={12} />
-            导出转写 MD
-          </a>
-          {state === 'READY' && (
-            <>
-              <a className="btn" href={exportUrls.minutesMd(meetingId)} download>
-                <Icon name="download" size={12} />
-                导出纪要 MD
-              </a>
-              <a className="btn" href={exportUrls.minutesDocx(meetingId)} download>
-                <Icon name="download" size={12} />
-                导出纪要 DOCX
-              </a>
-            </>
-          )}
+          />
         </div>
       </div>
       {tab === 'transcript' ? (

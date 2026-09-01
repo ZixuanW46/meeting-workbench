@@ -37,15 +37,21 @@ function mockMinutes(markdown: string) {
 }
 
 describe('纪要视图', () => {
-  it('把 Markdown 渲染成富文本：粗体、标题、嵌套列表、checkbox', async () => {
+  it('把 Markdown 渲染成富文本，标题与参会人行不在正文重复', async () => {
     mockMinutes(MINUTES_MARKDOWN)
 
     render(<MinutesView meetingId="m1" canRetry={false} onRetried={() => {}} />)
 
     // 行内粗体渲染为 <strong>，不能把 ** 星号漏出来。
-    const label = await screen.findByText('参会人员：')
+    const label = await screen.findByText('要点小标题：')
     expect(label.tagName).toBe('STRONG')
     expect(document.body.textContent).not.toContain('**')
+
+    // 页头已有大标题与参会人，正文里剥掉、不再重复。
+    expect(
+      screen.queryByRole('heading', { name: /08-30 会议/ }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/参会人员/)).not.toBeInTheDocument()
 
     expect(
       screen.getByRole('heading', { name: '议程时间轴' }),

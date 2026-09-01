@@ -19,6 +19,7 @@ import {
 import {
   extractDecisions,
   parseMinutes,
+  stripIntroHeader,
   type MinutesStructure,
 } from '../minutesStructure'
 import { Icon } from './Icon'
@@ -195,8 +196,8 @@ function StructuredMinutes({ structure }: { structure: MinutesStructure }) {
           ),
         )}
       </nav>
-      <div className="card minutes-body minutes-content">
-        {renderMarkdown(structure.intro)}
+      <div className="minutes-body minutes-content">
+        {renderMarkdown(stripIntroHeader(structure.intro))}
         {decisions.length > 0 && (
           <section
             ref={registerSection(DECISIONS_ANCHOR)}

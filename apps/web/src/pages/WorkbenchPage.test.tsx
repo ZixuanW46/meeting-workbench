@@ -200,12 +200,71 @@ describe('工作台页', () => {
 
     render(<WorkbenchPage meetingId="m1" />)
 
-    const reopen = await screen.findByRole('button', {
+    // 低频操作折叠在「更多操作」菜单里，键盘打开后选择。
+    const trigger = await screen.findByRole('button', { name: '更多操作' })
+    fireEvent.keyDown(trigger, { key: 'Enter' })
+    const reopen = await screen.findByRole('menuitem', {
       name: '重新确认说话人',
     })
     fireEvent.click(reopen)
 
     expect(await screen.findByText('说话人确认')).toBeInTheDocument()
     expect(reopenCalled).toBe(true)
+  })
+
+  it('READY 的更多操作菜单包含全部导出口', async () => {
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json({ ...MEETING, state: 'READY' }),
+      ),
+      http.get('/api/meetings/m1/minutes', () =>
+        HttpResponse.json({ markdown: '# 会议纪要', note: '' }),
+      ),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    const trigger = await screen.findByRole('button', { name: '更多操作' })
+    fireEvent.keyDown(trigger, { key: 'Enter' })
+
+    expect(
+      await screen.findByRole('menuitem', { name: '导出转写 MD' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('menuitem', { name: '导出纪要 MD' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('menuitem', { name: '导出纪要 DOCX' }),
+    ).toBeInTheDocument()
+    // 工具栏上不再平铺这些按钮。
+    expect(
+      screen.queryByRole('link', { name: /导出转写 MD/ }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('PARTIAL_READY 的菜单没有纪要导出口', async () => {
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json({ ...MEETING, state: 'PARTIAL_READY' }),
+      ),
+      http.get('/api/meetings/m1/transcript', () =>
+        HttpResponse.json({
+          raw_markdown: '张三 00:00-00:01\n先对齐进度',
+          cleaned_markdown: null,
+        }),
+      ),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    const trigger = await screen.findByRole('button', { name: '更多操作' })
+    fireEvent.keyDown(trigger, { key: 'Enter' })
+
+    expect(
+      await screen.findByRole('menuitem', { name: '导出转写 MD' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('menuitem', { name: '导出纪要 MD' }),
+    ).not.toBeInTheDocument()
   })
 })

@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from meeting_api.config import Settings
@@ -29,6 +29,7 @@ from meeting_api.minutes.prompt import (
     meeting_date_from_created_at,
 )
 from meeting_api.models import (
+    CleanedTranscriptBlock,
     HotwordEntry,
     Meeting,
     Person,
@@ -54,7 +55,20 @@ from meeting_api.pipeline.embedding import (
 from meeting_api.pipeline.serial import SingleModelSlot
 from meeting_api.speaker_labels import public_speaker_labels
 from meeting_api.storage import meeting_dir
-from meeting_api.transcript_format import format_transcript_blocks
+from meeting_api.transcript_cleaning import (
+    accept_cleaned_text,
+    apply_cleaned_blocks,
+    build_cleaning_prompt,
+    chunk_indexed_blocks,
+    parse_cleaning_response,
+    sha256_text,
+)
+from meeting_api.transcript_format import (
+    TranscriptBlock,
+    TranscriptInput,
+    build_transcript_blocks,
+    render_transcript_blocks,
+)
 from meeting_api.voiceprints import delete_voiceprint_with_clip
 from meeting_domain import (
     MeetingState,
@@ -74,6 +88,7 @@ STEP_ASR = "ASR"
 STEP_DIARIZATION = "DIARIZATION"
 STEP_VOICEPRINT_MATCHING = "VOICEPRINT_MATCHING"
 STEP_PREPARING_REVIEW = "PREPARING_REVIEW"
+STEP_CLEANING_TRANSCRIPT = "CLEANING_TRANSCRIPT"
 STEP_GENERATING_MINUTES = "GENERATING_MINUTES"
 
 # 声纹模板的代表性试听切片上限（秒）：够人听出是谁，又不臃肿。
@@ -148,6 +163,7 @@ class Worker:
         model_slot: SingleModelSlot | None = None,
         event_store: EventStore | None = None,
         minutes_adapter: MinutesAdapter | None = None,
+        cleaner_adapter: MinutesAdapter | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.settings = settings
@@ -166,6 +182,8 @@ class Worker:
         self.minutes_adapter = minutes_adapter or resolve_minutes_adapter(
             settings.minutes_backend
         )
+        # 清洗默认与纪要同一条 CLI 通道；测试可分别注入。
+        self.cleaner_adapter = cleaner_adapter or self.minutes_adapter
         self._process_lock = threading.Lock()
 
     def process_next(self) -> str | None:
@@ -266,16 +284,11 @@ class Worker:
 
     def _generate_minutes(self, session: Session, meeting: Meeting) -> str:
         meeting_id = meeting.id
-        meeting.processing_step = STEP_GENERATING_MINUTES
         meeting.processing_error = None
-        session.commit()
-        self._publish(meeting)
 
         try:
-            transcript = self._build_transcript(session, meeting_id)
-            target_dir = meeting_dir(self.settings, meeting_id)
-            target_dir.mkdir(parents=True, exist_ok=True)
-            (target_dir / "transcript.txt").write_text(transcript, encoding="utf-8")
+            labeled = self._labeled_segments(session, meeting_id)
+            blocks = build_transcript_blocks(labeled)
             hotword_entries = [
                 tuple(row)
                 for row in session.execute(
@@ -288,10 +301,35 @@ class Worker:
                 hotword_entries,
                 load_minutes_glossary(self.settings.data_dir),
             )
+            cleaned_by_index = self._clean_transcript_blocks(
+                session, meeting, blocks, glossary
+            )
+            if meeting.processing_step != STEP_GENERATING_MINUTES:
+                self._set_step(session, meeting, STEP_GENERATING_MINUTES)
+
+            # 磁盘上的 transcript.txt 永远是原文；清洗版另存一份。
+            transcript_raw = render_transcript_blocks(blocks)
+            target_dir = meeting_dir(self.settings, meeting_id)
+            target_dir.mkdir(parents=True, exist_ok=True)
+            (target_dir / "transcript.txt").write_text(transcript_raw, encoding="utf-8")
+
+            cleaned_rows = {
+                index: (sha256_text(blocks[index].text), cleaned_text)
+                for index, cleaned_text in cleaned_by_index.items()
+                if 0 <= index < len(blocks)
+            }
+            cleaned_blocks, has_cleaned = apply_cleaned_blocks(blocks, cleaned_rows)
+            if has_cleaned:
+                transcript_for_minutes = render_transcript_blocks(cleaned_blocks)
+                (target_dir / "transcript.cleaned.txt").write_text(
+                    transcript_for_minutes, encoding="utf-8"
+                )
+            else:
+                transcript_for_minutes = transcript_raw
 
             markdown = self.minutes_adapter.generate(
                 build_minutes_prompt(
-                    transcript,
+                    transcript_for_minutes,
                     template=load_minutes_template(self.settings.data_dir),
                     glossary=glossary,
                     meeting_date=meeting_date_from_created_at(meeting.created_at),
@@ -330,8 +368,67 @@ class Worker:
                 self._publish(meeting)
         return meeting_id
 
+    def _clean_transcript_blocks(
+        self,
+        session: Session,
+        meeting: Meeting,
+        blocks: Sequence[TranscriptBlock],
+        glossary: str | None,
+    ) -> dict[int, str]:
+        """按批清洗段落块并落库；任何失败只回退原文，绝不让会议失败。"""
+        if not self.settings.transcript_cleaning_enabled:
+            return {}
+
+        cleaned_by_index: dict[int, str] = {}
+        try:
+            self._set_step(session, meeting, STEP_CLEANING_TRANSCRIPT)
+            session.execute(
+                delete(CleanedTranscriptBlock).where(
+                    CleanedTranscriptBlock.meeting_id == meeting.id
+                )
+            )
+
+            for chunk in chunk_indexed_blocks(blocks):
+                expected_indices = [index for index, _ in chunk]
+                try:
+                    parsed = parse_cleaning_response(
+                        self.cleaner_adapter.generate(
+                            build_cleaning_prompt(chunk, glossary)
+                        ),
+                        expected_indices,
+                    )
+                except (MinutesCliError, ValueError):
+                    # 单批失败只丢这一批：对应块保留原文，继续后面的批次。
+                    continue
+
+                for block_index, block in chunk:
+                    cleaned_text = parsed.get(block_index)
+                    if cleaned_text is None:
+                        continue
+                    if not accept_cleaned_text(block.text, cleaned_text):
+                        continue
+                    session.add(
+                        CleanedTranscriptBlock(
+                            meeting_id=meeting.id,
+                            block_index=block_index,
+                            raw_sha256=sha256_text(block.text),
+                            cleaned_text=cleaned_text,
+                        )
+                    )
+                    cleaned_by_index[block_index] = cleaned_text
+
+            session.commit()
+        except Exception:
+            session.rollback()
+
+        try:
+            self._set_step(session, meeting, STEP_GENERATING_MINUTES)
+        except Exception:
+            session.rollback()
+        return cleaned_by_index
+
     @staticmethod
-    def _build_transcript(session: Session, meeting_id: str) -> str:
+    def _labeled_segments(session: Session, meeting_id: str) -> list[TranscriptInput]:
         segments = session.scalars(
             select(TranscriptSegment)
             .where(TranscriptSegment.meeting_id == meeting_id)
@@ -341,18 +438,21 @@ class Worker:
             raise ValueError("会议没有逐字稿片段")
 
         labels = public_speaker_labels(session, meeting_id)
-        transcript = format_transcript_blocks(
-            [
-                (
-                    segment.start_seconds,
-                    segment.end_seconds,
-                    labels.get(segment.cluster_id, "说话人"),
-                    segment.text,
-                )
-                for segment in segments
-            ]
+        return [
+            (
+                segment.start_seconds,
+                segment.end_seconds,
+                labels.get(segment.cluster_id, "说话人"),
+                segment.text,
+            )
+            for segment in segments
+        ]
+
+    @staticmethod
+    def _build_transcript(session: Session, meeting_id: str) -> str:
+        return render_transcript_blocks(
+            build_transcript_blocks(Worker._labeled_segments(session, meeting_id))
         )
-        return transcript
 
     def _retranscribe_blob_per_turn(
         self,

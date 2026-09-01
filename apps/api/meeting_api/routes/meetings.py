@@ -8,6 +8,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from meeting_api.models import (
+    CleanedTranscriptBlock,
     HotwordEntry,
     Meeting,
     Person,
@@ -187,6 +188,11 @@ def delete_meeting(meeting_id: str, request: Request) -> Response:
             .values(source_meeting_id=None)
         )
         session.execute(
+            delete(CleanedTranscriptBlock).where(
+                CleanedTranscriptBlock.meeting_id == meeting_id
+            )
+        )
+        session.execute(
             delete(TranscriptSegment).where(TranscriptSegment.meeting_id == meeting_id)
         )
         session.execute(
@@ -224,6 +230,11 @@ def retranscribe_meeting(meeting_id: str, request: Request) -> MeetingResponse:
         meeting.hotword_snapshot_json = json.dumps(frozen, ensure_ascii=False)
 
         session.execute(
+            delete(CleanedTranscriptBlock).where(
+                CleanedTranscriptBlock.meeting_id == meeting_id
+            )
+        )
+        session.execute(
             delete(TranscriptSegment).where(TranscriptSegment.meeting_id == meeting_id)
         )
         session.execute(
@@ -235,7 +246,7 @@ def retranscribe_meeting(meeting_id: str, request: Request) -> MeetingResponse:
         meeting.state = queued.value
 
         target_dir = meeting_dir(request.app.state.settings, meeting_id)
-        for filename in ("transcript.txt", "minutes.md"):
+        for filename in ("transcript.txt", "transcript.cleaned.txt", "minutes.md"):
             (target_dir / filename).unlink(missing_ok=True)
 
         session.commit()

@@ -1,0 +1,203 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from sqlalchemy import select
+
+from meeting_api.minutes.adapter import MinutesCliError
+from meeting_api.models import CleanedTranscriptBlock
+from meeting_api.worker import Worker
+
+
+def _prepare_generating_minutes(client) -> str:
+    created = client.post(
+        "/api/meetings",
+        json={"title": "清洗测试会议", "expected_speakers": 2},
+    )
+    assert created.status_code == 201
+    meeting_id = created.json()["id"]
+
+    uploaded = client.post(
+        f"/api/meetings/{meeting_id}/upload",
+        files={"file": ("meeting.wav", b"fake audio bytes", "audio/wav")},
+    )
+    assert uploaded.status_code == 200
+    assert client.app.state.worker.process_next() == meeting_id
+    assert client.get(f"/api/meetings/{meeting_id}").json()["state"] == (
+        "AWAITING_SPEAKER_REVIEW"
+    )
+
+    reviewed = client.post(
+        f"/api/meetings/{meeting_id}/review/decisions",
+        json={
+            "decisions": [
+                {
+                    "cluster_id": "S1",
+                    "kind": "NEW_PERSON",
+                    "display_name": "王芳",
+                },
+                {
+                    "cluster_id": "S2",
+                    "kind": "NEW_PERSON",
+                    "display_name": "李雷",
+                },
+            ]
+        },
+    )
+    assert reviewed.status_code == 200
+    assert reviewed.json()["state"] == "GENERATING_MINUTES"
+    return meeting_id
+
+
+def _replace_worker(client, **overrides) -> Worker:
+    options = {
+        "session_factory": client.app.state.session_factory,
+        "settings": client.app.state.settings,
+        "event_store": client.app.state.events,
+    }
+    options.update(overrides)
+    worker = Worker(**options)
+    client.app.state.worker = worker
+    return worker
+
+
+class StaticCleaner:
+    def __init__(self, output: str) -> None:
+        self.output = output
+        self.prompts: list[str] = []
+
+    def generate(self, transcript: str) -> str:
+        self.prompts.append(transcript)
+        return self.output
+
+
+class FailingCleaner:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+        self.prompts: list[str] = []
+
+    def generate(self, transcript: str) -> str:
+        self.prompts.append(transcript)
+        raise self.error
+
+
+class RecordingMinutes:
+    def __init__(self, markdown: str = "# 清洗纪要\n\n- 已生成") -> None:
+        self.markdown = markdown
+        self.prompts: list[str] = []
+
+    def generate(self, transcript: str) -> str:
+        self.prompts.append(transcript)
+        return self.markdown
+
+
+class FailingMinutes:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def generate(self, transcript: str) -> str:
+        self.prompts.append(transcript)
+        raise MinutesCliError("模拟纪要失败")
+
+
+class MustNotCallCleaner:
+    def generate(self, transcript: str) -> str:
+        del transcript
+        raise AssertionError("关闭清洗后不应调用 cleaner")
+
+
+def _cleaned_rows(client, meeting_id: str) -> list[CleanedTranscriptBlock]:
+    with client.app.state.session_factory() as session:
+        return list(
+            session.scalars(
+                select(CleanedTranscriptBlock)
+                .where(CleanedTranscriptBlock.meeting_id == meeting_id)
+                .order_by(CleanedTranscriptBlock.block_index)
+            )
+        )
+
+
+def test_worker_persists_cleaned_transcript_and_minutes_use_cleaned_text(client):
+    meeting_id = _prepare_generating_minutes(client)
+    cleaner = StaticCleaner('{"0": "这是清洗后的第一段", "1": "这是清洗后的第二段"}')
+    minutes = RecordingMinutes()
+    _replace_worker(client, cleaner_adapter=cleaner, minutes_adapter=minutes)
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    assert client.get(f"/api/meetings/{meeting_id}").json()["state"] == "READY"
+    rows = _cleaned_rows(client, meeting_id)
+    assert [row.block_index for row in rows] == [0, 1]
+    assert [row.cleaned_text for row in rows] == [
+        "这是清洗后的第一段",
+        "这是清洗后的第二段",
+    ]
+
+    target_dir = Path(client.app.state.settings.data_dir) / "meetings" / meeting_id
+    raw_text = (target_dir / "transcript.txt").read_text(encoding="utf-8")
+    cleaned_text = (target_dir / "transcript.cleaned.txt").read_text(encoding="utf-8")
+    assert "这是 meeting.wav 的假转写第一段" in raw_text
+    assert "这是清洗后的第一段" not in raw_text
+    assert "这是清洗后的第一段" in cleaned_text
+
+    (prompt,) = minutes.prompts
+    assert "这是清洗后的第一段" in prompt
+    assert "这是 meeting.wav 的假转写第一段" not in prompt
+    assert "会议逐字稿：" in prompt
+
+
+def test_worker_falls_back_to_raw_when_cleaner_returns_garbage_or_cli_error(client):
+    meeting_id = _prepare_generating_minutes(client)
+    cleaner = StaticCleaner("不是 JSON")
+    minutes = RecordingMinutes()
+    _replace_worker(client, cleaner_adapter=cleaner, minutes_adapter=minutes)
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    assert client.get(f"/api/meetings/{meeting_id}").json()["state"] == "READY"
+    assert _cleaned_rows(client, meeting_id) == []
+    (prompt,) = minutes.prompts
+    assert "这是 meeting.wav 的假转写第一段" in prompt
+
+    other_id = _prepare_generating_minutes(client)
+    failing_cleaner = FailingCleaner(MinutesCliError("模拟清洗失败"))
+    other_minutes = RecordingMinutes()
+    _replace_worker(client, cleaner_adapter=failing_cleaner, minutes_adapter=other_minutes)
+
+    assert client.app.state.worker.process_next() == other_id
+
+    assert client.get(f"/api/meetings/{other_id}").json()["state"] == "READY"
+    assert _cleaned_rows(client, other_id) == []
+    assert "这是 meeting.wav 的假转写第一段" in other_minutes.prompts[0]
+
+
+def test_worker_skips_cleaning_when_setting_disabled(client):
+    meeting_id = _prepare_generating_minutes(client)
+    client.app.state.settings.transcript_cleaning_enabled = False
+    minutes = RecordingMinutes()
+    _replace_worker(
+        client,
+        cleaner_adapter=MustNotCallCleaner(),
+        minutes_adapter=minutes,
+    )
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    assert client.get(f"/api/meetings/{meeting_id}").json()["state"] == "READY"
+    assert _cleaned_rows(client, meeting_id) == []
+    assert "这是 meeting.wav 的假转写第一段" in minutes.prompts[0]
+
+
+def test_cleaned_rows_survive_when_minutes_generation_fails(client):
+    meeting_id = _prepare_generating_minutes(client)
+    cleaner = StaticCleaner('{"0": "这是清洗后的第一段"}')
+    minutes = FailingMinutes()
+    _replace_worker(client, cleaner_adapter=cleaner, minutes_adapter=minutes)
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    assert client.get(f"/api/meetings/{meeting_id}").json()["state"] == "PARTIAL_READY"
+    rows = _cleaned_rows(client, meeting_id)
+    assert [row.block_index for row in rows] == [0]
+    assert rows[0].cleaned_text == "这是清洗后的第一段"
+    assert "这是清洗后的第一段" in minutes.prompts[0]

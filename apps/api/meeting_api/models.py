@@ -12,6 +12,7 @@ from sqlalchemy import (
     LargeBinary,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -94,6 +95,25 @@ class TranscriptSegment(Base):
     end_seconds: Mapped[float] = mapped_column(Float)
     text: Mapped[str] = mapped_column(Text)
     cluster_id: Mapped[str] = mapped_column(String(32))
+
+
+class CleanedTranscriptBlock(Base):
+    """段落块粒度的 LLM 清洗文本；原文只在 transcript_segments，永不覆盖。
+
+    block_index 对应 build_transcript_blocks 的块序；raw_sha256 是该块原文
+    的哈希，服务端重建块时哈希对得上才采用清洗文本，对不上自动回退原文。
+    """
+
+    __tablename__ = "cleaned_transcript_blocks"
+    __table_args__ = (UniqueConstraint("meeting_id", "block_index"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    meeting_id: Mapped[str] = mapped_column(
+        ForeignKey("meetings.id", ondelete="CASCADE"), index=True
+    )
+    block_index: Mapped[int] = mapped_column(Integer)
+    raw_sha256: Mapped[str] = mapped_column(String(64))
+    cleaned_text: Mapped[str] = mapped_column(Text)
 
 
 # 簇身份来源标记：写进 SpeakerCluster.assigned_via。

@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     # auto：按本机 PATH 选 claude/codex，都没有则纪要失败进 PARTIAL_READY；
     # 测试固定用 fake，绝不真调 CLI。
     minutes_backend: Literal["auto", "claude", "codex", "fake"] = "auto"
+    # 关闭后跳过转写清洗，纪要直接吃原文。
+    transcript_cleaning_enabled: bool = True
 
     def resolved_database_url(self) -> str:
         if self.database_url:

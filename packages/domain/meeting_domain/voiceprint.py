@@ -74,13 +74,38 @@ def match_voiceprint(
 TEMPLATE_CAP = 5
 
 # 与现有模板余弦达到该值视为冗余：没有信息增益，只刷新录音条件。
-TEMPLATE_REDUNDANCY_THRESHOLD = 0.9
+# 同人跨簇相似度实测约 0.4~0.8，0.9 永不触发去重；0.85 留少量安全边界。
+TEMPLATE_REDUNDANCY_THRESHOLD = 0.85
 
 
 @dataclass(frozen=True)
 class EnrollmentPlan:
-    action: str  # "append" | "replace" | "skip"
+    action: str  # "append" | "replace"
     replace_index: int | None = None
+
+
+def plan_cap_eviction(existing: Sequence[Sequence[float]]) -> int | None:
+    """超出模板上限时，选出信息贡献最小、最冗余的一条模板下标。
+
+    existing 按入库时间升序（最旧在前）。对每条模板取它与其他模板的
+    最大两两余弦相似度；该值越高，说明越容易被库里另一条模板替代。
+    并列时保留下标比较大的新模板，淘汰下标最小的旧模板。
+    """
+    if len(existing) <= TEMPLATE_CAP:
+        return None
+
+    evict_index: int | None = None
+    evict_similarity = float("-inf")
+    for index, template in enumerate(existing):
+        max_similarity = max(
+            cosine_similarity(template, other)
+            for other_index, other in enumerate(existing)
+            if other_index != index
+        )
+        if max_similarity > evict_similarity:
+            evict_index = index
+            evict_similarity = max_similarity
+    return evict_index
 
 
 def plan_enrollment(
@@ -89,10 +114,10 @@ def plan_enrollment(
 ) -> EnrollmentPlan:
     """多模板入库策略；existing 按入库时间升序（最旧在前）。
 
-    与某现有模板冗余（余弦 ≥0.9）→ 替换最相似那条（刷新录音条件而不是
-    堆重复）；未超上限 → 追加（满 5 时允许出现第 6 条「待裁决」槽位，
-    淘汰哪条由用户在声纹库页试听后自己删，系统绝不自动淘汰）；
-    已在超限状态 → 跳过入库，等用户删回上限内。
+    与某现有模板冗余（余弦 ≥0.85）→ 替换最相似那条（刷新录音条件而不是
+    堆重复）；否则追加。达到或超过上限时不跳过入库，调用方追加后用
+    plan_cap_eviction 自动淘汰最冗余模板收敛到上限内；用户仍可随时手动
+    删除任意模板。
     """
     best_index: int | None = None
     best_similarity = 0.0
@@ -103,9 +128,7 @@ def plan_enrollment(
             best_index = index
     if best_index is not None and best_similarity >= TEMPLATE_REDUNDANCY_THRESHOLD:
         return EnrollmentPlan(action="replace", replace_index=best_index)
-    if len(existing) <= TEMPLATE_CAP:
-        return EnrollmentPlan(action="append")
-    return EnrollmentPlan(action="skip")
+    return EnrollmentPlan(action="append")
 
 ENROLLABLE_DECISION_KINDS: frozenset[DecisionKind] = frozenset(
     {

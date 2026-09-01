@@ -43,6 +43,7 @@ from meeting_domain.voiceprint import (
     cosine_similarity,
     eligible_for_enrollment,
     match_voiceprint,
+    plan_cap_eviction,
     plan_enrollment,
 )
 
@@ -75,6 +76,7 @@ __all__ = [
     "eligible_for_enrollment",
     "has_unconfirmed_speakers",
     "match_voiceprint",
+    "plan_cap_eviction",
     "plan_enrollment",
     "plan_fragment_absorption",
     "review_complete",

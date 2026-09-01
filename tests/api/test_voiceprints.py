@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 
+from meeting_api.models import Person, Voiceprint
 from meeting_api.pipeline.embedding import FakeEmbeddingBackend, embedding_to_bytes
 
 
@@ -61,6 +63,12 @@ def _voiceprint_rows(client):
                 "ORDER BY p.display_name"
             )
         ).all()
+
+
+def _fake_vector(windows):
+    backend = FakeEmbeddingBackend()
+    backend.load()
+    return backend.embed(Path("unused.wav"), windows)
 
 
 def _walk(value: object):
@@ -324,3 +332,122 @@ def test_delete_voiceprint_also_removes_clip_file(client):
     assert client.delete(f"/api/voiceprints/{items[0]['id']}").status_code == 204
 
     assert not clip_path.exists()
+
+
+def test_enroll_voiceprints_keeps_one_best_cluster_per_person_per_meeting(client):
+    with client.app.state.session_factory() as session:
+        person = Person(display_name="同一人")
+        session.add(person)
+        session.commit()
+        person_id = person.id
+
+    meeting_id = _prepare_review(client, title="同人多簇只入一条")
+    with client.app.state.session_factory() as session:
+        session.execute(
+            text(
+                "UPDATE speaker_clusters SET quality_score = 0.8 "
+                "WHERE meeting_id = :meeting_id AND cluster_id = 'S1'"
+            ),
+            {"meeting_id": meeting_id},
+        )
+        session.execute(
+            text(
+                "UPDATE speaker_clusters SET quality_score = 0.9 "
+                "WHERE meeting_id = :meeting_id AND cluster_id = 'S2'"
+            ),
+            {"meeting_id": meeting_id},
+        )
+        session.commit()
+
+    response = client.post(
+        f"/api/meetings/{meeting_id}/review/decisions",
+        json={
+            "decisions": [
+                {"cluster_id": "S1", "kind": "LINK_EXISTING", "person_id": person_id},
+                {"cluster_id": "S2", "kind": "LINK_EXISTING", "person_id": person_id},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    with client.app.state.session_factory() as session:
+        rows = session.scalars(
+            select(Voiceprint).where(Voiceprint.person_id == person_id)
+        ).all()
+    assert len(rows) == 1
+    assert rows[0].embedding == embedding_to_bytes(
+        _fake_vector([(5.0, 10.0), (15.0, 20.0)])
+    )
+
+
+def test_enroll_voiceprints_auto_evicts_over_cap_and_removes_clip_file(client):
+    import io
+    import wave as wave_module
+
+    with client.app.state.session_factory() as session:
+        person = Person(display_name="自动淘汰")
+        session.add(person)
+        session.flush()
+        created_at = datetime(2026, 1, 1, tzinfo=UTC)
+        old_rows = [
+            Voiceprint(
+                person_id=person.id,
+                embedding=embedding_to_bytes(vector),
+                created_at=created_at + timedelta(seconds=index),
+            )
+            for index, vector in enumerate(
+                [
+                    (1.0, 0.0),
+                    (1.0, 0.0),
+                    (0.0, 1.0),
+                    (-1.0, 0.0),
+                    (0.0, -1.0),
+                ]
+            )
+        ]
+        session.add_all(old_rows)
+        session.commit()
+        person_id = person.id
+        evicted_id = old_rows[0].id
+
+    clip_dir = client.app.state.settings.data_dir / "voiceprints"
+    clip_dir.mkdir(parents=True, exist_ok=True)
+    evicted_clip = clip_dir / f"{evicted_id}.wav"
+    evicted_clip.write_bytes(b"old clip")
+
+    created = client.post(
+        "/api/meetings", json={"title": "超限后自动淘汰", "expected_speakers": 2}
+    )
+    meeting_id = created.json()["id"]
+    wav = io.BytesIO()
+    with wave_module.open(wav, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(16000)
+        writer.writeframes(b"\x00\x00" * int(16000 * 20))
+    uploaded = client.post(
+        f"/api/meetings/{meeting_id}/upload",
+        files={"file": ("meeting.wav", wav.getvalue(), "audio/wav")},
+    )
+    assert uploaded.status_code == 200
+    assert client.app.state.worker.process_next() == meeting_id
+
+    response = client.post(
+        f"/api/meetings/{meeting_id}/review/decisions",
+        json={
+            "decisions": [
+                {"cluster_id": "S1", "kind": "LINK_EXISTING", "person_id": person_id},
+                {"cluster_id": "S2", "kind": "KEEP_UNKNOWN"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    with client.app.state.session_factory() as session:
+        rows = session.scalars(
+            select(Voiceprint).where(Voiceprint.person_id == person_id)
+        ).all()
+        remaining_ids = {row.id for row in rows}
+    assert len(rows) == 5
+    assert evicted_id not in remaining_ids
+    assert not evicted_clip.exists()

@@ -137,7 +137,12 @@ def test_zero_norm_vectors_never_match():
 def _template_rule():
     """多模板规则在实现前呈现清晰的缺实现红灯。"""
     module = importlib.import_module("meeting_domain.voiceprint")
-    return module.plan_enrollment, module.TEMPLATE_CAP, module.TEMPLATE_REDUNDANCY_THRESHOLD
+    return (
+        module.plan_enrollment,
+        module.plan_cap_eviction,
+        module.TEMPLATE_CAP,
+        module.TEMPLATE_REDUNDANCY_THRESHOLD,
+    )
 
 
 def test_match_takes_best_template_of_each_person():
@@ -161,7 +166,7 @@ def test_person_with_empty_template_list_never_matches():
 
 
 def test_plan_enrollment_appends_when_under_cap():
-    plan_enrollment, _, _ = _template_rule()
+    plan_enrollment, _, _, _ = _template_rule()
 
     plan = plan_enrollment([(0.0, 1.0)], (1.0, 0.0))
 
@@ -170,17 +175,17 @@ def test_plan_enrollment_appends_when_under_cap():
 
 
 def test_plan_enrollment_appends_to_empty_library():
-    plan_enrollment, _, _ = _template_rule()
+    plan_enrollment, _, _, _ = _template_rule()
 
     assert plan_enrollment([], (1.0, 0.0)).action == "append"
 
 
 def test_plan_enrollment_replaces_redundant_template():
-    # 与现有模板余弦 ≥0.9：没有信息增益，替换最相似那条以刷新录音条件。
-    plan_enrollment, _, _ = _template_rule()
+    # 与现有模板余弦 ≥0.85：没有信息增益，替换最相似那条以刷新录音条件。
+    plan_enrollment, _, _, _ = _template_rule()
 
     plan = plan_enrollment(
-        [(0.0, 1.0), (0.9, 0.4358898943540673)],  # 第二条与候选余弦恰为 0.9
+        [(0.0, 1.0), (0.85, 0.526782687642637)],  # 第二条与候选余弦恰为 0.85
         (1.0, 0.0),
     )
 
@@ -188,16 +193,28 @@ def test_plan_enrollment_replaces_redundant_template():
     assert plan.replace_index == 1
 
 
+def test_plan_enrollment_below_redundancy_threshold_appends():
+    plan_enrollment, _, _, threshold = _template_rule()
+    assert threshold == 0.85
+
+    plan = plan_enrollment(
+        [(threshold - 0.001, 0.528392574527385)],
+        (1.0, 0.0),
+    )
+
+    assert plan.action == "append"
+    assert plan.replace_index is None
+
+
 def test_template_cap_is_five():
-    _, cap, _ = _template_rule()
+    _, _, cap, _ = _template_rule()
 
     assert cap == 5
 
 
 def test_plan_enrollment_appends_overflow_slot_at_cap():
-    # 满 5 条时第 6 条照常入库：淘汰哪条由用户在声纹库页试听后自己删，
-    # 系统不做自动淘汰。
-    plan_enrollment, cap, _ = _template_rule()
+    # 满 5 条时第 6 条照常入库：追加后的上限收敛由调用方自动淘汰最冗余模板。
+    plan_enrollment, _, cap, _ = _template_rule()
     existing = [(1.0, float(i * 4 + 1)) for i in range(cap)]
 
     plan = plan_enrollment(existing, (1.0, -20.0))
@@ -205,26 +222,66 @@ def test_plan_enrollment_appends_overflow_slot_at_cap():
     assert plan.action == "append"
 
 
-def test_plan_enrollment_skips_when_over_cap_until_user_prunes():
-    # 已在超限状态（6 条）：暂停继续入库，等用户删到 5 条以内。
-    plan_enrollment, cap, _ = _template_rule()
+def test_plan_enrollment_appends_when_over_cap_for_auto_eviction():
+    # 已在超限状态（6 条）也继续追加：调用方追加后自动淘汰最冗余模板。
+    plan_enrollment, _, cap, _ = _template_rule()
     existing = [(1.0, float(i * 4 + 1)) for i in range(cap + 1)]
 
     plan = plan_enrollment(existing, (1.0, -20.0))
 
-    assert plan.action == "skip"
+    assert plan.action == "append"
     assert plan.replace_index is None
 
 
 def test_plan_enrollment_redundant_replace_still_works_over_cap():
     # 超限期间同环境重复确认仍然只是刷新那条，不新增行数。
-    plan_enrollment, cap, _ = _template_rule()
+    plan_enrollment, _, cap, _ = _template_rule()
     existing = [(1.0, float(i * 4 + 1)) for i in range(cap + 1)]
 
     plan = plan_enrollment(existing, existing[2])
 
     assert plan.action == "replace"
     assert plan.replace_index == 2
+
+
+def test_plan_cap_eviction_returns_none_until_over_cap():
+    _, plan_cap_eviction, cap, _ = _template_rule()
+
+    assert plan_cap_eviction([(1.0, 0.0)] * cap) is None
+
+
+def test_plan_cap_eviction_picks_most_redundant_template():
+    _, plan_cap_eviction, _, _ = _template_rule()
+
+    index = plan_cap_eviction(
+        [
+            (1.0, 0.0),
+            (0.0, 1.0),
+            (0.6, 0.8),
+            (0.61, 0.79),
+            (-1.0, 0.0),
+            (0.0, -1.0),
+        ]
+    )
+
+    assert index == 2
+
+
+def test_plan_cap_eviction_ties_pick_oldest_index():
+    _, plan_cap_eviction, _, _ = _template_rule()
+
+    index = plan_cap_eviction(
+        [
+            (1.0, 0.0),
+            (0.0, 1.0),
+            (-1.0, 0.0),
+            (0.0, -1.0),
+            (0.6, 0.8),
+            (0.6, 0.8),
+        ]
+    )
+
+    assert index == 4
 
 
 @pytest.mark.parametrize("quality", [0.0, 1.0])

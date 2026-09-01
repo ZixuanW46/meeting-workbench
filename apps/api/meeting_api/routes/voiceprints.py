@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 
 from meeting_api.models import Meeting, Person, Voiceprint
+from meeting_api.voiceprints import delete_voiceprint_with_clip, voiceprint_clip_path
 
 router = APIRouter(prefix="/api/voiceprints")
 
@@ -41,7 +42,7 @@ class VoiceprintListResponse(BaseModel):
 
 
 def _clip_path(request: Request, voiceprint_id: str):
-    return request.app.state.settings.data_dir / "voiceprints" / f"{voiceprint_id}.wav"
+    return voiceprint_clip_path(request.app.state.settings.data_dir, voiceprint_id)
 
 
 @router.get("", response_model=VoiceprintListResponse)
@@ -105,8 +106,10 @@ def delete_voiceprint(voiceprint_id: str, request: Request) -> Response:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="声纹不存在",
             )
-        session.delete(voiceprint)
+        delete_voiceprint_with_clip(
+            session,
+            voiceprint,
+            request.app.state.settings.data_dir,
+        )
         session.commit()
-    # 模板删了切片就没有存在意义：连带清理，缺失容忍。
-    _clip_path(request, voiceprint_id).unlink(missing_ok=True)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

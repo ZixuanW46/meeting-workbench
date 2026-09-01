@@ -55,11 +55,13 @@ from meeting_api.pipeline.serial import SingleModelSlot
 from meeting_api.speaker_labels import public_speaker_labels
 from meeting_api.storage import meeting_dir
 from meeting_api.transcript_format import format_transcript_blocks
+from meeting_api.voiceprints import delete_voiceprint_with_clip
 from meeting_domain import (
     MeetingState,
     SpeakerDecision,
     eligible_for_enrollment,
     match_voiceprint,
+    plan_cap_eviction,
     plan_enrollment,
     plan_fragment_absorption,
     select_spread_windows,
@@ -559,8 +561,9 @@ class Worker:
         """在 M5 决定应用后，按多模板策略为符合领域规则的簇入库声纹。
 
         候选向量复用匹配阶段落库的簇声纹（缺失才现场补提）；与既有模板
-        冗余则替换那条并刷新出处，否则追加，满上限淘汰最旧。每条模板
-        同时留 ≤10s 试听切片与该窗的转写摘录，供声纹库页人工核对。
+        冗余则替换那条并刷新出处，否则每人每场只追加最佳一簇，超上限
+        自动淘汰最冗余模板。每条模板同时留 ≤10s 试听切片与该窗的
+        转写摘录，供声纹库页人工核对。
         """
         decision_by_cluster = {decision.cluster_id: decision for decision in decisions}
         eligible_clusters = [
@@ -596,6 +599,20 @@ class Worker:
         eligible_clusters = [
             cluster for cluster in eligible_clusters if cluster.embedding is not None
         ]
+        best_cluster_by_person: dict[str, SpeakerCluster] = {}
+        for cluster in eligible_clusters:
+            if cluster.person_id is None:
+                continue
+            current = best_cluster_by_person.get(cluster.person_id)
+            if current is None or (
+                cluster.total_seconds,
+                cluster.quality_score,
+            ) > (
+                current.total_seconds,
+                current.quality_score,
+            ):
+                best_cluster_by_person[cluster.person_id] = cluster
+        eligible_clusters = list(best_cluster_by_person.values())
 
         person_ids = {cluster.person_id for cluster in eligible_clusters}
         templates_by_person: dict[str, list[Voiceprint]] = {
@@ -622,9 +639,6 @@ class Worker:
             plan = plan_enrollment(
                 [embedding_from_bytes(row.embedding) for row in rows], candidate
             )
-            if plan.action == "skip":
-                # 该人处于超限待裁决状态：暂停入库，等用户在声纹库页删到上限内。
-                continue
             window = _best_clip_window(cluster)
             snippet = self._clip_snippet(
                 session, meeting.id, cluster.cluster_id, window
@@ -649,6 +663,17 @@ class Worker:
             session.flush()
             if window is not None:
                 self._write_voiceprint_clip(audio_path, window, target.id)
+            if plan.action == "append":
+                evict_index = plan_cap_eviction(
+                    [embedding_from_bytes(row.embedding) for row in rows]
+                )
+                if evict_index is not None:
+                    evicted = rows.pop(evict_index)
+                    delete_voiceprint_with_clip(
+                        session,
+                        evicted,
+                        self.settings.data_dir,
+                    )
         session.flush()
 
     def _write_voiceprint_clip(

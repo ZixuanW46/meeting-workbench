@@ -23,3 +23,11 @@ window.matchMedia =
 
 // jsdom 不滚动
 window.HTMLElement.prototype.scrollIntoView = window.HTMLElement.prototype.scrollIntoView || (() => {})
+
+// jsdom 缺 ResizeObserver（cmdk 的列表高度联动需要）
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+window.ResizeObserver = window.ResizeObserver || (ResizeObserverStub as unknown as typeof ResizeObserver)

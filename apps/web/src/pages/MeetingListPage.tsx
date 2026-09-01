@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { deleteMeeting, formatApiError, listMeetings, type Meeting } from '../api/client'
 import { DoctorBanner } from '../components/DoctorBanner'
+import { SkeletonListRows } from '../components/Skeleton'
+import { toast } from '../components/Toast'
 import { Icon } from '../components/Icon'
 import { StateBadge } from '../components/StateBadge'
 
@@ -27,7 +29,7 @@ export function MeetingListPage() {
     meetings?.filter((meeting) => meeting.state === 'AWAITING_SPEAKER_REVIEW')
       .length ?? 0
 
-  const onDelete = (meetingId: string) => {
+  const onDelete = (meetingId: string, title: string) => {
     setDeletingId(meetingId)
     setError(null)
     deleteMeeting(meetingId)
@@ -35,8 +37,12 @@ export function MeetingListPage() {
         setMeetings((current) =>
           current === null ? current : current.filter((m) => m.id !== meetingId),
         )
+        toast(`已删除「${title}」`)
       })
-      .catch((e: unknown) => setError(formatApiError(e)))
+      .catch((e: unknown) => {
+        setError(formatApiError(e))
+        toast(formatApiError(e), 'error')
+      })
       .finally(() => {
         setDeletingId(null)
         setConfirmingId(null)
@@ -84,6 +90,8 @@ export function MeetingListPage() {
 
       {error !== null && <div className="notice notice-error">{error}</div>}
 
+      {meetings === null && error === null && <SkeletonListRows />}
+
       {meetings !== null && (
         <div className="list-card">
           {meetings.length === 0 ? (
@@ -117,7 +125,7 @@ export function MeetingListPage() {
                       type="button"
                       className="btn btn-danger"
                       disabled={deletingId === meeting.id}
-                      onClick={() => onDelete(meeting.id)}
+                      onClick={() => onDelete(meeting.id, meeting.title)}
                     >
                       确认删除
                     </button>

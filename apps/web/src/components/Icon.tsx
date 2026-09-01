@@ -19,6 +19,7 @@ export const ICON_NAMES = [
   'trash',
   'hotwords',
   'edit',
+  'search',
 ] as const
 
 export type IconName = (typeof ICON_NAMES)[number]
@@ -50,6 +51,12 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   check: <path d="m3.5 8.5 3 3 6-7" />,
+  search: (
+    <>
+      <circle cx="7" cy="7" r="4.5" />
+      <path d="m10.5 10.5 3 3" />
+    </>
+  ),
   mic: (
     <>
       <rect x="6" y="2" width="4" height="7" rx="2" />

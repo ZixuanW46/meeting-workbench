@@ -9,6 +9,8 @@ import {
 } from '../api/client'
 import { DoctorBanner } from '../components/DoctorBanner'
 import { Icon } from '../components/Icon'
+import { Skeleton } from '../components/Skeleton'
+import { toast } from '../components/Toast'
 import { MinutesView } from '../components/MinutesView'
 import { Progress } from '../components/Progress'
 import { SpeakerReview } from '../components/SpeakerReview'
@@ -40,6 +42,11 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
   const refresh = useCallback(() => {
     getMeeting(meetingId)
       .then((data) => {
+        // 纪要在后台生成完的那一次刷新，给个明确的完成反馈
+        const previous = meetingStateRef.current
+        if (previous !== null && previous !== 'READY' && data.state === 'READY') {
+          toast('纪要已生成')
+        }
         setMeeting(data)
         setError(null)
       })
@@ -64,6 +71,7 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
       setMeeting(updated)
       setEditingTitle(false)
       setError(null)
+      toast('标题已更新')
     } catch (e: unknown) {
       setError(formatApiError(e))
     } finally {
@@ -81,7 +89,12 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
         {error !== null ? (
           <div className="notice notice-error">{error}</div>
         ) : (
-          <p className="section-desc">加载会议…</p>
+          <div data-testid="workbench-skeleton">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <Skeleton width="42%" height={22} />
+              <Skeleton width={220} height={12} />
+            </div>
+          </div>
         )}
       </div>
     )
@@ -210,6 +223,7 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
             if (result.has_unconfirmed_speakers) {
               setNotice('本场含未确认说话人，纪要会带「含未确认说话人」标记')
             }
+            toast('说话人确认已提交')
             refresh()
           }}
         />

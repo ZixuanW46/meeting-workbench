@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
+import { CommandPalette } from './components/CommandPalette'
 import { Icon } from './components/Icon'
+import { Toaster } from './components/Toast'
 import { HotwordsPage } from './pages/HotwordsPage'
 import { MeetingListPage } from './pages/MeetingListPage'
 import { NewMeetingPage } from './pages/NewMeetingPage'
@@ -21,6 +23,19 @@ function useHashRoute(): string {
 export default function App() {
   const route = useHashRoute()
   const meetingMatch = /^\/meetings\/([^/]+)$/.exec(route)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+
+  // Linear 惯例：⌘K / Ctrl+K 呼出命令面板
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setPaletteOpen((open) => !open)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   let page = <MeetingListPage />
   if (route === '/new') {
@@ -37,6 +52,15 @@ export default function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="sidebar-brand">会议工作台</div>
+        <button
+          type="button"
+          className="sidebar-search"
+          onClick={() => setPaletteOpen(true)}
+        >
+          <Icon name="search" size={13} />
+          搜索
+          <kbd className="kbd">⌘K</kbd>
+        </button>
         <nav className="sidebar-nav">
           <a
             href="#/"
@@ -63,6 +87,8 @@ export default function App() {
         </nav>
       </aside>
       <main className="main">{page}</main>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <Toaster />
     </div>
   )
 }

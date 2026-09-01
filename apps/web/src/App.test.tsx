@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import App from './App'
 import { server } from './test/server'
@@ -30,5 +30,26 @@ describe('App 壳', () => {
 
     expect(await screen.findByText('声纹库是空的')).toBeInTheDocument()
     window.location.hash = ''
+  })
+
+  it('⌘K 呼出命令面板，Esc 关闭', async () => {
+    window.location.hash = ''
+    server.use(http.get('/api/meetings', () => HttpResponse.json({ items: [] })))
+
+    render(<App />)
+    await screen.findByText('还没有会议')
+
+    fireEvent.keyDown(window, { key: 'k', metaKey: true })
+    expect(
+      await screen.findByPlaceholderText('搜索会议，或输入命令…'),
+    ).toBeInTheDocument()
+
+    fireEvent.keyDown(
+      screen.getByPlaceholderText('搜索会议，或输入命令…'),
+      { key: 'Escape' },
+    )
+    expect(
+      screen.queryByPlaceholderText('搜索会议，或输入命令…'),
+    ).not.toBeInTheDocument()
   })
 })

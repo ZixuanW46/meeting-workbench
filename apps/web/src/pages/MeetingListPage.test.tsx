@@ -154,6 +154,18 @@ describe('会议列表页', () => {
     expect(screen.getByText('产品周会')).toBeInTheDocument()
   })
 
+  it('加载中先出骨架屏，数据到达后替换为真实列表', async () => {
+    server.use(
+      http.get('/api/meetings', () => HttpResponse.json({ items: MEETINGS })),
+    )
+
+    render(<MeetingListPage />)
+    expect(screen.getByTestId('list-skeleton')).toBeInTheDocument()
+
+    expect(await screen.findByText('产品周会')).toBeInTheDocument()
+    expect(screen.queryByTestId('list-skeleton')).not.toBeInTheDocument()
+  })
+
   it('空列表保留空态', async () => {
     server.use(http.get('/api/meetings', () => HttpResponse.json({ items: [] })))
 

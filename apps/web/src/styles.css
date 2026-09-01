@@ -1310,3 +1310,255 @@ svg.clip-wave {
 .minutes-body ul ul {
   margin: 2px 0;
 }
+
+
+/* ---------- 命令面板（cmdk，⌘K 呼出） ---------- */
+
+[cmdk-overlay] {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+  z-index: 90;
+}
+
+[cmdk-dialog] {
+  position: fixed;
+  z-index: 100;
+  top: 14vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 32px));
+}
+
+[cmdk-root] {
+  background: var(--surface-2);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 16px 60px rgba(0, 0, 0, 0.55), var(--edge-highlight);
+  overflow: hidden;
+}
+
+[cmdk-input] {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+[cmdk-input]::placeholder {
+  color: var(--ink-tertiary);
+}
+
+[cmdk-list] {
+  max-height: 330px;
+  overflow-y: auto;
+  padding: 6px;
+  scroll-padding-block: 6px;
+}
+
+[cmdk-group-heading] {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--ink-tertiary);
+  padding: 8px 10px 4px;
+}
+
+[cmdk-item] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+[cmdk-item] .icon {
+  color: var(--ink-tertiary);
+  flex-shrink: 0;
+}
+
+[cmdk-item][data-selected='true'] {
+  background: var(--hover-wash);
+  color: var(--ink);
+}
+
+[cmdk-empty] {
+  display: block;
+  padding: 20px;
+  text-align: center;
+  color: var(--ink-tertiary);
+  font-size: 13px;
+}
+
+.cmdk-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 侧栏搜索入口：安静的入口＋快捷键提示 */
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-tertiary);
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  padding: 6px 8px;
+  cursor: pointer;
+  transition: color 0.12s var(--ease), border-color 0.12s var(--ease);
+}
+
+.sidebar-search:hover {
+  color: var(--ink-subtle);
+  border-color: var(--hairline-strong);
+}
+
+.kbd {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-tertiary);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: var(--canvas);
+}
+
+/* ---------- Toast：右下角操作反馈 ---------- */
+
+.toaster {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  z-index: 120;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  padding: 9px 14px;
+  cursor: pointer;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45), var(--edge-highlight);
+}
+
+.toast .icon {
+  color: var(--success);
+}
+
+.toast-error .icon {
+  color: var(--danger);
+}
+
+/* ---------- 骨架屏 ---------- */
+
+.skeleton {
+  display: block;
+  border-radius: 6px;
+  background: var(--surface-3);
+  position: relative;
+  overflow: hidden;
+}
+
+/* ---------- 微动效（一律尊重 reduced-motion） ---------- */
+
+.badge {
+  transition:
+    background 0.2s var(--ease),
+    color 0.2s var(--ease),
+    border-color 0.2s var(--ease);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.05), transparent);
+    animation: shimmer 1.4s infinite;
+  }
+
+  @keyframes shimmer {
+    to {
+      transform: translateX(100%);
+    }
+  }
+
+  [cmdk-root] {
+    animation: palette-in 0.16s var(--ease);
+  }
+
+  @keyframes palette-in {
+    from {
+      opacity: 0;
+      transform: translateY(-6px) scale(0.99);
+    }
+  }
+
+  .toast {
+    animation: rise-in 0.22s var(--ease);
+  }
+
+  /* 列表行与确认卡入场：轻微上浮，前几个错峰 */
+  .list-card .list-row,
+  .speaker-card,
+  .card {
+    animation: rise-in 0.28s var(--ease) backwards;
+  }
+
+  .list-card .list-row:nth-child(2),
+  .speaker-card:nth-child(2) {
+    animation-delay: 0.03s;
+  }
+
+  .list-card .list-row:nth-child(3),
+  .speaker-card:nth-child(3) {
+    animation-delay: 0.06s;
+  }
+
+  .list-card .list-row:nth-child(4),
+  .speaker-card:nth-child(4) {
+    animation-delay: 0.09s;
+  }
+
+  .list-card .list-row:nth-child(5),
+  .speaker-card:nth-child(5) {
+    animation-delay: 0.12s;
+  }
+
+  .list-card .list-row:nth-child(n + 6),
+  .speaker-card:nth-child(n + 6) {
+    animation-delay: 0.15s;
+  }
+
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+  }
+}

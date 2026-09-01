@@ -155,6 +155,26 @@ describe('转写视图', () => {
     expect(audio.currentTime).toBe(4090)
   })
 
+  it('元数据加载完成前已暂停的行不会开播', async () => {
+    mockTranscript(RAW_MARKDOWN, null)
+
+    renderView('raw')
+
+    // 点播后立刻暂停（jsdom readyState 恒 0，正处于等元数据窗口）。
+    fireEvent.click(
+      await screen.findByRole('button', { name: '播放 00:58 – 01:40 原声' }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '暂停 00:58 – 01:40 原声' }))
+
+    const audio = screen.getByTestId('transcript-audio') as HTMLAudioElement
+    fireEvent(audio, new Event('loadedmetadata'))
+    // 迟到的元数据不再 seek 开播，按钮保持「播放」态。
+    expect(audio.currentTime).toBe(0)
+    expect(
+      screen.getByRole('button', { name: '播放 00:58 – 01:40 原声' }),
+    ).toBeInTheDocument()
+  })
+
   it('播到块尾自动停，再点当前行则暂停', async () => {
     mockTranscript(RAW_MARKDOWN, null)
 

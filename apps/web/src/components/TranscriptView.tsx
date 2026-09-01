@@ -122,6 +122,10 @@ export function TranscriptView({
     setPlayingIndex(index)
 
     const begin = () => {
+      // 等元数据期间用户可能已暂停或切到别行：意图不在本行就不开播。
+      if (playingRef.current?.index !== index) {
+        return
+      }
       try {
         audio.currentTime = row.startSeconds
         const started = audio.play()

@@ -85,12 +85,7 @@ export function MinutesView({ meetingId, canRetry, onRetried }: MinutesViewProps
       )}
       {error !== null && <div className="notice notice-error">{error}</div>}
       {minutes !== null && (
-        <Fragment>
-          <div className="notice notice-info" style={{ marginBottom: 12 }}>
-            {minutes.note}
-          </div>
-          <div className="card minutes-body">{renderMarkdown(minutes.markdown)}</div>
-        </Fragment>
+        <div className="card minutes-body">{renderMarkdown(minutes.markdown)}</div>
       )}
       {minutes === null && notReady && !canRetry && (
         <p className="section-desc">纪要尚未生成</p>

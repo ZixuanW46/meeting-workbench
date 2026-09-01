@@ -1183,6 +1183,13 @@ svg.clip-wave {
   transition: background 0.1s var(--ease);
 }
 
+/* 行级回听键：比声纹试听键再小一号，与 13px 行文本对齐 */
+.transcript-play {
+  width: 20px;
+  height: 20px;
+  margin-top: 0;
+}
+
 .transcript-row:first-child {
   border-top: none;
 }

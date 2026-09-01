@@ -24,6 +24,11 @@ window.matchMedia =
 // jsdom 不滚动
 window.HTMLElement.prototype.scrollIntoView = window.HTMLElement.prototype.scrollIntoView || (() => {})
 
+// jsdom 的媒体元素方法只会打「Not implemented」日志，换成安静的桩
+window.HTMLMediaElement.prototype.play = () => Promise.resolve()
+window.HTMLMediaElement.prototype.pause = () => {}
+window.HTMLMediaElement.prototype.load = () => {}
+
 // jsdom 缺 ResizeObserver（cmdk 的列表高度联动需要）
 class ResizeObserverStub {
   observe() {}

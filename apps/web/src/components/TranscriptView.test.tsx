@@ -1,8 +1,14 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
+import { afterEach } from 'vitest'
 import type { TranscriptVariant } from '../api/client'
 import { server } from '../test/server'
+import { resetPlaybackForTests } from './clipPlayback'
 import { TranscriptView } from './TranscriptView'
+
+afterEach(() => {
+  resetPlaybackForTests()
+})
 
 // 后端导出为 PLAUD 风格段落块：标签行「{说话人} {mm:ss}-{mm:ss}」+ 文本行，块间空行。
 const RAW_MARKDOWN = [
@@ -117,6 +123,64 @@ describe('转写视图', () => {
 
     expect(
       await screen.findByText('（本场会议没有可解析的逐字稿）'),
+    ).toBeInTheDocument()
+  })
+
+  it('点行首播放键 seek 到块起点，同刻只有一行在播', async () => {
+    mockTranscript(RAW_MARKDOWN, null)
+
+    renderView('raw')
+
+    const first = await screen.findByRole('button', {
+      name: '播放 00:00 – 00:58 原声',
+    })
+    const audio = screen.getByTestId('transcript-audio') as HTMLAudioElement
+
+    fireEvent.click(first)
+    expect(
+      screen.getByRole('button', { name: '暂停 00:00 – 00:58 原声' }),
+    ).toBeInTheDocument()
+    // 元数据就绪后从块起点开播（jsdom readyState 恒 0，手动补事件）。
+    fireEvent(audio, new Event('loadedmetadata'))
+    expect(audio.currentTime).toBe(0)
+
+    // 换一行开播：前一行回到「播放」态，h:mm:ss 起点同样可反解。
+    fireEvent.click(
+      screen.getByRole('button', { name: '播放 1:08:10 – 1:08:45 原声' }),
+    )
+    expect(
+      screen.getByRole('button', { name: '播放 00:00 – 00:58 原声' }),
+    ).toBeInTheDocument()
+    fireEvent(audio, new Event('loadedmetadata'))
+    expect(audio.currentTime).toBe(4090)
+  })
+
+  it('播到块尾自动停，再点当前行则暂停', async () => {
+    mockTranscript(RAW_MARKDOWN, null)
+
+    renderView('raw')
+
+    const play = await screen.findByRole('button', {
+      name: '播放 00:00 – 00:58 原声',
+    })
+    const audio = screen.getByTestId('transcript-audio') as HTMLAudioElement
+
+    fireEvent.click(play)
+    expect(
+      screen.getByRole('button', { name: '暂停 00:00 – 00:58 原声' }),
+    ).toBeInTheDocument()
+    // 越过块尾的 timeupdate 触发自停。
+    audio.currentTime = 59
+    fireEvent(audio, new Event('timeupdate'))
+    expect(
+      screen.getByRole('button', { name: '播放 00:00 – 00:58 原声' }),
+    ).toBeInTheDocument()
+
+    // 再点开播后手动点暂停，回到「播放」态。
+    fireEvent.click(screen.getByRole('button', { name: '播放 00:00 – 00:58 原声' }))
+    fireEvent.click(screen.getByRole('button', { name: '暂停 00:00 – 00:58 原声' }))
+    expect(
+      screen.getByRole('button', { name: '播放 00:00 – 00:58 原声' }),
     ).toBeInTheDocument()
   })
 })

@@ -297,7 +297,7 @@ async def patch_tus_upload(
                 if offset + len(chunk) > pending.length:
                     output.truncate(pending.offset)
                     raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                         detail="上传内容超过 Upload-Length",
                         headers={**TUS_HEADERS, "Upload-Offset": str(pending.offset)},
                     )
@@ -327,9 +327,7 @@ async def patch_tus_upload(
             meeting.audio_filename = saved.filename
             meeting.audio_sha256 = saved.sha256
             meeting.audio_size = saved.size
-            meeting.state = transition(
-                MeetingState(meeting.state), MeetingState.QUEUED
-            ).value
+            meeting.state = transition(MeetingState(meeting.state), MeetingState.QUEUED).value
             session.commit()
             remove_pending_upload(
                 request.app.state.settings,

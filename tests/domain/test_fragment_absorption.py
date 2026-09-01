@@ -43,7 +43,7 @@ def test_fragment_over_distance_threshold_is_kept():
     assert plan == {}
 
 
-def test_fragment_near_second_major_is_kept_without_safety_margin():
+def test_fragment_between_similar_majors_absorbs_without_safety_margin():
     plan = plan_fragment_absorption(
         [
             ("S1", 60.0, _unit(0.487, math.sqrt(1.0 - 0.487 * 0.487))),
@@ -54,14 +54,28 @@ def test_fragment_near_second_major_is_kept_without_safety_margin():
         min_margin=0.05,
     )
 
-    assert plan == {}
+    assert plan == {"S9": "S1"}
 
 
-def test_fragment_absorbs_when_second_major_is_beyond_safety_margin():
+def test_fragment_near_dissimilar_rival_is_kept_without_safety_margin():
     plan = plan_fragment_absorption(
         [
             ("S1", 60.0, _unit(0.5, math.sqrt(1.0 - 0.5 * 0.5))),
-            ("S2", 60.0, (0.0, 1.0)),
+            ("S2", 60.0, _unit(0.48, -math.sqrt(1.0 - 0.48 * 0.48))),
+            ("S9", 8.0, (1.0, 0.0)),
+        ],
+        max_fragment_seconds=20.0,
+        min_margin=0.05,
+    )
+
+    assert plan == {}
+
+
+def test_fragment_absorbs_when_dissimilar_rival_is_beyond_safety_margin():
+    plan = plan_fragment_absorption(
+        [
+            ("S1", 60.0, _unit(0.5, math.sqrt(1.0 - 0.5 * 0.5))),
+            ("S2", 60.0, _unit(0.4, -math.sqrt(1.0 - 0.4 * 0.4))),
             ("S9", 8.0, (1.0, 0.0)),
         ],
         max_fragment_seconds=20.0,
@@ -69,6 +83,25 @@ def test_fragment_absorbs_when_second_major_is_beyond_safety_margin():
     )
 
     assert plan == {"S9": "S1"}
+
+
+def test_non_positive_min_margin_disables_safety_margin():
+    clusters = [
+        ("S1", 60.0, _unit(0.487, math.sqrt(1.0 - 0.487 * 0.487))),
+        ("S2", 60.0, _unit(0.485, -math.sqrt(1.0 - 0.485 * 0.485))),
+        ("S9", 8.0, (1.0, 0.0)),
+    ]
+
+    assert plan_fragment_absorption(
+        clusters,
+        max_fragment_seconds=20.0,
+        min_margin=0.0,
+    ) == {"S9": "S1"}
+    assert plan_fragment_absorption(
+        clusters,
+        max_fragment_seconds=20.0,
+        min_margin=-0.01,
+    ) == {"S9": "S1"}
 
 
 def test_fragment_single_major_candidate_satisfies_safety_margin():

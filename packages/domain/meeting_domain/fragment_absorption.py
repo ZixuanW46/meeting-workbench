@@ -14,6 +14,11 @@ ClusterForAbsorption = tuple[str, float, Embedding | None]
 FRAGMENT_ABSORB_MAX_DISTANCE = 0.6
 FRAGMENT_ABSORB_MIN_MARGIN = 0.05
 
+# 与 diarization.py 中 CLUSTER_MERGE_MAX_DISTANCE 同源：真机实测同人簇均值
+# 声纹距离 <=0.39、异人簇均值声纹距离 >=0.63，因此主簇间距离 <=0.4
+# 视为大概率同一人，不参与碎簇安全边际竞争。
+SAME_SPEAKER_MAX_DISTANCE = 0.4
+
 
 def plan_fragment_absorption(
     clusters: Sequence[ClusterForAbsorption],
@@ -63,11 +68,19 @@ def plan_fragment_absorption(
             continue
         candidates.sort()
         best = candidates[0]
-        has_margin = (
-            min_margin <= 0
-            or len(candidates) == 1
-            or candidates[1][0] - best[0] >= min_margin
-        )
+        has_margin = True
+        if min_margin > 0:
+            best_vector = normalized[best[2]]
+            rival_dist: float | None = None
+            for distance, _, major_id in candidates[1:]:
+                major_vector = normalized[major_id]
+                major_distance = 1.0 - sum(
+                    left * right for left, right in zip(best_vector, major_vector, strict=True)
+                )
+                if major_distance > SAME_SPEAKER_MAX_DISTANCE:
+                    rival_dist = distance
+                    break
+            has_margin = rival_dist is None or rival_dist - best[0] >= min_margin
         if best[0] <= max_distance and has_margin:
             plan[cluster_id] = best[2]
     return plan

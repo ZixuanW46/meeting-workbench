@@ -27,7 +27,13 @@ codex login
 ./scripts/launchd/install_launchd.sh
 ```
 
-launchd 中的 API 只绑定 `127.0.0.1:8000`，不会监听局域网地址。安装完成后由同机浏览器访问工作台。
+launchd 中的 API 默认只绑定 `127.0.0.1:8000`，不监听局域网；由同机浏览器访问工作台。若确认所在网络可信，可在安装时显式开放局域网访问（API 无鉴权，开放前请自行评估）：
+
+```bash
+MW_BIND_HOST=0.0.0.0 ./scripts/launchd/install_launchd.sh
+```
+
+之后局域网设备可通过 `http://<主机名>.local:8000`（mDNS 固定网址）或本机 IP 访问。
 
 ## 数据与隐私
 

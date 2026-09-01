@@ -11,7 +11,7 @@
         <string>uvicorn</string>
         <string>meeting_api.main:app</string>
         <string>--host</string>
-        <string>127.0.0.1</string>
+        <string>__BIND_HOST__</string>
         <string>--port</string>
         <string>8000</string>
     </array>

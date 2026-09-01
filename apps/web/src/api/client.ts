@@ -275,8 +275,18 @@ export function retryMinutes(meetingId: string): Promise<{ state: string }> {
   return apiFetch(`/api/meetings/${meetingId}/minutes/retry`, { method: 'POST' })
 }
 
-export function getTranscriptMarkdown(meetingId: string): Promise<string> {
-  return apiFetchText(`/api/meetings/${meetingId}/export/transcript.md`)
+/** 转写版本：cleaned=LLM 清洗版（去语气词、修标点，不改语义），raw=ASR 原文 */
+export type TranscriptVariant = 'cleaned' | 'raw'
+
+export interface TranscriptResult {
+  /** ASR 原文的 PLAUD 段落块 markdown */
+  raw_markdown: string
+  /** LLM 清洗版；本场没有可用清洗块（清洗失败或已关闭）时为 null */
+  cleaned_markdown: string | null
+}
+
+export function getTranscript(meetingId: string): Promise<TranscriptResult> {
+  return apiFetch<TranscriptResult>(`/api/meetings/${meetingId}/transcript`)
 }
 
 export function getDoctor(): Promise<DoctorReport> {
@@ -338,7 +348,8 @@ export function eventsUrl(meetingId: string): string {
 }
 
 export const exportUrls = {
-  transcriptMd: (meetingId: string) => `/api/meetings/${meetingId}/export/transcript.md`,
+  transcriptMd: (meetingId: string, variant: TranscriptVariant = 'raw') =>
+    `/api/meetings/${meetingId}/export/transcript.md?variant=${variant}`,
   minutesMd: (meetingId: string) => `/api/meetings/${meetingId}/export/minutes.md`,
   minutesDocx: (meetingId: string) => `/api/meetings/${meetingId}/export/minutes.docx`,
 }

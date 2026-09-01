@@ -20,6 +20,7 @@ export const STEP_LABELS: Record<string, string> = {
   DIARIZATION: '说话人切分',
   VOICEPRINT_MATCHING: '声纹匹配',
   PREPARING_REVIEW: '准备确认包',
+  CLEANING_TRANSCRIPT: '清洗转写',
   GENERATING_MINUTES: '生成纪要',
 }
 
@@ -29,6 +30,7 @@ export const PIPELINE_STEPS: Array<{ key: string; label: string }> = [
   { key: 'DIARIZATION', label: STEP_LABELS.DIARIZATION },
   { key: 'VOICEPRINT_MATCHING', label: STEP_LABELS.VOICEPRINT_MATCHING },
   { key: 'PREPARING_REVIEW', label: STEP_LABELS.PREPARING_REVIEW },
+  { key: 'CLEANING_TRANSCRIPT', label: STEP_LABELS.CLEANING_TRANSCRIPT },
   { key: 'GENERATING_MINUTES', label: STEP_LABELS.GENERATING_MINUTES },
 ]
 

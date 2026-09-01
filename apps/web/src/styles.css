@@ -1159,6 +1159,24 @@ svg.clip-wave {
   color: var(--ink);
 }
 
+/* 转写版本切换：复用胶囊分组的小号变体，挂在转写卡上方 */
+.tabs-compact .tab {
+  font-size: 12px;
+  padding: 2px 10px;
+}
+
+.transcript-variant-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.transcript-variant-hint {
+  font-size: 12px;
+  color: var(--ink-tertiary);
+}
+
 .result-toolbar {
   display: flex;
   align-items: center;

@@ -44,8 +44,11 @@ describe('工作台页', () => {
       http.get('/api/meetings/m1', () =>
         HttpResponse.json({ ...MEETING, state: 'PARTIAL_READY' }),
       ),
-      http.get('/api/meetings/m1/export/transcript.md', () =>
-        HttpResponse.text('张三 00:00-00:01\n先对齐进度'),
+      http.get('/api/meetings/m1/transcript', () =>
+        HttpResponse.json({
+          raw_markdown: '张三 00:00-00:01\n先对齐进度',
+          cleaned_markdown: null,
+        }),
       ),
     )
 

@@ -6,6 +6,7 @@ import {
   reopenReview,
   updateMeetingTitle,
   type Meeting,
+  type TranscriptVariant,
 } from '../api/client'
 import { DoctorBanner } from '../components/DoctorBanner'
 import { Icon } from '../components/Icon'
@@ -257,6 +258,10 @@ function ResultPanel({
   const [tab, setTab] = useState<'transcript' | 'minutes'>(
     state === 'PARTIAL_READY' ? 'transcript' : 'minutes',
   )
+  // 转写默认展示清洗版；没有清洗版时 TranscriptView 自动落回原文，
+  // 导出按钮跟随当前口径（后端对无清洗版的 cleaned 请求同样回退原文）。
+  const [transcriptVariant, setTranscriptVariant] =
+    useState<TranscriptVariant>('cleaned')
   const [reopening, setReopening] = useState(false)
   const [reopenError, setReopenError] = useState<string | null>(null)
 
@@ -315,7 +320,11 @@ function ResultPanel({
           >
             重新确认说话人
           </button>
-          <a className="btn" href={exportUrls.transcriptMd(meetingId)} download>
+          <a
+            className="btn"
+            href={exportUrls.transcriptMd(meetingId, transcriptVariant)}
+            download
+          >
             <Icon name="download" size={12} />
             导出转写 MD
           </a>
@@ -334,7 +343,11 @@ function ResultPanel({
         </div>
       </div>
       {tab === 'transcript' ? (
-        <TranscriptView meetingId={meetingId} />
+        <TranscriptView
+          meetingId={meetingId}
+          variant={transcriptVariant}
+          onVariantChange={setTranscriptVariant}
+        />
       ) : (
         <MinutesView
           meetingId={meetingId}

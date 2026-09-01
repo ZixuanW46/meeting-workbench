@@ -137,6 +137,7 @@ def _settings_with_fragment_limit(client, seconds: float) -> Settings:
         embedding_backend=current.embedding_backend,
         minutes_backend=current.minutes_backend,
         fragment_merge_max_seconds=seconds,
+        fragment_merge_min_margin=current.fragment_merge_min_margin,
     )
 
 

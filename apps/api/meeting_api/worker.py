@@ -519,6 +519,7 @@ class Worker:
                 for cluster in clusters
             ],
             max_fragment_seconds=self.settings.fragment_merge_max_seconds,
+            min_margin=self.settings.fragment_merge_min_margin,
         )
         if not plan:
             return list(turns)

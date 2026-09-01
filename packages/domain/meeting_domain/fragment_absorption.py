@@ -12,6 +12,7 @@ ClusterForAbsorption = tuple[str, float, Embedding | None]
 # 异人 >=0.63（见 diarization.py 里 CLUSTER_MERGE_MAX_DISTANCE 注释）；
 # 碎片声纹噪声更大，取异人下限保守侧、比主簇二次合并的 0.4 松。
 FRAGMENT_ABSORB_MAX_DISTANCE = 0.6
+FRAGMENT_ABSORB_MIN_MARGIN = 0.05
 
 
 def plan_fragment_absorption(
@@ -19,6 +20,7 @@ def plan_fragment_absorption(
     *,
     max_fragment_seconds: float,
     max_distance: float = FRAGMENT_ABSORB_MAX_DISTANCE,
+    min_margin: float = FRAGMENT_ABSORB_MIN_MARGIN,
 ) -> dict[str, str]:
     """规划碎簇到最相近主簇的吸收关系；只返回簇标签映射，不碰身份。"""
     if max_fragment_seconds <= 0:
@@ -47,8 +49,8 @@ def plan_fragment_absorption(
         if total_seconds >= max_fragment_seconds or cluster_id not in normalized:
             continue
         candidate = normalized[cluster_id]
-        # 最相近主簇：按（距离、-主簇时长、簇号）取最小，结果确定可复现。
-        best: tuple[float, float, str] | None = None
+        # 候选主簇：按（距离、-主簇时长、簇号）排序，结果确定可复现。
+        candidates: list[tuple[float, float, str]] = []
         for major_id in majors:
             vector = normalized[major_id]
             if len(vector) != len(candidate):
@@ -56,9 +58,16 @@ def plan_fragment_absorption(
             distance = 1.0 - sum(
                 left * right for left, right in zip(candidate, vector, strict=True)
             )
-            key = (distance, -totals[major_id], major_id)
-            if best is None or key < best:
-                best = key
-        if best is not None and best[0] <= max_distance:
+            candidates.append((distance, -totals[major_id], major_id))
+        if not candidates:
+            continue
+        candidates.sort()
+        best = candidates[0]
+        has_margin = (
+            min_margin <= 0
+            or len(candidates) == 1
+            or candidates[1][0] - best[0] >= min_margin
+        )
+        if best[0] <= max_distance and has_margin:
             plan[cluster_id] = best[2]
     return plan

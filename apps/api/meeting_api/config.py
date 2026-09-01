@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     embedding_backend: Literal["auto", "fake", "sherpa-onnx"] = "auto"
     # 出卡前按簇声纹自动并入的碎簇时长上限（秒），0 = 关闭，建议 15~30。
     fragment_merge_max_seconds: float = 20.0
+    # 碎簇吸收安全边际：最近主簇需比次近主簇至少近这么多，0 = 关闭。
+    fragment_merge_min_margin: float = 0.05
     # auto：按本机 PATH 选 claude/codex，都没有则纪要失败进 PARTIAL_READY；
     # 测试固定用 fake，绝不真调 CLI。
     minutes_backend: Literal["auto", "claude", "codex", "fake"] = "auto"

@@ -1256,6 +1256,205 @@ svg.clip-wave {
   margin: 2px 0;
 }
 
+/* ---------- 纪要阅读改版：目录导航 + 决议一览（画布定稿 B+D） ---------- */
+
+.minutes-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 40px;
+  align-items: start;
+}
+
+.minutes-toc {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.minutes-toc-heading {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--ink-tertiary);
+  text-transform: uppercase;
+  padding: 0 10px 8px;
+}
+
+.minutes-toc-item {
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-left: 2px solid transparent;
+  border-radius: 0 6px 6px 0;
+  color: var(--ink-subtle);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: color 0.12s var(--ease), background 0.12s var(--ease);
+}
+
+.minutes-toc-item:hover {
+  color: var(--ink);
+}
+
+.minutes-toc-item.active {
+  border-left-color: var(--primary);
+  color: var(--ink);
+  font-weight: 500;
+  background: var(--hover-wash);
+}
+
+.minutes-toc-badge {
+  font-size: 11px;
+  background: var(--surface-3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  padding: 0 7px;
+  color: var(--ink-tertiary);
+}
+
+/* 窄窗口收起目录，正文回到单栏 */
+@media (max-width: 960px) {
+  .minutes-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .minutes-toc {
+    display: none;
+  }
+}
+
+.minutes-decisions {
+  margin: 16px 0 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  box-shadow: var(--edge-highlight);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.minutes-decisions-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--primary-hover);
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.minutes-decision-row {
+  display: flex;
+  gap: 10px;
+}
+
+.minutes-decision-index {
+  color: var(--ink-tertiary);
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.minutes-decision-link {
+  font: inherit;
+  font-weight: 500;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.minutes-decision-link:hover {
+  color: var(--primary-hover);
+}
+
+.minutes-section {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline);
+}
+
+.minutes-section h2 {
+  font-size: 16px;
+  margin: 0 0 10px;
+}
+
+/* 要点小标题内联化：去掉浏览器圆点，粗体引导句承担层次 */
+.minutes-section ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+.minutes-section li {
+  margin: 8px 0;
+}
+
+.minutes-section li > strong:first-child {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.minutes-section li ul {
+  margin-top: 8px;
+  padding-left: 14px;
+  border-left: 1px solid var(--hairline-strong);
+}
+
+.minutes-section li ul li {
+  margin: 6px 0;
+  color: var(--ink-subtle);
+}
+
+.minutes-conclusion {
+  padding: 6px 0 6px 14px;
+  border-left: 2px solid var(--primary);
+}
+
+.minutes-conclusion > strong:first-child {
+  font-weight: 600;
+}
+
+.minutes-timeline-item {
+  display: flex;
+  gap: 16px;
+  margin: 6px 0;
+}
+
+.minutes-timeline-time {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-tertiary);
+  width: 110px;
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  padding-top: 2px;
+}
+
+/* GFM 任务项：真复选框（只读展示，不可交互） */
+.minutes-section input[type='checkbox'] {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 4px;
+  margin: 0 8px 0 0;
+  vertical-align: -2px;
+  background: transparent;
+}
+
+.minutes-section input[type='checkbox']:checked {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
 .meta-row {
   display: flex;
   align-items: center;

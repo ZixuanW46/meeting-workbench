@@ -42,11 +42,12 @@ function parseTranscript(markdown: string): TranscriptRow[] {
 export function TranscriptView({
   meetingId,
   variant,
-  onVariantChange,
+  onCleanedAvailable,
 }: {
   meetingId: string
   variant: TranscriptVariant
-  onVariantChange: (variant: TranscriptVariant) => void
+  /** 加载后告知父组件是否有清洗版，工具栏据此决定是否出切换按钮 */
+  onCleanedAvailable?: (available: boolean) => void
 }) {
   const [transcript, setTranscript] = useState<TranscriptResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -57,6 +58,7 @@ export function TranscriptView({
       .then((data) => {
         if (!stale) {
           setTranscript(data)
+          onCleanedAvailable?.(data.cleaned_markdown !== null)
         }
       })
       .catch((e: unknown) => {
@@ -67,6 +69,8 @@ export function TranscriptView({
     return () => {
       stale = true
     }
+    // onCleanedAvailable 是父组件的稳定 setState，不进依赖免得重复拉取。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meetingId])
 
   if (error !== null) {
@@ -76,58 +80,26 @@ export function TranscriptView({
     return <p className="section-desc">加载转写…</p>
   }
 
-  // 没有可用清洗版时只有原文一个口径，不出切换。
-  const cleanedAvailable = transcript.cleaned_markdown !== null
-  const showCleaned = cleanedAvailable && variant === 'cleaned'
+  // 没有可用清洗版时只有原文一个口径；切换按钮在工作台工具栏。
+  const showCleaned =
+    transcript.cleaned_markdown !== null && variant === 'cleaned'
   const markdown = showCleaned
     ? (transcript.cleaned_markdown as string)
     : transcript.raw_markdown
 
   const rows = parseTranscript(markdown)
-  const body =
-    rows.length === 0 ? (
-      <pre className="speaker-text">{markdown}</pre>
-    ) : (
-      <div className="card">
-        {rows.map((row, index) => (
-          <div key={index} className="transcript-row">
-            <span className="transcript-time">{row.time}</span>
-            <span className="transcript-speaker">{row.speaker}</span>
-            <span className="transcript-text">{row.text}</span>
-          </div>
-        ))}
-      </div>
-    )
-
-  if (!cleanedAvailable) {
-    return body
+  if (rows.length === 0) {
+    return <pre className="speaker-text">{markdown}</pre>
   }
   return (
-    <div>
-      <div className="transcript-variant-row">
-        <div className="tabs tabs-compact" role="group" aria-label="转写版本">
-          <button
-            type="button"
-            className={`tab${showCleaned ? ' active' : ''}`}
-            onClick={() => onVariantChange('cleaned')}
-          >
-            清洗版
-          </button>
-          <button
-            type="button"
-            className={`tab${showCleaned ? '' : ' active'}`}
-            onClick={() => onVariantChange('raw')}
-          >
-            原文
-          </button>
+    <div className="card">
+      {rows.map((row, index) => (
+        <div key={index} className="transcript-row">
+          <span className="transcript-time">{row.time}</span>
+          <span className="transcript-speaker">{row.speaker}</span>
+          <span className="transcript-text">{row.text}</span>
         </div>
-        {showCleaned && (
-          <span className="transcript-variant-hint">
-            已去除语气词与口误，原始转写完整保留
-          </span>
-        )}
-      </div>
-      {body}
+      ))}
     </div>
   )
 }

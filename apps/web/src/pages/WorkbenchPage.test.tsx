@@ -61,6 +61,50 @@ describe('工作台页', () => {
     expect(screen.getByText(/本机 Claude 或 Codex CLI/)).toBeInTheDocument()
   })
 
+  it('有清洗版时工具栏出「查看原文」按钮，点按在两个口径间切换', async () => {
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json({ ...MEETING, state: 'PARTIAL_READY' }),
+      ),
+      http.get('/api/meetings/m1/transcript', () =>
+        HttpResponse.json({
+          raw_markdown: '张三 00:00-00:01\n嗯，先对齐进度',
+          cleaned_markdown: '张三 00:00-00:01\n先对齐进度',
+        }),
+      ),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    // 默认清洗版
+    expect(await screen.findByText('先对齐进度')).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: '查看原文' }))
+    expect(await screen.findByText('嗯，先对齐进度')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '查看清洗版' }))
+    expect(await screen.findByText('先对齐进度')).toBeInTheDocument()
+  })
+
+  it('没有清洗版时不出切换按钮', async () => {
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json({ ...MEETING, state: 'PARTIAL_READY' }),
+      ),
+      http.get('/api/meetings/m1/transcript', () =>
+        HttpResponse.json({
+          raw_markdown: '张三 00:00-00:01\n先对齐进度',
+          cleaned_markdown: null,
+        }),
+      ),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    expect(await screen.findByText('先对齐进度')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '查看原文' }),
+    ).not.toBeInTheDocument()
+  })
+
   it('标题可就地编辑，保存后展示新标题', async () => {
     let patchedTitle: string | null = null
     server.use(

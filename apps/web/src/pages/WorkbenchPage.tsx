@@ -262,6 +262,8 @@ function ResultPanel({
   // 导出按钮跟随当前口径（后端对无清洗版的 cleaned 请求同样回退原文）。
   const [transcriptVariant, setTranscriptVariant] =
     useState<TranscriptVariant>('cleaned')
+  // 是否有清洗版由 TranscriptView 加载后上报，决定工具栏是否出切换按钮。
+  const [cleanedAvailable, setCleanedAvailable] = useState(false)
   const [reopening, setReopening] = useState(false)
   const [reopenError, setReopenError] = useState<string | null>(null)
 
@@ -310,6 +312,19 @@ function ResultPanel({
           </button>
         </div>
         <div className="export-links">
+          {tab === 'transcript' && cleanedAvailable && (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() =>
+                setTranscriptVariant(
+                  transcriptVariant === 'cleaned' ? 'raw' : 'cleaned',
+                )
+              }
+            >
+              {transcriptVariant === 'cleaned' ? '查看原文' : '查看清洗版'}
+            </button>
+          )}
           <button
             type="button"
             className="btn"
@@ -346,7 +361,7 @@ function ResultPanel({
         <TranscriptView
           meetingId={meetingId}
           variant={transcriptVariant}
-          onVariantChange={setTranscriptVariant}
+          onCleanedAvailable={setCleanedAvailable}
         />
       ) : (
         <MinutesView

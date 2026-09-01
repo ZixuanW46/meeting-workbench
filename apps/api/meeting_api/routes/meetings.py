@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import json
+import shutil
 
-from fastapi import APIRouter, HTTPException, Request, status
-from sqlalchemy import delete, select
+from fastapi import APIRouter, HTTPException, Request, Response, status
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
-from meeting_api.models import HotwordEntry, Meeting, Person, SpeakerCluster, TranscriptSegment
+from meeting_api.models import (
+    HotwordEntry,
+    Meeting,
+    Person,
+    SpeakerCluster,
+    TranscriptSegment,
+    Voiceprint,
+)
 from meeting_api.schemas import (
     MeetingCreate,
     MeetingListResponse,
@@ -20,6 +28,15 @@ router = APIRouter(prefix="/api/meetings")
 
 
 type SpeakerSummary = tuple[list[str], int]
+
+BUSY_MEETING_STATES: frozenset[MeetingState] = frozenset(
+    {
+        MeetingState.QUEUED,
+        MeetingState.PROCESSING,
+        MeetingState.APPLYING_DECISIONS,
+        MeetingState.GENERATING_MINUTES,
+    }
+)
 
 
 def _speaker_summaries(
@@ -147,6 +164,39 @@ def update_meeting_title(
         session.refresh(meeting)
         summary = _speaker_summaries(session, [meeting.id]).get(meeting.id, ([], 0))
         return _to_response(meeting, summary)
+
+
+@router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_meeting(meeting_id: str, request: Request) -> Response:
+    session_factory = request.app.state.session_factory
+    with session_factory() as session:
+        meeting = session.get(Meeting, meeting_id)
+        if meeting is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会议不存在")
+
+        current = MeetingState(meeting.state) if meeting.state in MeetingState else None
+        if current in BUSY_MEETING_STATES:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="处理中的会议不能删除",
+            )
+
+        session.execute(
+            update(Voiceprint)
+            .where(Voiceprint.source_meeting_id == meeting_id)
+            .values(source_meeting_id=None)
+        )
+        session.execute(
+            delete(TranscriptSegment).where(TranscriptSegment.meeting_id == meeting_id)
+        )
+        session.execute(
+            delete(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
+        )
+        session.delete(meeting)
+        session.commit()
+
+    shutil.rmtree(meeting_dir(request.app.state.settings, meeting_id), ignore_errors=True)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{meeting_id}/retranscribe", response_model=MeetingResponse)

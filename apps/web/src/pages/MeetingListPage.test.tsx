@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { makeDoctorReport } from '../test/doctor'
 import { server } from '../test/server'
@@ -102,6 +102,56 @@ describe('会议列表页', () => {
     }
     // 行链接可访问名仍是标题本身
     expect(screen.getByRole('link', { name: /产品周会/ })).toBeInTheDocument()
+  })
+
+  it('删除会议：两段式确认后行消失，取消则不发请求', async () => {
+    let deleteCalled = 0
+    server.use(
+      http.get('/api/meetings', () => HttpResponse.json({ items: MEETINGS })),
+      http.delete('/api/meetings/m2', () => {
+        deleteCalled += 1
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+
+    render(<MeetingListPage />)
+    await screen.findByText('架构评审')
+
+    // 第一次点删除只进入确认态，不发请求
+    fireEvent.click(screen.getByRole('button', { name: '删除会议 架构评审' }))
+    expect(deleteCalled).toBe(0)
+
+    // 取消退回
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('button', { name: '确认删除' })).not.toBeInTheDocument()
+
+    // 再来一次并确认
+    fireEvent.click(screen.getByRole('button', { name: '删除会议 架构评审' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
+
+    await waitFor(() => expect(deleteCalled).toBe(1))
+    await waitFor(() =>
+      expect(screen.queryByText('架构评审')).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText('产品周会')).toBeInTheDocument()
+  })
+
+  it('删除处理中的会议：后端 409 时展示错误且行保留', async () => {
+    server.use(
+      http.get('/api/meetings', () => HttpResponse.json({ items: MEETINGS })),
+      http.delete('/api/meetings/m1', () =>
+        HttpResponse.json({ detail: '处理中的会议不能删除' }, { status: 409 }),
+      ),
+    )
+
+    render(<MeetingListPage />)
+    await screen.findByText('产品周会')
+
+    fireEvent.click(screen.getByRole('button', { name: '删除会议 产品周会' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
+
+    expect(await screen.findByText('处理中的会议不能删除')).toBeInTheDocument()
+    expect(screen.getByText('产品周会')).toBeInTheDocument()
   })
 
   it('空列表保留空态', async () => {

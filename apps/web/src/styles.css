@@ -477,6 +477,43 @@ a {
   transition: background 0.1s var(--ease);
 }
 
+/* 行主体是链接、行尾是操作：拆开避免交互元素嵌套 */
+.list-row-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+}
+
+/* 删除入口安静存在：悬停行才浮现，与标题编辑入口同一性格 */
+.row-delete {
+  opacity: 0;
+  padding: 4px 8px;
+}
+
+.list-row:hover .row-delete,
+.row-delete:focus-visible {
+  opacity: 1;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-danger {
+  border-color: rgba(235, 106, 100, 0.55);
+  color: var(--danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(235, 106, 100, 0.12);
+  border-color: var(--danger);
+}
+
 .list-row:first-child {
   border-top: none;
 }

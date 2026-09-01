@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { formatApiError, listMeetings, type Meeting } from '../api/client'
+import { deleteMeeting, formatApiError, listMeetings, type Meeting } from '../api/client'
 import { DoctorBanner } from '../components/DoctorBanner'
 import { Icon } from '../components/Icon'
 import { StateBadge } from '../components/StateBadge'
@@ -20,9 +20,28 @@ function formatCreatedAt(value: string): string {
 export function MeetingListPage() {
   const [meetings, setMeetings] = useState<Meeting[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // 删除走两段式确认：整场会议（音频、转写、纪要）一起消失，值得多点一下
+  const [confirmingId, setConfirmingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const awaitingCount =
     meetings?.filter((meeting) => meeting.state === 'AWAITING_SPEAKER_REVIEW')
       .length ?? 0
+
+  const onDelete = (meetingId: string) => {
+    setDeletingId(meetingId)
+    setError(null)
+    deleteMeeting(meetingId)
+      .then(() => {
+        setMeetings((current) =>
+          current === null ? current : current.filter((m) => m.id !== meetingId),
+        )
+      })
+      .catch((e: unknown) => setError(formatApiError(e)))
+      .finally(() => {
+        setDeletingId(null)
+        setConfirmingId(null)
+      })
+  }
 
   useEffect(() => {
     let stale = false
@@ -78,23 +97,50 @@ export function MeetingListPage() {
             </div>
           ) : (
             meetings.map((meeting) => (
-              <a
-                key={meeting.id}
-                className="list-row"
-                href={`#/meetings/${meeting.id}`}
-              >
-                <span className="list-row-main">
-                  <span className="list-row-title">{meeting.title}</span>
-                  <span className="list-row-meta">
-                    {meeting.speakers.length + meeting.unknown_speaker_count > 0
-                      ? `参会 ${meeting.speakers.length + meeting.unknown_speaker_count} 人 · `
-                      : ''}
-                    {formatCreatedAt(meeting.created_at)}
+              <div key={meeting.id} className="list-row">
+                <a className="list-row-link" href={`#/meetings/${meeting.id}`}>
+                  <span className="list-row-main">
+                    <span className="list-row-title">{meeting.title}</span>
+                    <span className="list-row-meta">
+                      {meeting.speakers.length + meeting.unknown_speaker_count > 0
+                        ? `参会 ${meeting.speakers.length + meeting.unknown_speaker_count} 人 · `
+                        : ''}
+                      {formatCreatedAt(meeting.created_at)}
+                    </span>
                   </span>
-                </span>
-                <StateBadge state={meeting.state} />
-                <Icon name="chevron-right" size={12} className="list-row-chevron" />
-              </a>
+                  <StateBadge state={meeting.state} />
+                  <Icon name="chevron-right" size={12} className="list-row-chevron" />
+                </a>
+                {confirmingId === meeting.id ? (
+                  <span className="row-actions">
+                    <button
+                      type="button"
+                      className="btn btn-danger"
+                      disabled={deletingId === meeting.id}
+                      onClick={() => onDelete(meeting.id)}
+                    >
+                      确认删除
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={deletingId === meeting.id}
+                      onClick={() => setConfirmingId(null)}
+                    >
+                      取消
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-ghost row-delete"
+                    aria-label={`删除会议 ${meeting.title}`}
+                    onClick={() => setConfirmingId(meeting.id)}
+                  >
+                    <Icon name="trash" size={12} />
+                  </button>
+                )}
+              </div>
             ))
           )}
         </div>

@@ -233,6 +233,10 @@ export function updateMeetingTitle(meetingId: string, title: string): Promise<Me
   })
 }
 
+export function deleteMeeting(meetingId: string): Promise<void> {
+  return apiFetch<void>(`/api/meetings/${meetingId}`, { method: 'DELETE' })
+}
+
 export function uploadAudio(
   meetingId: string,
   file: File,

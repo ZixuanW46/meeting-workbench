@@ -118,8 +118,10 @@ function useMinutesStructure(markdown: string | null): MinutesStructure | null {
 function StructuredMinutes({ structure }: { structure: MinutesStructure }) {
   const decisions = extractDecisions(structure)
   const sectionRefs = useRef(new Map<string, HTMLElement>())
+  // 锚点用序号而不是标题：LLM 偶尔会产出重复的二级标题
+  const anchorOf = (index: number) => `section-${index}`
   const [active, setActive] = useState<string>(
-    decisions.length > 0 ? DECISIONS_ANCHOR : structure.sections[0].title,
+    decisions.length > 0 ? DECISIONS_ANCHOR : anchorOf(0),
   )
   // 点击目录后的平滑滚动期间，观察器会连环触发；短暂挂起联动。
   const suspendUntil = useRef(0)
@@ -182,9 +184,9 @@ function StructuredMinutes({ structure }: { structure: MinutesStructure }) {
       <nav className="minutes-toc" aria-label="纪要目录">
         <div className="minutes-toc-heading">本场纪要</div>
         {decisions.length > 0 && tocEntry(DECISIONS_ANCHOR, '决议一览')}
-        {structure.sections.map((section) =>
+        {structure.sections.map((section, index) =>
           tocEntry(
-            section.title,
+            anchorOf(index),
             section.title === FOLLOWUP_TITLE && section.taskCount > 0 ? (
               <Fragment>
                 {section.title}
@@ -205,7 +207,7 @@ function StructuredMinutes({ structure }: { structure: MinutesStructure }) {
           >
             <div className="minutes-decisions-title">本场决议一览</div>
             {decisions.map((decision, index) => (
-              <div key={decision.section} className="minutes-decision-row">
+              <div key={`${decision.sectionIndex}-${index}`} className="minutes-decision-row">
                 <span className="minutes-decision-index">
                   {String(index + 1).padStart(2, '0')}
                 </span>
@@ -213,7 +215,7 @@ function StructuredMinutes({ structure }: { structure: MinutesStructure }) {
                   <button
                     type="button"
                     className="minutes-decision-link"
-                    onClick={() => jumpTo(decision.section)}
+                    onClick={() => jumpTo(anchorOf(decision.sectionIndex))}
                   >
                     {decision.section}
                   </button>
@@ -223,10 +225,10 @@ function StructuredMinutes({ structure }: { structure: MinutesStructure }) {
             ))}
           </section>
         )}
-        {structure.sections.map((section) => (
+        {structure.sections.map((section, index) => (
           <section
-            key={section.title}
-            ref={registerSection(section.title)}
+            key={anchorOf(index)}
+            ref={registerSection(anchorOf(index))}
             className="minutes-section"
           >
             <h2>{section.title}</h2>

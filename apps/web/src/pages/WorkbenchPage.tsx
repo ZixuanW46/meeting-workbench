@@ -56,6 +56,10 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
         if (previous !== null && previous !== 'READY' && data.state === 'READY') {
           toast('纪要已生成')
         }
+        // 「含未确认说话人」提示只在纪要生成期间有意义：纪要本身会带标记
+        if (data.state === 'READY' || data.state === 'PARTIAL_READY') {
+          setNotice(null)
+        }
         setMeeting(data)
         setError(null)
       })

@@ -53,7 +53,7 @@ describe('纪要结构解析', () => {
     const decisions = extractDecisions(parseMinutes(MARKDOWN))
 
     expect(decisions).toEqual([
-      { section: '见山与教育业务机会', text: '见山暂不作为主业，小步探索。' },
+      { section: '见山与教育业务机会', sectionIndex: 1, text: '见山暂不作为主业，小步探索。' },
     ])
   })
 

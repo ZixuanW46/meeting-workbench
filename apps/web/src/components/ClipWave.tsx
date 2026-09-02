@@ -70,9 +70,9 @@ export function ClipWave({
           <rect x="0" y="0" width={progress * 192} height="24" />
         </clipPath>
       </defs>
-      <g fill="#3e3e44">{rects}</g>
+      <g fill="var(--hairline-tertiary)">{rects}</g>
       {progress > 0 && (
-        <g fill="#5e6ad2" clipPath={`url(#${clipId})`}>
+        <g fill="var(--primary)" clipPath={`url(#${clipId})`}>
           {rects}
         </g>
       )}

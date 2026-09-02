@@ -19,6 +19,8 @@ export interface MinutesStructure {
 
 export interface MinutesDecision {
   section: string
+  /** 所属议题在 sections 里的下标：标题可能重复，跳转按下标定位 */
+  sectionIndex: number
   text: string
 }
 
@@ -70,12 +72,11 @@ function buildSection(title: string, lines: string[]): MinutesSection {
 
 /** 抽取各议题的结论作为决议一览；没有任何结论时返回空数组。 */
 export function extractDecisions(structure: MinutesStructure): MinutesDecision[] {
-  return structure.sections
-    .filter((section) => section.conclusion !== null)
-    .map((section) => ({
-      section: section.title,
-      text: section.conclusion as string,
-    }))
+  return structure.sections.flatMap((section, index) =>
+    section.conclusion === null
+      ? []
+      : [{ section: section.title, sectionIndex: index, text: section.conclusion }],
+  )
 }
 
 /** 决议一览里只要纯文本：去掉粗体/斜体标记，保留文字本身。 */

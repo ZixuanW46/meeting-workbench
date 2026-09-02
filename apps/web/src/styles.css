@@ -877,6 +877,25 @@ a {
   }
 }
 
+/* 进度卡：取消入口靠右、安静，不与进度争视觉 */
+.progress-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.progress-card .progress-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.progress-cancel {
+  flex: none;
+  font-size: 13px;
+  padding: 6px 10px;
+}
+
 .progress-degraded {
   font-size: 12px;
   color: var(--ink-tertiary);

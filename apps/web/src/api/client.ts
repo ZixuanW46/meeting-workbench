@@ -261,6 +261,11 @@ export function localToday(): string {
   return `${now.getFullYear()}-${month}-${day}`
 }
 
+/** 取消处理：排队/转写中 → CANCELED；生成纪要中 → PARTIAL_READY（转写与确认保留） */
+export function cancelMeeting(meetingId: string): Promise<Meeting> {
+  return apiFetch<Meeting>(`/api/meetings/${meetingId}/cancel`, { method: 'POST' })
+}
+
 /** 显式重转写：清掉转写、确认与纪要，音频不动，回到排队 */
 export function retranscribeMeeting(meetingId: string): Promise<Meeting> {
   return apiFetch<Meeting>(`/api/meetings/${meetingId}/retranscribe`, { method: 'POST' })

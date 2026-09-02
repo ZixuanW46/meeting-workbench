@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  cancelMeeting,
   formatApiError,
   getMeeting,
   reopenReview,
@@ -43,6 +44,7 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
   const [editingDate, setEditingDate] = useState(false)
   const [dateDraft, setDateDraft] = useState('')
   const [savingDate, setSavingDate] = useState(false)
+  const [canceling, setCanceling] = useState(false)
   const meetingStateRef = useRef<string | null>(null)
   meetingStateRef.current = meeting?.state ?? null
 
@@ -103,6 +105,20 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
       setError(formatApiError(e))
     } finally {
       setSavingDate(false)
+    }
+  }
+
+  const cancel = async () => {
+    setCanceling(true)
+    try {
+      const updated = await cancelMeeting(meetingId)
+      setMeeting(updated)
+      setError(null)
+      toast(updated.state === 'PARTIAL_READY' ? '已停止生成纪要' : '已取消处理')
+    } catch (e: unknown) {
+      setError(formatApiError(e))
+    } finally {
+      setCanceling(false)
     }
   }
 
@@ -294,7 +310,7 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
       )}
 
       {PROGRESS_STATES.has(meeting.state) && (
-        <div className="card">
+        <div className="card progress-card">
           <Progress
             meetingId={meetingId}
             onSnapshot={(snapshot) => {
@@ -303,6 +319,19 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
               }
             }}
           />
+          {/* 决定应用在请求内瞬间完成，不给取消；其余处理中状态都可停 */}
+          {meeting.state !== 'APPLYING_DECISIONS' && (
+            <button
+              type="button"
+              className="btn btn-ghost progress-cancel"
+              disabled={canceling}
+              onClick={() => {
+                void cancel()
+              }}
+            >
+              {meeting.state === 'GENERATING_MINUTES' ? '停止生成纪要' : '取消处理'}
+            </button>
+          )}
         </div>
       )}
 

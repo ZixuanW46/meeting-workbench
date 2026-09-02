@@ -40,7 +40,10 @@ MW_BIND_HOST=0.0.0.0 ./scripts/launchd/install_launchd.sh
 - 音频、转写、说话人信息、声纹和数据库均留在 `data/`，音频不出本机。
 - 纪要只走用户已登录的本机 CLI：Claude 使用 `claude -p --output-format json`，Codex 使用 `codex exec`。禁止 `--bare`，也不读取 CLI token。
 - 使用云端 CLI 时，纪要生成所需的文本会由该 CLI 发送给相应服务；音频和模型权重不会随请求发送。
+- 纪要与清洗的 CLI 子进程在空临时目录里运行，关闭全部内置工具与 MCP、不持久化会话；逐字稿只留在 `data/`。
 - 想自定义纪要风格时，把提示词模板写进 `data/minutes_prompt.md`（存在即覆盖默认指令头；逐字稿仍会附在其后）。
+- 单次 CLI 调用超时可调：`MW_MINUTES_TIMEOUT_SECONDS`（默认 600）、`MW_CLEANING_TIMEOUT_SECONDS`（默认 180）。
+- 处理失败或被取消的会议可在界面上「重新处理」，音频不必重传；服务重启时中断的转写会自动回到队列。
 - 模型在本机串行使用，以适应 16GB 统一内存；实际耗时取决于录音与机器负载，不作为对外性能承诺。
 
 ## 开发

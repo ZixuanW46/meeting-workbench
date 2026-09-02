@@ -55,9 +55,9 @@ def test_doctor_reports_dependencies_models_cli_and_readiness(client, monkeypatc
         "minutes_ready": True,
         "migrations": {
             "current_revision": None,
-            "head_revision": "0013",
+            "head_revision": "0014",
             "pending": True,
-            "warning": "数据库迁移未应用（当前未初始化，最新 0013），请运行 make migrate。",
+            "warning": "数据库迁移未应用（当前未初始化，最新 0014），请运行 make migrate。",
         },
     }
 
@@ -72,23 +72,23 @@ def test_doctor_warns_when_database_revision_is_behind_head(client, monkeypatch)
 
     assert payload["migrations"] == {
         "current_revision": "0010",
-        "head_revision": "0013",
+        "head_revision": "0014",
         "pending": True,
-        "warning": "数据库迁移未应用（当前 0010，最新 0013），请运行 make migrate。",
+        "warning": "数据库迁移未应用（当前 0010，最新 0014），请运行 make migrate。",
     }
 
 
 def test_doctor_reports_no_migration_warning_at_head(client, monkeypatch):
     with client.app.state.engine.begin() as connection:
         connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32))"))
-        connection.execute(text("INSERT INTO alembic_version VALUES ('0013')"))
+        connection.execute(text("INSERT INTO alembic_version VALUES ('0014')"))
     monkeypatch.setattr("meeting_api.doctor.shutil.which", lambda _name: None)
 
     migrations = client.get("/api/doctor").json()["migrations"]
 
     assert migrations == {
-        "current_revision": "0013",
-        "head_revision": "0013",
+        "current_revision": "0014",
+        "head_revision": "0014",
         "pending": False,
         "warning": None,
     }

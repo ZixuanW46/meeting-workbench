@@ -8,7 +8,7 @@ import tempfile
 import threading
 import wave
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from sqlalchemy import delete, select
@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from meeting_api.config import Settings
 from meeting_api.events import EventStore
+from meeting_api.meeting_date import resolve_meeting_date
 from meeting_api.minutes.adapter import (
     MinutesAdapter,
     MinutesCliError,
@@ -26,7 +27,6 @@ from meeting_api.minutes.prompt import (
     build_minutes_prompt,
     load_minutes_glossary,
     load_minutes_template,
-    meeting_date_from_created_at,
 )
 from meeting_api.models import (
     CleanedTranscriptBlock,
@@ -124,12 +124,11 @@ def _cluster_windows(
     )
 
 
-def _auto_title_from_minutes(markdown: str, created_at: datetime) -> str | None:
+def _auto_title_from_minutes(markdown: str, meeting_date: date) -> str | None:
     for line in markdown.splitlines():
         if line.startswith("# "):
             topic = MODEL_DATE_PREFIX_RE.sub("", line[2:].strip()).strip()
-            meeting_date = meeting_date_from_created_at(created_at).strftime("%y-%m-%d")
-            return f"{meeting_date}：{topic}"[:TITLE_MAX_LENGTH]
+            return f"{meeting_date.strftime('%y-%m-%d')}：{topic}"[:TITLE_MAX_LENGTH]
     return None
 
 
@@ -335,15 +334,16 @@ class Worker:
             else:
                 transcript_for_minutes = transcript_raw
 
+            meeting_date, _ = resolve_meeting_date(meeting)
             markdown = self.minutes_adapter.generate(
                 build_minutes_prompt(
                     transcript_for_minutes,
                     template=load_minutes_template(self.settings.data_dir),
                     glossary=glossary,
-                    meeting_date=meeting_date_from_created_at(meeting.created_at),
+                    meeting_date=meeting_date,
                 )
             )
-            auto_title = _auto_title_from_minutes(markdown, meeting.created_at)
+            auto_title = _auto_title_from_minutes(markdown, meeting_date)
             if auto_title is not None and not meeting.title_user_edited:
                 meeting.title = auto_title
             if meeting.has_unconfirmed_speakers:

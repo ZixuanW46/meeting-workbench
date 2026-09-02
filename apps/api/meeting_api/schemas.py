@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
+from typing import Literal, Self
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class MeetingCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
+    # 会议发生日；不填则按音频文件名或创建日推断。
+    meeting_date: date | None = None
     expected_speakers: int | None = Field(default=None, ge=1)
     hotwords: list[str] = Field(default_factory=list)
 
@@ -30,16 +33,27 @@ class MeetingCreate(BaseModel):
         return cleaned
 
 
-class MeetingTitleUpdate(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
+class MeetingUpdate(BaseModel):
+    """PATCH 只改给出的字段：标题、会议日期各自可选，但至少要给一个。"""
+
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    meeting_date: date | None = None
 
     @field_validator("title")
     @classmethod
-    def title_not_blank(cls, value: str) -> str:
+    def title_not_blank(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         stripped = value.strip()
         if not stripped:
             raise ValueError("标题不能为空")
         return stripped
+
+    @model_validator(mode="after")
+    def at_least_one_field(self) -> Self:
+        if "title" not in self.model_fields_set and "meeting_date" not in self.model_fields_set:
+            raise ValueError("至少提供 title 或 meeting_date 之一")
+        return self
 
 
 class MeetingResponse(BaseModel):
@@ -49,6 +63,9 @@ class MeetingResponse(BaseModel):
     expected_speakers: int | None
     hotwords: list[str]
     created_at: datetime
+    # 生效的会议日期与来源：user=用户填写 / filename=音频文件名 / created=创建日。
+    meeting_date: date
+    meeting_date_source: Literal["user", "filename", "created"]
     speakers: list[str]
     unknown_speaker_count: int
 

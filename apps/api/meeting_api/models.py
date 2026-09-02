@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     Float,
     ForeignKey,
     Integer,
@@ -37,6 +38,9 @@ class Meeting(Base):
         Boolean, default=False, server_default="0"
     )
     state: Mapped[str] = mapped_column(String(32), default=MeetingState.DRAFT.value)
+    # 用户显式填写的会议日期；None 表示未填，按文件名或创建日推断
+    # （见 meeting_date.resolve_meeting_date）。
+    meeting_date: Mapped[date | None] = mapped_column(Date, default=None)
     # 预计人数是先验，不是硬约束；None = 不确定
     expected_speakers: Mapped[int | None] = mapped_column(default=None)
     hotwords_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]")

@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
+from meeting_api.meeting_date import resolve_meeting_date
 from meeting_api.models import (
     CleanedTranscriptBlock,
     HotwordEntry,
@@ -20,7 +21,7 @@ from meeting_api.schemas import (
     MeetingCreate,
     MeetingListResponse,
     MeetingResponse,
-    MeetingTitleUpdate,
+    MeetingUpdate,
 )
 from meeting_api.storage import meeting_dir
 from meeting_domain import RETRANSCRIBABLE_STATES, MeetingState, snapshot, transition
@@ -97,6 +98,7 @@ def _to_response(
     meeting: Meeting, speaker_summary: SpeakerSummary = ([], 0)
 ) -> MeetingResponse:
     speakers, unknown_speaker_count = speaker_summary
+    meeting_date, meeting_date_source = resolve_meeting_date(meeting)
     return MeetingResponse(
         id=meeting.id,
         title=meeting.title,
@@ -104,6 +106,8 @@ def _to_response(
         expected_speakers=meeting.expected_speakers,
         hotwords=json.loads(meeting.hotwords_json),
         created_at=meeting.created_at,
+        meeting_date=meeting_date,
+        meeting_date_source=meeting_date_source,
         speakers=speakers,
         unknown_speaker_count=unknown_speaker_count,
     )
@@ -115,6 +119,7 @@ def create_meeting(payload: MeetingCreate, request: Request) -> MeetingResponse:
     with session_factory() as session:
         meeting = Meeting(
             title=payload.title,
+            meeting_date=payload.meeting_date,
             expected_speakers=payload.expected_speakers,
             hotwords_json=json.dumps(payload.hotwords, ensure_ascii=False),
         )
@@ -150,8 +155,8 @@ def get_meeting(meeting_id: str, request: Request) -> MeetingResponse:
 
 
 @router.patch("/{meeting_id}", response_model=MeetingResponse)
-def update_meeting_title(
-    meeting_id: str, payload: MeetingTitleUpdate, request: Request
+def update_meeting(
+    meeting_id: str, payload: MeetingUpdate, request: Request
 ) -> MeetingResponse:
     session_factory = request.app.state.session_factory
     with session_factory() as session:
@@ -159,8 +164,11 @@ def update_meeting_title(
         if meeting is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会议不存在")
 
-        meeting.title = payload.title
-        meeting.title_user_edited = True
+        if payload.title is not None:
+            meeting.title = payload.title
+            meeting.title_user_edited = True
+        if "meeting_date" in payload.model_fields_set:
+            meeting.meeting_date = payload.meeting_date
         session.commit()
         session.refresh(meeting)
         summary = _speaker_summaries(session, [meeting.id]).get(meeting.id, ([], 0))

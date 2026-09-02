@@ -90,6 +90,37 @@ def test_transcript_endpoint_returns_raw_and_cleaned_versions(client):
     assert "第二段不应采用" not in payload["cleaned_markdown"]
 
 
+def test_transcript_endpoint_returns_structured_blocks(client):
+    # 前端不该正则反解渲染好的 markdown；块级 JSON 才是接口契约。
+    meeting_id = _seed_meeting_with_transcript(client)
+    _add_cleaned_rows(client, meeting_id)
+
+    payload = client.get(f"/api/meetings/{meeting_id}/transcript").json()
+
+    assert payload["blocks"] == [
+        {
+            "start_seconds": 0.0,
+            "end_seconds": 5.0,
+            "label": "王芳",
+            "text": "嗯第一段原文",
+            "cleaned_text": "第一段清洗文本",
+        },
+        {
+            "start_seconds": 5.0,
+            "end_seconds": 9.0,
+            "label": "说话人 2",
+            "text": "第二段原文",
+            "cleaned_text": None,
+        },
+    ]
+    assert payload["cleaned_available"] is True
+
+    bare = _seed_meeting_with_transcript(client)
+    bare_payload = client.get(f"/api/meetings/{bare}/transcript").json()
+    assert all(block["cleaned_text"] is None for block in bare_payload["blocks"])
+    assert bare_payload["cleaned_available"] is False
+
+
 def test_transcript_endpoint_uses_none_when_no_cleaned_rows_match(client):
     meeting_id = _seed_meeting_with_transcript(client)
 

@@ -48,9 +48,21 @@ LIST_ITEM_PATTERN = re.compile(r"^(?P<nested>  )?- (?P<content>.*)$")
 TASK_PATTERN = re.compile(r"^\[(?P<checked>[ xX])\] (?P<content>.*)$")
 
 
+class TranscriptBlockResponse(BaseModel):
+    start_seconds: float
+    end_seconds: float
+    # 公开说话人标签：确认后的名字或「说话人 N」。
+    label: str
+    text: str
+    # 该块的清洗文本；清洗失败或哈希对不上时为 None，前端回退原文。
+    cleaned_text: str | None
+
+
 class TranscriptResponse(BaseModel):
+    # 块级结构才是接口契约；markdown 字段只给导出预览与旧调用方。
+    blocks: list[TranscriptBlockResponse]
+    cleaned_available: bool
     raw_markdown: str
-    # 清洗版；没有任何哈希对得上的清洗块时为 None，前端据此隐藏切换。
     cleaned_markdown: str | None
 
 
@@ -214,9 +226,24 @@ def get_transcript(meeting_id: str, request: Request) -> TranscriptResponse:
     with request.app.state.session_factory() as session:
         meeting = _get_meeting(session, meeting_id)
         _require_export_state(meeting, TRANSCRIPT_EXPORT_STATES)
+        blocks = _build_transcript_blocks(session, meeting_id)
+        cleaned_blocks, changed = apply_cleaned_blocks(
+            blocks, _cleaned_rows_by_index(session, meeting_id)
+        )
         return TranscriptResponse(
-            raw_markdown=_build_export_transcript(session, meeting_id),
-            cleaned_markdown=_build_cleaned_export_transcript(session, meeting_id),
+            blocks=[
+                TranscriptBlockResponse(
+                    start_seconds=block.start_seconds,
+                    end_seconds=block.end_seconds,
+                    label=block.label,
+                    text=block.text,
+                    cleaned_text=cleaned.text if cleaned.text != block.text else None,
+                )
+                for block, cleaned in zip(blocks, cleaned_blocks, strict=True)
+            ],
+            cleaned_available=changed,
+            raw_markdown=_render_transcript_markdown(blocks),
+            cleaned_markdown=_render_transcript_markdown(cleaned_blocks) if changed else None,
         )
 
 

@@ -47,6 +47,8 @@ interface SpeakerCardProps {
   clusterLabels: Record<string, number>
   draft: DecisionDraft | undefined
   onChange: (draft: DecisionDraft) => void
+  /** 本场还没有任何已确认者时，「就近归属」没有锚点，选项禁用 */
+  nearestDisabled?: boolean
   /** 整个确认页共用的一个 audio 元素：卡片只 seek，不各自解码整场音频 */
   audioRef: RefObject<HTMLAudioElement>
   /** 后端算好的整场峰值；取不到时为 null，只是没波形 */
@@ -78,6 +80,7 @@ export function SpeakerCard({
   clusterLabels,
   draft,
   onChange,
+  nearestDisabled = false,
   audioRef,
   peaks,
   duration,
@@ -333,17 +336,25 @@ export function SpeakerCard({
         role="radiogroup"
         aria-label={`说话人 ${anonymousIndex} 的决定`}
       >
-        {options.map((option) => (
-          <label key={option.kind} className="decision-option">
-            <input
-              type="radio"
-              name={`decision-${card.cluster_id}`}
-              checked={draft?.kind === option.kind}
-              onChange={() => setKind(option.kind)}
-            />
-            {option.label}
-          </label>
-        ))}
+        {options.map((option) => {
+          const disabled = option.kind === 'NEAREST_CONFIRMED' && nearestDisabled
+          return (
+            <label
+              key={option.kind}
+              className={`decision-option${disabled ? ' disabled' : ''}`}
+              title={disabled ? '先确认至少一位参会人，才有可并入的对象' : undefined}
+            >
+              <input
+                type="radio"
+                name={`decision-${card.cluster_id}`}
+                checked={draft?.kind === option.kind}
+                disabled={disabled}
+                onChange={() => setKind(option.kind)}
+              />
+              {option.label}
+            </label>
+          )
+        })}
       </div>
 
       {draft?.kind === 'NEW_PERSON' && (

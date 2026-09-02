@@ -14,6 +14,8 @@ import {
 import { DecisionDraft, draftValid, SpeakerCard } from './SpeakerCard'
 
 const UNKNOWN_KINDS = new Set(['KEEP_UNKNOWN', 'UNDECIDED_UNKNOWN'])
+// 这些决定会产生一个确认身份，是「就近归属」可并入的锚点
+const ANCHOR_KINDS = new Set(['CONFIRM', 'REASSIGN', 'LINK_EXISTING', 'NEW_PERSON'])
 
 interface SpeakerReviewProps {
   meetingId: string
@@ -119,6 +121,12 @@ export function SpeakerReview({ meetingId, onSubmitted }: SpeakerReviewProps) {
     const draft = drafts[card.cluster_id]
     return draft !== undefined && UNKNOWN_KINDS.has(draft.kind)
   })
+  // 后端规则：就近归属需要本场至少一位已确认参会人；前端提前拦住，不等 422
+  const hasAnchor = cards.some((card) => {
+    const draft = drafts[card.cluster_id]
+    return draft !== undefined && ANCHOR_KINDS.has(draft.kind) && draftValid(draft)
+  })
+  const decidedCount = cards.length - undecidedIds.length
 
   const handleSubmit = async () => {
     setSubmitting(true)
@@ -158,6 +166,7 @@ export function SpeakerReview({ meetingId, onSubmitted }: SpeakerReviewProps) {
             onChange={(draft) =>
               setDrafts((prev) => ({ ...prev, [card.cluster_id]: draft }))
             }
+            nearestDisabled={!hasAnchor}
             audioRef={audioRef}
             peaks={peaks?.peaks ?? null}
             duration={peaks?.duration ?? 0}
@@ -174,7 +183,12 @@ export function SpeakerReview({ meetingId, onSubmitted }: SpeakerReviewProps) {
         <div className="review-batch">
           <div className="review-batch-row">
             <span className="form-hint">其余 {undecidedIds.length} 张未决定：</span>
-            <button type="button" className="btn" onClick={() => batchSet('NEAREST_CONFIRMED')}>
+            <button
+              type="button"
+              className="btn"
+              disabled={!hasAnchor}
+              onClick={() => batchSet('NEAREST_CONFIRMED')}
+            >
               并入已确认参会人（按声纹就近）
             </button>
             <button type="button" className="btn" onClick={() => batchSet('UNDECIDED_UNKNOWN')}>
@@ -186,7 +200,11 @@ export function SpeakerReview({ meetingId, onSubmitted }: SpeakerReviewProps) {
           </div>
         </div>
       )}
-      <div className="review-footer">
+      {/* 十几张卡竖排很长：提交栏吸底常驻，随时看得到还剩几张 */}
+      <div className="review-footer review-footer-sticky" data-testid="review-footer">
+        <span className="review-progress">
+          {`已决定 ${decidedCount} / ${cards.length}`}
+        </span>
         <button
           type="button"
           className="btn btn-primary"

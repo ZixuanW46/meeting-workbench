@@ -1109,6 +1109,29 @@ svg.clip-wave {
   flex-wrap: wrap;
 }
 
+/* 吸底提交栏：暗面 + 顶边发丝线，不投影 */
+.review-footer-sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin-top: 16px;
+  padding: 10px 0 12px;
+  background: var(--canvas);
+  border-top: 1px solid var(--hairline);
+}
+
+.review-progress {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.decision-option.disabled {
+  color: var(--ink-tertiary);
+  cursor: not-allowed;
+}
+
 /* ---------- 上传（大面板走 16px 圆角） ---------- */
 
 .upload-panel {
@@ -1121,6 +1144,32 @@ svg.clip-wave {
   flex-direction: column;
   align-items: center;
   gap: 10px;
+}
+
+/* 拖入中：虚线变实、边线提亮，表面抬一级 */
+.upload-panel.dragging {
+  border-style: solid;
+  border-color: var(--primary);
+  background: var(--surface-2);
+}
+
+.upload-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 仅对辅助技术可见 */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .upload-icon {

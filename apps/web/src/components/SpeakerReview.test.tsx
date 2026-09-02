@@ -82,6 +82,55 @@ const TAIL_CARDS = {
   people: REVIEW.people,
 }
 
+const NO_ANCHOR = {
+  cards: [REVIEW.cards[1], TAIL_CARDS.cards[2], TAIL_CARDS.cards[3]],
+  people: [],
+}
+
+describe('说话人确认页固定提交栏', () => {
+  it('提交栏常驻并显示「已决定 x / y」，随选择更新', async () => {
+    mockReview()
+    render(<SpeakerReview meetingId="m1" onSubmitted={() => {}} />)
+
+    await findCard('S2')
+    const footer = screen.getByTestId('review-footer')
+    expect(footer).toHaveClass('review-footer-sticky')
+    // S1 的「较高」建议已预选
+    expect(within(footer).getByText('已决定 1 / 2')).toBeInTheDocument()
+
+    fireEvent.click(
+      within(await findCard('S2')).getByLabelText('保持匿名（标为说话人 2）'),
+    )
+    expect(within(footer).getByText('已决定 2 / 2')).toBeInTheDocument()
+    expect(within(footer).getByRole('button', { name: '提交确认' })).toBeEnabled()
+  })
+
+  it('本场没有任何已确认者时，「并入最近的已确认参会人」不可选，批量按钮也禁用', async () => {
+    server.use(
+      http.get('/api/meetings/m1/review', () => HttpResponse.json(NO_ANCHOR)),
+    )
+    render(<SpeakerReview meetingId="m1" onSubmitted={() => {}} />)
+
+    const card = await findCard('S2')
+    const nearest = within(card).getByLabelText('并入最近的已确认参会人')
+    expect(nearest).toBeDisabled()
+    expect(
+      screen.getByRole('button', { name: '并入已确认参会人（按声纹就近）' }),
+    ).toBeDisabled()
+
+    // 给 S2 起个名字后，其他卡的就近归属就有锚点了
+    fireEvent.click(within(card).getByLabelText('新建人'))
+    fireEvent.change(within(card).getByPlaceholderText('输入显示名'), {
+      target: { value: '王芳' },
+    })
+    expect(
+      within(await findCard('S3')).getByLabelText('并入最近的已确认参会人'),
+    ).toBeEnabled()
+    // 只剩 2 张未决定，批量栏按既有规则收起
+    expect(screen.queryByText(/张未决定：/)).not.toBeInTheDocument()
+  })
+})
+
 describe('说话人确认卡', () => {
   it('尾簇批量栏：一键就近归属，可再逐卡覆盖，提交带 NEAREST_CONFIRMED', async () => {
     server.use(

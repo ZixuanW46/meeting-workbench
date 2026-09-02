@@ -52,6 +52,23 @@ describe('进度组件', () => {
     expect(screen.getByText('语音转写')).toBeInTheDocument()
   })
 
+  it('步骤内进度（清洗 3/12）跟在步骤文案后面', async () => {
+    render(<Progress meetingId="m1" />)
+
+    act(() => {
+      FakeEventSource.instances[0].onmessage?.({
+        data: JSON.stringify({
+          state: 'GENERATING_MINUTES',
+          processing_step: 'CLEANING_TRANSCRIPT',
+          detail: '3/12',
+          seq: 1,
+        }),
+      })
+    })
+
+    expect(screen.getByText('清洗转写 3/12')).toBeInTheDocument()
+  })
+
   it('SSE 断开后落到 3 秒轮询', async () => {
     const fetchMock = vi
       .fn()

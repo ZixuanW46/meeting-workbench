@@ -86,6 +86,7 @@ export function Progress({ meetingId, onSnapshot }: ProgressProps) {
         {currentStep !== null && (
           <span className="progress-step-label">
             {STEP_LABELS[currentStep] ?? currentStep}
+            {snapshot?.detail ? ` ${snapshot.detail}` : ''}
           </span>
         )}
       </div>

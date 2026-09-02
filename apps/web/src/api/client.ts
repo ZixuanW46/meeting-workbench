@@ -83,6 +83,8 @@ export interface ReviewSubmitResult {
 export interface ProgressSnapshot {
   state: string
   processing_step: string | null
+  /** 步骤内进度，如清洗「3/12」 */
+  detail?: string | null
   seq: number
 }
 

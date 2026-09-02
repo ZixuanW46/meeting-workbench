@@ -3,6 +3,7 @@ import {
   formatApiError,
   getMeeting,
   reopenReview,
+  retranscribeMeeting,
   updateMeeting,
   updateMeetingTitle,
   type Meeting,
@@ -319,17 +320,70 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
       )}
 
       {RESULT_STATES.has(meeting.state) && (
-        <ResultPanel meetingId={meetingId} state={meeting.state} onChanged={refresh} />
+        <ResultPanel
+          meetingId={meetingId}
+          state={meeting.state}
+          processingError={meeting.processing_error}
+          onChanged={refresh}
+        />
       )}
 
-      {meeting.state === 'FAILED' && (
-        <div className="notice notice-error">
-          处理失败。请检查音频文件后新建会议重试。
+      {(meeting.state === 'FAILED' || meeting.state === 'CANCELED') && (
+        <RecoveryPanel meeting={meeting} onChanged={refresh} />
+      )}
+    </div>
+  )
+}
+
+/** FAILED / CANCELED：音频还在盘上，给出原因并允许放回队列重跑。 */
+function RecoveryPanel({
+  meeting,
+  onChanged,
+}: {
+  meeting: Meeting
+  onChanged: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const failed = meeting.state === 'FAILED'
+
+  const retry = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await retranscribeMeeting(meeting.id)
+      toast('已重新放回队列')
+      onChanged()
+    } catch (e: unknown) {
+      setError(formatApiError(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className={`notice ${failed ? 'notice-error' : ''} recovery-panel`}>
+      <div className="recovery-body">
+        <div>{failed ? '处理失败。' : '这场会议已取消。'}</div>
+        {failed && meeting.processing_error !== null && (
+          <div className="recovery-reason">{meeting.processing_error}</div>
+        )}
+        <div className="form-hint">
+          音频仍保存在本机；重新处理会从校验与转写重新开始。
         </div>
-      )}
-      {meeting.state === 'CANCELED' && (
-        <div className="notice">这场会议已取消。</div>
-      )}
+        {error !== null && <div className="form-error">{error}</div>}
+      </div>
+      <button
+        type="button"
+        className="btn"
+        disabled={busy}
+        onClick={() => {
+          void retry()
+        }}
+      >
+        <Icon name="refresh" size={12} />
+        重新处理
+      </button>
     </div>
   )
 }
@@ -337,10 +391,12 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
 function ResultPanel({
   meetingId,
   state,
+  processingError,
   onChanged,
 }: {
   meetingId: string
   state: string
+  processingError: string | null
   onChanged: () => void
 }) {
   const [tab, setTab] = useState<'transcript' | 'minutes'>(
@@ -354,6 +410,8 @@ function ResultPanel({
   const [cleanedAvailable, setCleanedAvailable] = useState(false)
   const [reopening, setReopening] = useState(false)
   const [reopenError, setReopenError] = useState<string | null>(null)
+  // 重新转写会丢掉已确认的说话人与纪要：菜单点了先出确认条，再发请求。
+  const [confirmingRetranscribe, setConfirmingRetranscribe] = useState(false)
 
   const handleReopen = async () => {
     setReopening(true)
@@ -369,12 +427,61 @@ function ResultPanel({
     }
   }
 
+  const handleRetranscribe = async () => {
+    setReopening(true)
+    setReopenError(null)
+    try {
+      await retranscribeMeeting(meetingId)
+      setConfirmingRetranscribe(false)
+      toast('已重新放回队列')
+      onChanged()
+    } catch (e: unknown) {
+      setReopenError(formatApiError(e))
+    } finally {
+      setReopening(false)
+    }
+  }
+
   return (
     <section className="section">
       {state === 'PARTIAL_READY' && (
         <div className="notice notice-warn" style={{ marginBottom: 12 }}>
-          音频已转写并完成说话人确认；生成纪要需要本机 Claude 或 Codex
-          CLI，安装并登录后可在「纪要」页重试。
+          <div>
+            <div>
+              音频已转写并完成说话人确认；生成纪要需要本机 Claude 或 Codex
+              CLI，安装并登录后可在「纪要」页重试。
+            </div>
+            {processingError !== null && (
+              <div className="recovery-reason">{processingError}</div>
+            )}
+          </div>
+        </div>
+      )}
+      {confirmingRetranscribe && (
+        <div className="notice notice-warn" style={{ marginBottom: 12 }}>
+          <span style={{ flex: 1 }}>
+            重新转写会丢弃已确认的说话人与现有纪要，音频不动。确定继续？
+          </span>
+          <span className="row-actions">
+            <button
+              type="button"
+              className="btn btn-danger"
+              disabled={reopening}
+              onClick={() => {
+                void handleRetranscribe()
+              }}
+            >
+              确认重新转写
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={reopening}
+              onClick={() => setConfirmingRetranscribe(false)}
+            >
+              取消
+            </button>
+          </span>
         </div>
       )}
       {reopenError !== null && (
@@ -421,6 +528,7 @@ function ResultPanel({
             onReopen={() => {
               void handleReopen()
             }}
+            onRetranscribe={() => setConfirmingRetranscribe(true)}
           />
         </div>
       </div>

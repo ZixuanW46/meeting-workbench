@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { makeDoctorReport } from '../test/doctor'
 import { server } from '../test/server'
@@ -273,6 +273,99 @@ describe('工作台页', () => {
     expect(
       screen.queryByRole('link', { name: /导出转写 MD/ }),
     ).not.toBeInTheDocument()
+  })
+
+  it('FAILED 展示失败原因，「重新处理」把会议放回队列', async () => {
+    let state = 'FAILED'
+    let retranscribed = false
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json({
+          ...MEETING,
+          state,
+          processing_error: state === 'FAILED' ? 'RuntimeError: 模型内存不足' : null,
+        }),
+      ),
+      http.post('/api/meetings/m1/retranscribe', () => {
+        retranscribed = true
+        state = 'QUEUED'
+        return HttpResponse.json({ ...MEETING, state, processing_error: null })
+      }),
+      http.get('/api/meetings/m1/progress', () =>
+        HttpResponse.json({ state: 'QUEUED', processing_step: null, seq: 1 }),
+      ),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    expect(await screen.findByText(/模型内存不足/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重新处理' }))
+
+    expect(await screen.findByText('排队中')).toBeInTheDocument()
+    expect(retranscribed).toBe(true)
+  })
+
+  it('CANCELED 也能重新处理', async () => {
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json({ ...MEETING, state: 'CANCELED', processing_error: null }),
+      ),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    expect(await screen.findByRole('button', { name: '重新处理' })).toBeInTheDocument()
+  })
+
+  it('PARTIAL_READY 把纪要失败原因写在提示里', async () => {
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json({
+          ...MEETING,
+          state: 'PARTIAL_READY',
+          processing_error: 'MinutesCliError: claude 失败：Not logged in',
+        }),
+      ),
+      http.get('/api/meetings/m1/transcript', () =>
+        HttpResponse.json({ raw_markdown: '张三 00:00-00:01\n先对齐进度', cleaned_markdown: null }),
+      ),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    expect(await screen.findByText(/Not logged in/)).toBeInTheDocument()
+  })
+
+  it('READY 菜单里的「重新转写」要二次确认，确认后调用重转写接口', async () => {
+    let retranscribed = false
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json({ ...MEETING, state: 'READY' }),
+      ),
+      http.get('/api/meetings/m1/minutes', () =>
+        HttpResponse.json({ markdown: '# 会议纪要', note: '' }),
+      ),
+      http.post('/api/meetings/m1/retranscribe', () => {
+        retranscribed = true
+        return HttpResponse.json({ ...MEETING, state: 'QUEUED' })
+      }),
+      http.get('/api/meetings/m1/progress', () =>
+        HttpResponse.json({ state: 'QUEUED', processing_step: null, seq: 1 }),
+      ),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    const trigger = await screen.findByRole('button', { name: '更多操作' })
+    fireEvent.keyDown(trigger, { key: 'Enter' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: '重新转写' }))
+
+    // 会丢掉已确认的说话人与纪要，所以先出确认条，不直接发请求。
+    expect(await screen.findByText(/会丢弃/)).toBeInTheDocument()
+    expect(retranscribed).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '确认重新转写' }))
+
+    await waitFor(() => expect(retranscribed).toBe(true))
   })
 
   it('PARTIAL_READY 的菜单没有纪要导出口', async () => {

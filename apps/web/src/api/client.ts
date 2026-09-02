@@ -16,6 +16,8 @@ export interface Meeting {
   speakers: string[]
   /** 确认后仍未落名的说话人簇数 */
   unknown_speaker_count: number
+  /** FAILED / PARTIAL_READY 的失败原因，给人看的一句话 */
+  processing_error: string | null
 }
 
 export interface MeetingCreateInput {
@@ -257,6 +259,11 @@ export function localToday(): string {
   const month = String(now.getMonth() + 1).padStart(2, '0')
   const day = String(now.getDate()).padStart(2, '0')
   return `${now.getFullYear()}-${month}-${day}`
+}
+
+/** 显式重转写：清掉转写、确认与纪要，音频不动，回到排队 */
+export function retranscribeMeeting(meetingId: string): Promise<Meeting> {
+  return apiFetch<Meeting>(`/api/meetings/${meetingId}/retranscribe`, { method: 'POST' })
 }
 
 export function deleteMeeting(meetingId: string): Promise<void> {

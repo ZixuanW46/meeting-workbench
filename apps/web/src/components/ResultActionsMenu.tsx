@@ -13,6 +13,7 @@ export function ResultActionsMenu({
   transcriptVariant,
   reopening,
   onReopen,
+  onRetranscribe,
 }: {
   meetingId: string
   state: string
@@ -20,6 +21,8 @@ export function ResultActionsMenu({
   transcriptVariant: TranscriptVariant
   reopening: boolean
   onReopen: () => void
+  /** 进入「重新转写」二次确认；真正发请求由父组件在确认后做 */
+  onRetranscribe: () => void
 }) {
   return (
     <DropdownMenu.Root>
@@ -34,6 +37,12 @@ export function ResultActionsMenu({
             <button type="button" className="menu-item" onClick={onReopen}>
               <Icon name="refresh" size={12} />
               重新确认说话人
+            </button>
+          </DropdownMenu.Item>
+          <DropdownMenu.Item asChild disabled={reopening}>
+            <button type="button" className="menu-item" onClick={onRetranscribe}>
+              <Icon name="refresh" size={12} />
+              重新转写
             </button>
           </DropdownMenu.Item>
           <DropdownMenu.Separator className="menu-separator" />

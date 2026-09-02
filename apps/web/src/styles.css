@@ -746,6 +746,28 @@ a {
   background: var(--primary);
 }
 
+/* 失败 / 取消恢复面板：原因等宽小字，动作靠右 */
+.recovery-panel {
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.recovery-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.recovery-reason {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-subtle);
+  word-break: break-all;
+  margin-top: 2px;
+}
+
 /* 就绪横幅：可堆叠、可关闭 */
 .doctor-banners {
   display: flex;

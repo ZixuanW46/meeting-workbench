@@ -180,10 +180,18 @@ class Worker:
         self.model_slot = model_slot or SingleModelSlot()
         self.events = event_store or EventStore()
         self.minutes_adapter = minutes_adapter or resolve_minutes_adapter(
-            settings.minutes_backend
+            settings.minutes_backend,
+            timeout_seconds=settings.minutes_timeout_seconds,
         )
-        # 清洗默认与纪要同一条 CLI 通道；测试可分别注入。
-        self.cleaner_adapter = cleaner_adapter or self.minutes_adapter
+        # 清洗默认与纪要同一条 CLI 通道、各自超时；测试可分别注入。
+        self.cleaner_adapter = cleaner_adapter or (
+            self.minutes_adapter
+            if minutes_adapter is not None
+            else resolve_minutes_adapter(
+                settings.minutes_backend,
+                timeout_seconds=settings.cleaning_timeout_seconds,
+            )
+        )
         self._process_lock = threading.Lock()
 
     def process_next(self) -> str | None:

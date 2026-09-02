@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     minutes_backend: Literal["auto", "claude", "codex", "fake"] = "auto"
     # 关闭后跳过转写清洗，纪要直接吃原文。
     transcript_cleaning_enabled: bool = True
+    # CLI 单次调用超时（秒）。整份纪要要吞下几万字逐字稿再吐几千字，
+    # 与 3000 字一批的清洗不能共用一个值。
+    minutes_timeout_seconds: float = 600.0
+    cleaning_timeout_seconds: float = 180.0
 
     def resolved_database_url(self) -> str:
         if self.database_url:

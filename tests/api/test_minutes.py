@@ -606,3 +606,77 @@ def test_minutes_cli_settings_probes_executables_on_path(client, tmp_path, monke
         "note": NOTE,
     }
     assert not any(Path(fake_bin).as_posix() in str(value) for value in response.json().values())
+
+
+def test_claude_command_disables_all_tools_mcp_and_session_persistence():
+    # 逐字稿是不可信输入：会上一句「忽略上面的指令」不能变成一次工具调用。
+    command = ClaudeCliAdapter().build_command()
+
+    assert command[command.index("--tools") + 1] == ""
+    assert "--strict-mcp-config" in command
+    assert "--no-session-persistence" in command
+    assert "--bare" not in command
+
+
+def test_codex_command_is_ephemeral_and_skips_git_repo_check():
+    command = CodexCliAdapter().build_command()
+
+    assert "--ephemeral" in command
+    assert "--skip-git-repo-check" in command
+    assert command[-1] == "-"
+
+
+def test_cli_runs_in_empty_scratch_directory_not_repo_root(tmp_path):
+    # 子进程若继承仓库根目录，claude 会读进 CLAUDE.md/.claude 设置，codex 会把
+    # AGENTS.md 当指令；必须在空的临时目录里跑，且跑完即清理。
+    fake_codex = _write_script(
+        tmp_path / "codex",
+        'printf "%s|%s" "$PWD" "$(ls -A | wc -l | tr -d \' \')"',
+    )
+
+    output = CodexCliAdapter(executable=str(fake_codex)).generate("逐字稿正文")
+
+    cwd, entries = output.split("|")
+    assert Path(cwd).resolve() != Path.cwd().resolve()
+    assert entries == "0"
+    assert not Path(cwd).exists()
+
+
+def test_worker_gives_minutes_and_cleaning_separate_configurable_timeouts(tmp_path):
+    # 整份纪要要吞四万字再吐六千字，和 3000 字一批的清洗不能共用 120 秒。
+    settings = Settings(
+        data_dir=tmp_path,
+        minutes_backend="claude",
+        minutes_timeout_seconds=900,
+        cleaning_timeout_seconds=45,
+    )
+
+    worker = Worker(session_factory=None, settings=settings)
+
+    assert isinstance(worker.minutes_adapter, ClaudeCliAdapter)
+    assert worker.minutes_adapter.timeout_seconds == 900
+    assert isinstance(worker.cleaner_adapter, ClaudeCliAdapter)
+    assert worker.cleaner_adapter.timeout_seconds == 45
+
+
+def test_auto_adapter_passes_timeout_to_resolved_cli(tmp_path):
+    both = tmp_path / "both"
+    both.mkdir()
+    _write_script(both / "claude", "")
+    hanging = _write_script(tmp_path / "hang", "exec sleep 30")
+    codex_only = tmp_path / "codex-only"
+    codex_only.mkdir()
+    (codex_only / "codex").symlink_to(hanging)
+
+    resolved = AutoMinutesAdapter(path=str(both), timeout_seconds=7).resolve()
+    assert resolved.timeout_seconds == 7
+
+    with pytest.raises(MinutesCliError, match="超时"):
+        AutoMinutesAdapter(path=str(codex_only), timeout_seconds=0.2).generate("逐字稿")
+
+
+def test_default_timeouts_favor_long_minutes_generation():
+    settings = Settings()
+
+    assert settings.minutes_timeout_seconds >= 600
+    assert settings.cleaning_timeout_seconds >= 120

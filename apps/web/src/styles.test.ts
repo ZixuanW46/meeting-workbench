@@ -70,7 +70,7 @@ describe('样式约定', () => {
   })
 
   it('进度条当前步骤有轻微动效', () => {
-    expect(css).toContain('.progress-seg.current')
+    expect(css).toContain('.progress-step-current .progress-step-dot')
   })
 
   it('动效尊重 prefers-reduced-motion', () => {

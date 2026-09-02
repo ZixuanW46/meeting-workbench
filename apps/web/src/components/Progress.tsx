@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { eventsUrl, getProgress, type ProgressSnapshot } from '../api/client'
-import { PIPELINE_STEPS, STEP_LABELS, stateLabel } from '../labels'
+import { PIPELINE_STEPS, stateLabel } from '../labels'
+import { Icon } from './Icon'
 
 const POLL_INTERVAL_MS = 3000
 
@@ -75,35 +76,46 @@ export function Progress({ meetingId, onSnapshot }: ProgressProps) {
 
   const currentStep = snapshot?.processing_step ?? null
   const currentIndex = PIPELINE_STEPS.findIndex((step) => step.key === currentStep)
+  const state = snapshot?.state ?? null
+  // 排队中还没有步骤：给一句解释，别让人以为卡住了
+  const subtitle =
+    snapshot === null
+      ? '正在连接进度…'
+      : state === 'QUEUED'
+        ? '等待前面的会议处理完成；模型在本机串行运行'
+        : state === 'GENERATING_MINUTES'
+          ? '逐字稿正交给本机 CLI 清洗并生成纪要，长会议需要几分钟'
+          : '音频只在本机处理，转写与切分期间可以先离开这个页面'
 
   return (
-    <div className="progress-panel">
-      <div className="progress-current">
-        <span className="spinner" aria-hidden="true" />
-        <span className="progress-state">
-          {snapshot === null ? '连接进度…' : stateLabel(snapshot.state)}
-        </span>
-        {currentStep !== null && (
-          <span className="progress-step-label">
-            {STEP_LABELS[currentStep] ?? currentStep}
-            {snapshot?.detail ? ` ${snapshot.detail}` : ''}
-          </span>
-        )}
+    <div className="progress-hero" role="status" aria-live="polite">
+      <span className="progress-hero-ring" aria-hidden="true" />
+      <div className="progress-hero-state">
+        {snapshot === null ? '连接进度…' : stateLabel(snapshot.state)}
       </div>
-      <div className="progress-track" aria-hidden="true">
+      <div className="progress-hero-subtitle">{subtitle}</div>
+      <ol className="progress-steps">
         {PIPELINE_STEPS.map((step, index) => {
-          // 已过步骤实心、当前步骤实心且轻微呼吸
-          const filled = currentIndex >= 0 && index <= currentIndex
+          const done = currentIndex >= 0 && index < currentIndex
           const current = currentIndex >= 0 && index === currentIndex
+          const tone = done ? 'done' : current ? 'current' : 'pending'
           return (
-            <span
+            <li
               key={step.key}
-              title={step.label}
-              className={`progress-seg${filled ? ' filled' : ''}${current ? ' current' : ''}`}
-            />
+              className={`progress-step progress-step-${tone}`}
+              aria-current={current ? 'step' : undefined}
+            >
+              <span className="progress-step-dot" aria-hidden="true">
+                {done && <Icon name="check" size={10} />}
+              </span>
+              <span className="progress-step-label">
+                {step.label}
+                {current && snapshot?.detail ? ` ${snapshot.detail}` : ''}
+              </span>
+            </li>
           )
         })}
-      </div>
+      </ol>
       {degraded && (
         <span className="progress-degraded">实时连接已断开，每 3 秒自动刷新</span>
       )}

@@ -314,7 +314,7 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
       )}
 
       {PROGRESS_STATES.has(meeting.state) && (
-        <div className="card progress-card">
+        <div className="progress-stage">
           <Progress
             meetingId={meetingId}
             onSnapshot={(snapshot) => {

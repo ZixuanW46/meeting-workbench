@@ -804,67 +804,123 @@ a {
   opacity: 1;
 }
 
-/* ---------- 进度 ---------- */
+/* ---------- 进度：占满内容区、垂直居中的舞台，不做小条 ---------- */
 
-.progress-panel {
+.progress-stage {
+  min-height: 60vh;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-}
-
-.progress-current {
-  display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  justify-content: center;
+  gap: 24px;
+  padding: 24px 0;
 }
 
-.progress-state {
+.progress-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  width: min(420px, 100%);
+}
+
+/* 大环：hairline 底 + primary 弧，慢转 */
+.progress-hero-ring {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 3px solid var(--hairline-strong);
+  border-top-color: var(--primary);
+  animation: spin 1.1s linear infinite;
+  margin-bottom: 18px;
+}
+
+.progress-hero-state {
+  font-size: 20px;
   font-weight: 600;
+  letter-spacing: -0.3px;
   color: var(--ink);
 }
 
-.progress-step-label {
+.progress-hero-subtitle {
+  margin-top: 6px;
+  font-size: 13px;
   color: var(--ink-subtle);
+  max-width: 360px;
+  line-height: 1.5;
 }
 
-.spinner {
-  width: 12px;
-  height: 12px;
-  border: 2px solid var(--hairline-strong);
-  border-top-color: var(--primary);
+/* 步骤清单：竖排，dot + 标签；完成打勾、当前呼吸、未到灰 */
+.progress-steps {
+  list-style: none;
+  margin: 26px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+}
+
+.progress-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 12px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  color: var(--ink-tertiary);
+  transition: color 0.2s var(--ease), background 0.2s var(--ease);
+}
+
+.progress-step-dot {
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  animation: spin 0.9s linear infinite;
-  flex-shrink: 0;
+  border: 1px solid var(--hairline-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--inverse-ink);
+  transition: background 0.2s var(--ease), border-color 0.2s var(--ease);
+}
+
+.progress-step-done {
+  color: var(--ink-muted);
+}
+
+.progress-step-done .progress-step-dot {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.progress-step-current {
+  color: var(--ink);
+  font-weight: 500;
+  background: var(--hover-wash);
+}
+
+.progress-step-current .progress-step-dot {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 4px var(--canvas), inset 0 0 0 9px var(--primary);
+  animation: seg-breathe 1.6s var(--ease) infinite;
+}
+
+.progress-step-pending .progress-step-dot {
+  opacity: 0.6;
+}
+
+.progress-cancel {
+  font-size: 13px;
+  padding: 6px 12px;
 }
 
 @keyframes spin {
   to {
     transform: rotate(360deg);
   }
-}
-
-.progress-track {
-  display: flex;
-  gap: 4px;
-  max-width: 360px;
-}
-
-.progress-seg {
-  flex: 1;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--hairline);
-  transition: background 0.2s var(--ease);
-}
-
-.progress-seg.filled {
-  background: var(--primary);
-}
-
-/* 当前步骤轻微呼吸，一眼看出卡在哪一步 */
-.progress-seg.current {
-  animation: seg-breathe 1.6s var(--ease) infinite;
 }
 
 @keyframes seg-breathe {
@@ -877,26 +933,8 @@ a {
   }
 }
 
-/* 进度卡：取消入口靠右、安静，不与进度争视觉 */
-.progress-card {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.progress-card .progress-panel {
-  flex: 1;
-  min-width: 0;
-}
-
-.progress-cancel {
-  flex: none;
-  font-size: 13px;
-  padding: 6px 10px;
-}
-
 .progress-degraded {
+  margin-top: 14px;
   font-size: 12px;
   color: var(--ink-tertiary);
 }

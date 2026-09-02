@@ -68,6 +68,8 @@ class MeetingResponse(BaseModel):
     meeting_date_source: Literal["user", "filename", "created"]
     speakers: list[str]
     unknown_speaker_count: int
+    # FAILED / PARTIAL_READY 的失败原因，给人看的一句话；不含服务器路径。
+    processing_error: str | None = None
 
 
 class MeetingListResponse(BaseModel):

@@ -7,9 +7,11 @@ DRAFT → UPLOADING → QUEUED → PROCESSING → AWAITING_SPEAKER_REVIEW
 旁路：
 - FAILED：处理链路上的失败（人工停点本身不会失败，只能取消）。
 - CANCELED：用户主动取消处理中会议。
+- 终态（FAILED / CANCELED）= 系统不再自动推进；音频还在盘上，用户可显式重转写回 QUEUED。
 - PARTIAL_READY：转写已好、纪要 CLI 失败；不是终态，可重试回 GENERATING_MINUTES。
 - AWAITING_SPEAKER_REVIEW / READY / PARTIAL_READY：用户可显式重转写回 QUEUED。
 - READY / PARTIAL_READY：用户可重开说话人确认（复用转写与切分，仅重出纪要）。
+- PROCESSING → QUEUED 只供进程重启时把中断的任务自动放回队列。
 """
 
 from __future__ import annotations
@@ -47,7 +49,12 @@ TRANSITIONS: dict[MeetingState, frozenset[MeetingState]] = {
         {MeetingState.PROCESSING, MeetingState.FAILED, MeetingState.CANCELED}
     ),
     MeetingState.PROCESSING: frozenset(
-        {MeetingState.AWAITING_SPEAKER_REVIEW, MeetingState.FAILED, MeetingState.CANCELED}
+        {
+            MeetingState.AWAITING_SPEAKER_REVIEW,
+            MeetingState.QUEUED,
+            MeetingState.FAILED,
+            MeetingState.CANCELED,
+        }
     ),
     # 唯一人工停点：可被确认推进、显式重转写或取消，不存在自动失败。
     MeetingState.AWAITING_SPEAKER_REVIEW: frozenset(
@@ -81,8 +88,9 @@ TRANSITIONS: dict[MeetingState, frozenset[MeetingState]] = {
     MeetingState.READY: frozenset(
         {MeetingState.QUEUED, MeetingState.AWAITING_SPEAKER_REVIEW}
     ),
-    MeetingState.FAILED: frozenset(),
-    MeetingState.CANCELED: frozenset(),
+    # 终态只剩用户显式重转写这一条出边。
+    MeetingState.FAILED: frozenset({MeetingState.QUEUED}),
+    MeetingState.CANCELED: frozenset({MeetingState.QUEUED}),
 }
 
 TERMINAL_STATES: frozenset[MeetingState] = frozenset(
@@ -96,6 +104,8 @@ RETRANSCRIBABLE_STATES: frozenset[MeetingState] = frozenset(
         MeetingState.AWAITING_SPEAKER_REVIEW,
         MeetingState.READY,
         MeetingState.PARTIAL_READY,
+        MeetingState.FAILED,
+        MeetingState.CANCELED,
     }
 )
 

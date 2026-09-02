@@ -10,7 +10,7 @@ from meeting_api.models import Meeting
 from meeting_domain import MeetingState
 
 
-def test_startup_marks_interrupted_processing_meeting_failed(tmp_path, monkeypatch):
+def test_startup_requeues_interrupted_processing_meeting(tmp_path, monkeypatch):
     database_url = f"sqlite:///{tmp_path}/recovery.sqlite3"
     engine = make_engine(database_url)
     init_db(engine)
@@ -47,7 +47,9 @@ def test_startup_marks_interrupted_processing_meeting_failed(tmp_path, monkeypat
         with client.app.state.session_factory() as session:
             recovered = session.get(Meeting, "interrupted-meeting")
             assert recovered is not None
-            assert recovered.state == MeetingState.FAILED.value
-            assert "上次处理中断" in recovered.processing_error
+            # 音频还在盘上，重启后自动重跑，用户无感；不再打成死胡同 FAILED。
+            assert recovered.state == MeetingState.QUEUED.value
+            assert recovered.processing_step is None
+            assert recovered.processing_error is None
 
-    assert (MeetingState.PROCESSING, MeetingState.FAILED) in transitions
+    assert (MeetingState.PROCESSING, MeetingState.QUEUED) in transitions

@@ -141,6 +141,16 @@ def test_retranscribe_removes_cleaned_transcript_rows_and_file(client):
     target_dir = client.app.state.settings.data_dir / "meetings" / meeting_id
     target_dir.mkdir(parents=True)
     (target_dir / "transcript.cleaned.txt").write_text("旧清洗稿", encoding="utf-8")
+    # 重转写要求音频文件仍在盘上。
+    (target_dir / "raw").mkdir()
+    (target_dir / "raw" / "meeting.wav").write_bytes(b"fake audio bytes")
+    with client.app.state.session_factory() as session:
+        meeting = session.get(Meeting, meeting_id)
+        assert meeting is not None
+        meeting.audio_filename = "meeting.wav"
+        meeting.audio_size = 16
+        meeting.audio_sha256 = "0" * 64
+        session.commit()
 
     response = client.post(f"/api/meetings/{meeting_id}/retranscribe")
 

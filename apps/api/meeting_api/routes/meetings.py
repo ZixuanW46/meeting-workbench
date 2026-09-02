@@ -110,6 +110,7 @@ def _to_response(
         meeting_date_source=meeting_date_source,
         speakers=speakers,
         unknown_speaker_count=unknown_speaker_count,
+        processing_error=meeting.processing_error,
     )
 
 
@@ -228,6 +229,17 @@ def retranscribe_meeting(meeting_id: str, request: Request) -> MeetingResponse:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="会议当前状态不允许重转写",
+            )
+        # FAILED / CANCELED 可能倒在上传或校验环节：没有完整音频就没法重跑。
+        audio_path = (
+            meeting_dir(request.app.state.settings, meeting_id) / "raw" / meeting.audio_filename
+            if meeting.audio_filename
+            else None
+        )
+        if audio_path is None or not audio_path.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="会议没有可用的音频文件，无法重新处理；请新建会议重新上传",
             )
         queued = transition(current, MeetingState.QUEUED)
 

@@ -52,10 +52,11 @@ def test_invalid_transition_raises():
         transition(MeetingState.DRAFT, MeetingState.READY)
 
 
-def test_failed_and_canceled_are_the_only_terminal_states_and_have_no_outgoing():
+def test_failed_and_canceled_are_terminal_but_user_can_requeue_them():
+    # 终态 = 系统不再自动推进；音频还在盘上，用户可显式重转写回 QUEUED。
     assert TERMINAL_STATES == frozenset({MeetingState.FAILED, MeetingState.CANCELED})
     for state in TERMINAL_STATES:
-        assert TRANSITIONS[state] == frozenset()
+        assert TRANSITIONS[state] == frozenset({MeetingState.QUEUED})
 
 
 @pytest.mark.parametrize(
@@ -71,16 +72,22 @@ def test_explicit_retranscription_can_requeue_completed_transcription_states(sta
 
 
 @pytest.mark.parametrize("state", [MeetingState.FAILED, MeetingState.CANCELED])
-def test_terminal_states_cannot_be_retranscribed(state):
-    assert not can_transition(state, MeetingState.QUEUED)
+def test_terminal_states_can_be_retranscribed_by_user(state):
+    assert transition(state, MeetingState.QUEUED) == MeetingState.QUEUED
 
 
-def test_retranscribable_states_are_exactly_the_completed_transcription_states():
+def test_interrupted_processing_can_be_requeued_on_startup():
+    assert can_transition(MeetingState.PROCESSING, MeetingState.QUEUED)
+
+
+def test_retranscribable_states_are_completed_transcription_and_terminal_states():
     assert RETRANSCRIBABLE_STATES == frozenset(
         {
             MeetingState.AWAITING_SPEAKER_REVIEW,
             MeetingState.READY,
             MeetingState.PARTIAL_READY,
+            MeetingState.FAILED,
+            MeetingState.CANCELED,
         }
     )
     # UPLOADING → QUEUED 是上传完成边，仍然合法，但不属于可重转写状态。

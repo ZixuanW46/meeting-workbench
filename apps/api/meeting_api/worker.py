@@ -133,16 +133,20 @@ def _auto_title_from_minutes(markdown: str, meeting_date: date) -> str | None:
 
 
 def recover_interrupted_meetings(session_factory: sessionmaker[Session]) -> int:
-    """进程退出时留在 PROCESSING 的任务无法续跑，启动时明确标记失败。"""
+    """进程退出时留在 PROCESSING 的任务无法续跑：音频还在盘上，放回队列自动重跑。
+
+    半途落库的转写段、簇会在下一轮 _persist_segments 前被清掉（见 _process_one）。
+    """
     with session_factory() as session:
         meetings = session.scalars(
             select(Meeting).where(Meeting.state == MeetingState.PROCESSING.value)
         ).all()
         for meeting in meetings:
             meeting.state = transition(
-                MeetingState(meeting.state), MeetingState.FAILED
+                MeetingState(meeting.state), MeetingState.QUEUED
             ).value
-            meeting.processing_error = "上次处理中断，已在本次启动时标记为失败"
+            meeting.processing_step = None
+            meeting.processing_error = None
         if meetings:
             session.commit()
         return len(meetings)
@@ -234,6 +238,13 @@ class Worker:
             ).value
             meeting.processing_step = STEP_VALIDATING
             meeting.processing_error = None
+            # 上一次中断或失败可能已落了一半产物：重跑前清干净，避免簇与片段重复。
+            session.execute(
+                delete(TranscriptSegment).where(TranscriptSegment.meeting_id == meeting_id)
+            )
+            session.execute(
+                delete(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
+            )
             session.commit()
             self._publish(meeting)
 

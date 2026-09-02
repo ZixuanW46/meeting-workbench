@@ -52,7 +52,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.session_factory = make_session_factory(engine)
         recovered_count = recover_interrupted_meetings(app.state.session_factory)
         if recovered_count:
-            logger.warning("已将 %d 场上次中断的会议标记为失败", recovered_count)
+            logger.warning("已将 %d 场上次中断的会议重新放回队列", recovered_count)
         app.state.events = EventStore()
         app.state.worker = Worker(
             app.state.session_factory,

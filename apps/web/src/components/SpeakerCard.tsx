@@ -1,7 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import WaveSurfer from 'wavesurfer.js'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import {
-  audioUrl,
   type DecisionKind,
   type ReviewCard,
   type ReviewPerson,
@@ -49,6 +47,12 @@ interface SpeakerCardProps {
   clusterLabels: Record<string, number>
   draft: DecisionDraft | undefined
   onChange: (draft: DecisionDraft) => void
+  /** 整个确认页共用的一个 audio 元素：卡片只 seek，不各自解码整场音频 */
+  audioRef: RefObject<HTMLAudioElement>
+  /** 后端算好的整场峰值；取不到时为 null，只是没波形 */
+  peaks: number[] | null
+  /** 音频总时长（秒），与峰值一起来自后端 */
+  duration: number
 }
 
 function formatSeconds(value: number): string {
@@ -74,95 +78,41 @@ export function SpeakerCard({
   clusterLabels,
   draft,
   onChange,
+  audioRef,
+  peaks,
+  duration,
 }: SpeakerCardProps) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const surferRef = useRef<WaveSurfer | null>(null)
+  void meetingId
   const activeRef = useRef<{ key: string; start: number; end: number } | null>(null)
-  // 独占总线里代表本卡的身份；stop 回调只暂停、保留播放头，方便回头续播
+  // 独占总线里代表本卡的身份；被别的卡抢走时整卡复位（播放头已被挪走）
   const ownerRef = useRef<symbol | null>(null)
   if (ownerRef.current === null) {
     ownerRef.current = Symbol('speaker-card')
   }
   const owner = ownerRef.current
-  const [peaks, setPeaks] = useState<number[] | null>(null)
-  const [decodedDuration, setDecodedDuration] = useState(0)
   const [activeKey, setActiveKey] = useState<string | null>(null)
   const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
+  const listeningRef = useRef(false)
 
-  const pauseFromBus = () => {
-    try {
-      surferRef.current?.pause()
-    } catch {
-      // 忽略暂停失败
+  const detach = () => {
+    const audio = audioRef.current
+    if (audio !== null && listeningRef.current) {
+      audio.removeEventListener('timeupdate', handleTimeUpdateRef.current)
     }
-    setPlaying(false)
+    listeningRef.current = false
   }
 
-  useEffect(() => {
-    const container = containerRef.current
-    if (container === null) {
-      return
+  const attach = () => {
+    const audio = audioRef.current
+    if (audio !== null && !listeningRef.current) {
+      audio.addEventListener('timeupdate', handleTimeUpdateRef.current)
+      listeningRef.current = true
     }
-    let surfer: WaveSurfer | null = null
-    try {
-      surfer = WaveSurfer.create({
-        container,
-        url: audioUrl(meetingId),
-        height: 0,
-        normalize: true,
-        interact: false,
-      })
-    } catch {
-      // 环境不支持（如测试）时静默降级：无波形也能试听与决定
-      return
-    }
-    const ws = surfer
-    surferRef.current = ws
-    ws.on('decode', () => {
-      try {
-        // 峰值只用于绘制片段波形；导出失败不影响试听
-        const exporter = ws as unknown as {
-          exportPeaks?: (options: {
-            channels?: number
-            maxLength?: number
-          }) => number[][]
-        }
-        const exported = exporter.exportPeaks?.({ channels: 1, maxLength: 2000 })
-        const first = exported?.[0]
-        if (first !== undefined && first.length > 0) {
-          setPeaks(first)
-          setDecodedDuration(ws.getDuration())
-        }
-      } catch {
-        // 保持无波形展示
-      }
-    })
-    ws.on('timeupdate', (time: number) => {
-      const active = activeRef.current
-      if (active === null) {
-        return
-      }
-      const span = active.end - active.start
-      setProgress(span > 0 ? Math.min(1, Math.max(0, (time - active.start) / span)) : 0)
-      if (time >= active.end) {
-        activeRef.current = null
-        releasePlayback(owner)
-        setActiveKey(null)
-        setPlaying(false)
-        setProgress(0)
-        ws.pause()
-      }
-    })
-    return () => {
-      activeRef.current = null
-      releasePlayback(owner)
-      surferRef.current = null
-      ws.destroy()
-    }
-  }, [meetingId, owner])
+  }
 
-  const stopSelf = () => {
+  const resetSelf = () => {
+    detach()
     activeRef.current = null
     releasePlayback(owner)
     setActiveKey(null)
@@ -170,63 +120,106 @@ export function SpeakerCard({
     setProgress(0)
   }
 
+  /** 到点自停：暂停共享 audio 并复位本卡 */
+  const handleTimeUpdateRef = useRef<() => void>(() => {})
+  handleTimeUpdateRef.current = () => {
+    const active = activeRef.current
+    const audio = audioRef.current
+    if (active === null || audio === null) {
+      return
+    }
+    const span = active.end - active.start
+    const time = audio.currentTime
+    setProgress(span > 0 ? Math.min(1, Math.max(0, (time - active.start) / span)) : 0)
+    if (time >= active.end) {
+      try {
+        audio.pause()
+      } catch {
+        // 忽略暂停失败
+      }
+      resetSelf()
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      detach()
+      releasePlayback(owner)
+    }
+    // 只在卸载时解除监听
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [owner])
+
+  /** 被别的卡抢走播放：共享播放头已挪走，本卡整体复位 */
+  const stopFromBus = () => {
+    try {
+      audioRef.current?.pause()
+    } catch {
+      // 忽略暂停失败
+    }
+    resetSelf()
+  }
+
+  const startAt = (key: string, start: number, end: number, time: number, ratio: number) => {
+    const audio = audioRef.current
+    if (audio === null) {
+      return
+    }
+    claimPlayback(owner, stopFromBus)
+    activeRef.current = { key, start, end }
+    setActiveKey(key)
+    setPlaying(true)
+    setProgress(ratio)
+    try {
+      audio.currentTime = time
+      attach()
+      const started = audio.play()
+      if (started !== undefined) {
+        started.catch(() => resetSelf())
+      }
+    } catch {
+      resetSelf()
+    }
+  }
+
   const toggleClip = (key: string, start: number, end: number) => {
-    const ws = surferRef.current
-    if (ws === null) {
+    const audio = audioRef.current
+    if (audio === null) {
       return
     }
     if (activeRef.current?.key === key) {
       if (playing) {
         // 暂停保留播放头，再点播放从原位置续播
+        detach()
         releasePlayback(owner)
         setPlaying(false)
         try {
-          ws.pause()
+          audio.pause()
         } catch {
           // 忽略暂停失败
         }
         return
       }
-      claimPlayback(owner, pauseFromBus)
+      claimPlayback(owner, stopFromBus)
       setPlaying(true)
       try {
-        void ws.play()
+        attach()
+        const started = audio.play()
+        if (started !== undefined) {
+          started.catch(() => resetSelf())
+        }
       } catch {
-        stopSelf()
+        resetSelf()
       }
       return
     }
-    claimPlayback(owner, pauseFromBus)
-    activeRef.current = { key, start, end }
-    setActiveKey(key)
-    setPlaying(true)
-    setProgress(0)
-    try {
-      ws.setTime(start)
-      void ws.play()
-    } catch {
-      stopSelf()
-    }
+    startAt(key, start, end, start, 0)
   }
 
   /** 点波形跳到片段内相对位置并从那里播放；点的是别的片段则切换过去 */
   const seekClip = (key: string, start: number, end: number, ratio: number) => {
-    const ws = surferRef.current
-    if (ws === null) {
-      return
-    }
     const clamped = Math.min(1, Math.max(0, ratio))
-    claimPlayback(owner, pauseFromBus)
-    activeRef.current = { key, start, end }
-    setActiveKey(key)
-    setPlaying(true)
-    setProgress(clamped)
-    try {
-      ws.setTime(start + clamped * (end - start))
-      void ws.play()
-    } catch {
-      stopSelf()
-    }
+    startAt(key, start, end, start + clamped * (end - start), clamped)
   }
 
   const setKind = (kind: DecisionKind) => {
@@ -286,7 +279,6 @@ export function SpeakerCard({
         )}
       </div>
 
-      <div ref={containerRef} style={{ display: 'none' }} />
       <div className="speaker-clips">
         {card.sample_clips.map((clip) => {
           const key = `${clip.start_seconds}-${clip.end_seconds}`
@@ -295,7 +287,7 @@ export function SpeakerCard({
           const span = clip.end_seconds - clip.start_seconds
           const bars =
             peaks !== null
-              ? clipBars(peaks, decodedDuration, clip.start_seconds, clip.end_seconds)
+              ? clipBars(peaks, duration, clip.start_seconds, clip.end_seconds)
               : []
           const range = `${formatSeconds(clip.start_seconds)}–${formatSeconds(clip.end_seconds)}`
           return (

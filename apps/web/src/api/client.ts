@@ -380,6 +380,16 @@ export function deleteHotword(hotwordId: string): Promise<void> {
   return apiFetch<void>(`/api/hotwords/${hotwordId}`, { method: 'DELETE' })
 }
 
+/** 整场音频的波形峰值（后端算一次并缓存）：≤2000 桶、0～1，附时长秒数 */
+export interface AudioPeaks {
+  duration: number
+  peaks: number[]
+}
+
+export function getPeaks(meetingId: string): Promise<AudioPeaks> {
+  return apiFetch<AudioPeaks>(`/api/meetings/${meetingId}/peaks`)
+}
+
 export function audioUrl(meetingId: string): string {
   return `/api/meetings/${meetingId}/audio`
 }

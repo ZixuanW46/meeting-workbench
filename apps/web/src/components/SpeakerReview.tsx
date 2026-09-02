@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
+  audioUrl,
   formatApiError,
+  getPeaks,
   getReview,
   submitDecisions,
+  type AudioPeaks,
   type ReviewCard,
   type ReviewPerson,
   type ReviewSubmitResult,
@@ -37,6 +40,24 @@ export function SpeakerReview({ meetingId, onSubmitted }: SpeakerReviewProps) {
   const [drafts, setDrafts] = useState<Record<string, DecisionDraft>>({})
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  // 整页一个 audio + 一份后端峰值：十几张卡不再各自解码两小时音频
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const [peaks, setPeaks] = useState<AudioPeaks | null>(null)
+
+  useEffect(() => {
+    let stale = false
+    getPeaks(meetingId)
+      .then((data) => {
+        if (!stale && data.peaks.length > 0 && data.duration > 0) {
+          setPeaks(data)
+        }
+      })
+      // 非 PCM 音频没有峰值：没波形也能试听与决定
+      .catch(() => {})
+    return () => {
+      stale = true
+    }
+  }, [meetingId])
 
   useEffect(() => {
     let stale = false
@@ -137,9 +158,18 @@ export function SpeakerReview({ meetingId, onSubmitted }: SpeakerReviewProps) {
             onChange={(draft) =>
               setDrafts((prev) => ({ ...prev, [card.cluster_id]: draft }))
             }
+            audioRef={audioRef}
+            peaks={peaks?.peaks ?? null}
+            duration={peaks?.duration ?? 0}
           />
         ))}
       </div>
+      <audio
+        ref={audioRef}
+        src={audioUrl(meetingId)}
+        preload="metadata"
+        data-testid="review-audio"
+      />
       {undecidedIds.length >= 3 && (
         <div className="review-batch">
           <div className="review-batch-row">

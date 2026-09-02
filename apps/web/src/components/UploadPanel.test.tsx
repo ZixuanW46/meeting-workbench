@@ -103,6 +103,32 @@ describe('tus 上传面板', () => {
     await waitFor(() => expect(onUploaded).toHaveBeenCalledTimes(1))
   })
 
+  it('整个面板可拖入录音：拖放后文件名上屏，上传走同一条 tus 通道', async () => {
+    render(<UploadPanel meetingId="m1" onUploaded={() => {}} />)
+    const zone = screen.getByTestId('upload-dropzone')
+    const file = new File(['audio-bytes'], '拖进来的录音.m4a', { type: 'audio/mp4' })
+
+    fireEvent.dragOver(zone)
+    expect(zone).toHaveClass('dragging')
+    fireEvent.drop(zone, { dataTransfer: { files: [file] } })
+    expect(zone).not.toHaveClass('dragging')
+
+    expect(screen.getByText('拖进来的录音.m4a')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '上传音频' }))
+    await waitFor(() => expect(state.uploads).toHaveLength(1))
+    expect(state.uploads[0].options.metadata.filename).toBe('拖进来的录音.m4a')
+  })
+
+  it('原生 file input 藏起来，用样式化按钮代打开；无障碍名保留', () => {
+    render(<UploadPanel meetingId="m1" onUploaded={() => {}} />)
+    const input = screen.getByLabelText('选择音频文件') as HTMLInputElement
+    expect(input).toHaveClass('visually-hidden')
+    const clickSpy = vi.spyOn(input, 'click')
+
+    fireEvent.click(screen.getByRole('button', { name: '选择文件' }))
+    expect(clickSpy).toHaveBeenCalledTimes(1)
+  })
+
   it('会议卡在 UPLOADING 时给出断点续传提示', () => {
     render(<UploadPanel meetingId="m1" resuming onUploaded={() => {}} />)
 

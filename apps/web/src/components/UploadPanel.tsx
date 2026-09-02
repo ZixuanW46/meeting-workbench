@@ -1,6 +1,6 @@
 // tus 断点续传上传面板：可暂停/继续，断线或刷新后按服务端 offset 续传。
 // 业务校验以后端为准，这里只做传输与进度展示。
-import { useRef, useState } from 'react'
+import { useRef, useState, type DragEvent } from 'react'
 import * as tus from 'tus-js-client'
 import { formatApiError } from '../api/client'
 import { Icon } from './Icon'
@@ -20,7 +20,9 @@ export function UploadPanel({
   const [phase, setPhase] = useState<Phase>('idle')
   const [percent, setPercent] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [dragging, setDragging] = useState(false)
   const uploadRef = useRef<tus.Upload | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const startUpload = () => {
     if (file === null) {
@@ -79,8 +81,30 @@ export function UploadPanel({
     setError(null)
   }
 
+  const onDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    if (!dragging) {
+      setDragging(true)
+    }
+  }
+
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setDragging(false)
+    const dropped = event.dataTransfer?.files?.[0] ?? null
+    if (dropped !== null) {
+      handleFileChange(dropped)
+    }
+  }
+
   return (
-    <div className="upload-panel">
+    <div
+      className={`upload-panel${dragging ? ' dragging' : ''}`}
+      data-testid="upload-dropzone"
+      onDragOver={onDragOver}
+      onDragLeave={() => setDragging(false)}
+      onDrop={onDrop}
+    >
       <span className="upload-icon">
         <Icon name="mic" size={16} />
       </span>
@@ -91,13 +115,28 @@ export function UploadPanel({
       {resuming && phase === 'idle' && (
         <div className="section-desc">上次上传未完成：选择同一个文件可从断点继续</div>
       )}
+      {/* 原生 file input 只留给无障碍与键盘：样式化按钮代为打开 */}
       <input
+        ref={inputRef}
         type="file"
         accept="audio/*"
+        className="visually-hidden"
         aria-label="选择音频文件"
         onChange={(event) => handleFileChange(event.target.files?.[0] ?? null)}
       />
-      {file !== null && <span className="upload-filename">{file.name}</span>}
+      <div className="upload-pick">
+        <button
+          type="button"
+          className="btn"
+          disabled={phase === 'uploading'}
+          onClick={() => inputRef.current?.click()}
+        >
+          选择文件
+        </button>
+        <span className="upload-filename">
+          {file !== null ? file.name : '或把录音拖到这里'}
+        </span>
+      </div>
       {error !== null && <div className="notice notice-error">{error}</div>}
       {phase === 'idle' ? (
         <button

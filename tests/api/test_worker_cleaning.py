@@ -201,3 +201,58 @@ def test_cleaned_rows_survive_when_minutes_generation_fails(client):
     assert [row.block_index for row in rows] == [0]
     assert rows[0].cleaned_text == "这是清洗后的第一段"
     assert "这是清洗后的第一段" in minutes.prompts[0]
+
+
+def test_retry_reuses_cleaned_blocks_by_hash_without_calling_cleaner_again(client):
+    # 两小时会议清洗十几批、每批一次 CLI 冷启动；纪要重试或重开确认时
+    # 原文没变，必须按 raw_sha256 复用，不能整场重清。
+    meeting_id = _prepare_generating_minutes(client)
+    cleaner = StaticCleaner('{"0": "这是清洗后的第一段", "1": "这是清洗后的第二段"}')
+    _replace_worker(client, cleaner_adapter=cleaner, minutes_adapter=FailingMinutes())
+    assert client.app.state.worker.process_next() == meeting_id
+    assert client.get(f"/api/meetings/{meeting_id}").json()["state"] == "PARTIAL_READY"
+    assert len(cleaner.prompts) == 1
+
+    retried = client.post(f"/api/meetings/{meeting_id}/minutes/retry")
+    assert retried.status_code == 200
+    minutes = RecordingMinutes()
+    _replace_worker(client, cleaner_adapter=MustNotCallCleaner(), minutes_adapter=minutes)
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    assert client.get(f"/api/meetings/{meeting_id}").json()["state"] == "READY"
+    rows = _cleaned_rows(client, meeting_id)
+    assert [row.cleaned_text for row in rows] == [
+        "这是清洗后的第一段",
+        "这是清洗后的第二段",
+    ]
+    assert "这是清洗后的第一段" in minutes.prompts[0]
+
+
+def test_reopened_review_only_cleans_blocks_whose_text_changed(client):
+    # 重开确认后只改了标签：块索引可能整体位移，但原文哈希不变的块照样命中缓存。
+    meeting_id = _prepare_generating_minutes(client)
+    cleaner = StaticCleaner('{"0": "这是清洗后的第一段", "1": "这是清洗后的第二段"}')
+    _replace_worker(client, cleaner_adapter=cleaner, minutes_adapter=RecordingMinutes())
+    assert client.app.state.worker.process_next() == meeting_id
+    assert client.get(f"/api/meetings/{meeting_id}").json()["state"] == "READY"
+
+    assert client.post(f"/api/meetings/{meeting_id}/review/reopen").status_code == 200
+    reviewed = client.post(
+        f"/api/meetings/{meeting_id}/review/decisions",
+        json={
+            "decisions": [
+                {"cluster_id": "S1", "kind": "CONFIRM"},
+                {"cluster_id": "S2", "kind": "KEEP_UNKNOWN"},
+            ]
+        },
+    )
+    assert reviewed.status_code == 200
+    minutes = RecordingMinutes()
+    _replace_worker(client, cleaner_adapter=MustNotCallCleaner(), minutes_adapter=minutes)
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    assert client.get(f"/api/meetings/{meeting_id}").json()["state"] == "READY"
+    assert "这是清洗后的第一段" in minutes.prompts[0]
+    assert "这是清洗后的第二段" in minutes.prompts[0]

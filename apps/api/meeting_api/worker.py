@@ -390,13 +390,43 @@ class Worker:
         cleaned_by_index: dict[int, str] = {}
         try:
             self._set_step(session, meeting, STEP_CLEANING_TRANSCRIPT)
+            # 上一轮的清洗块按原文哈希复用：纪要重试、重开确认只改标签时，
+            # 块索引可能位移，但原文没变的块不必再送一次 CLI。
+            cached_by_sha: dict[str, str] = {
+                row.raw_sha256: row.cleaned_text
+                for row in session.scalars(
+                    select(CleanedTranscriptBlock).where(
+                        CleanedTranscriptBlock.meeting_id == meeting.id
+                    )
+                )
+            }
             session.execute(
                 delete(CleanedTranscriptBlock).where(
                     CleanedTranscriptBlock.meeting_id == meeting.id
                 )
             )
 
-            for chunk in chunk_indexed_blocks(blocks):
+            pending: list[TranscriptBlock] = []
+            pending_indices: list[int] = []
+            for index, block in enumerate(blocks):
+                cached = cached_by_sha.get(sha256_text(block.text))
+                if cached is None:
+                    pending.append(block)
+                    pending_indices.append(index)
+                    continue
+                session.add(
+                    CleanedTranscriptBlock(
+                        meeting_id=meeting.id,
+                        block_index=index,
+                        raw_sha256=sha256_text(block.text),
+                        cleaned_text=cached,
+                    )
+                )
+                cleaned_by_index[index] = cached
+
+            # 只把未命中的块送清洗；块号仍用它在整份逐字稿里的真实索引。
+            for chunk in chunk_indexed_blocks(pending):
+                chunk = [(pending_indices[local], block) for local, block in chunk]
                 expected_indices = [index for index, _ in chunk]
                 try:
                     parsed = parse_cleaning_response(

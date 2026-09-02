@@ -150,6 +150,7 @@ def recover_interrupted_meetings(session_factory: sessionmaker[Session]) -> int:
                 MeetingState(meeting.state), MeetingState.QUEUED
             ).value
             meeting.processing_step = None
+            meeting.processing_detail = None
             meeting.processing_error = None
         if meetings:
             session.commit()
@@ -291,6 +292,7 @@ class Worker:
                     MeetingState(meeting.state),
                     MeetingState.AWAITING_SPEAKER_REVIEW,
                 ).value
+                meeting.processing_detail = None
                 session.commit()
                 self._publish(meeting)
             except ProcessingCanceled:
@@ -383,6 +385,7 @@ class Worker:
             meeting.state = transition(
                 MeetingState(meeting.state), MeetingState.READY
             ).value
+            meeting.processing_detail = None
             session.commit()
             self._publish(meeting)
         except ProcessingCanceled:
@@ -397,6 +400,7 @@ class Worker:
                 meeting.state = transition(
                     MeetingState(meeting.state), MeetingState.PARTIAL_READY
                 ).value
+                meeting.processing_detail = None
                 meeting.processing_error = f"{type(exc).__name__}: {exc}"
                 session.commit()
                 self._publish(meeting)
@@ -407,6 +411,7 @@ class Worker:
                 meeting.state = transition(
                     MeetingState(meeting.state), MeetingState.FAILED
                 ).value
+                meeting.processing_detail = None
                 meeting.processing_error = f"{type(exc).__name__}: {exc}"
                 session.commit()
                 self._publish(meeting)
@@ -461,7 +466,15 @@ class Worker:
                 cleaned_by_index[index] = cached
 
             # 只把未命中的块送清洗；块号仍用它在整份逐字稿里的真实索引。
-            for chunk in chunk_indexed_blocks(pending):
+            chunks = chunk_indexed_blocks(pending)
+            for ordinal, chunk in enumerate(chunks, start=1):
+                # 每批一次 CLI 冷启动，几分钟里进度要能看出到第几批。
+                self._set_step(
+                    session,
+                    meeting,
+                    STEP_CLEANING_TRANSCRIPT,
+                    detail=f"{ordinal}/{len(chunks)}",
+                )
                 chunk = [(pending_indices[local], block) for local, block in chunk]
                 expected_indices = [index for index, _ in chunk]
                 try:
@@ -576,9 +589,12 @@ class Worker:
             raise ValueError("会议音频大小与上传记录不一致")
         return audio_path
 
-    def _set_step(self, session: Session, meeting: Meeting, step: str) -> None:
+    def _set_step(
+        self, session: Session, meeting: Meeting, step: str, *, detail: str | None = None
+    ) -> None:
         self._ensure_state_unchanged(session, meeting)
         meeting.processing_step = step
+        meeting.processing_detail = detail
         session.commit()
         self._publish(meeting)
 
@@ -591,7 +607,9 @@ class Worker:
             raise ProcessingCanceled(meeting.id)
 
     def _publish(self, meeting: Meeting) -> None:
-        self.events.publish(meeting.id, meeting.state, meeting.processing_step)
+        self.events.publish(
+            meeting.id, meeting.state, meeting.processing_step, meeting.processing_detail
+        )
 
     @staticmethod
     def _persist_segments(

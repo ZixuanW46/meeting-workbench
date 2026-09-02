@@ -51,6 +51,8 @@ class Meeting(Base):
     audio_sha256: Mapped[str | None] = mapped_column(String(64), default=None)
     audio_size: Mapped[int | None] = mapped_column(BigInteger, default=None)
     processing_step: Mapped[str | None] = mapped_column(String(32), default=None)
+    # 步骤内的细粒度进度（如清洗「3/12」），给人看；步骤切换时清空。
+    processing_detail: Mapped[str | None] = mapped_column(String(64), default=None)
     processing_error: Mapped[str | None] = mapped_column(Text, default=None)
     has_unconfirmed_speakers: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="0"

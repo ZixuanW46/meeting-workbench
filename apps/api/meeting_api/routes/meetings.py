@@ -239,6 +239,7 @@ def cancel_meeting(meeting_id: str, request: Request) -> MeetingResponse:
             )
         meeting.state = transition(current, target).value
         meeting.processing_step = None
+        meeting.processing_detail = None
         meeting.processing_error = (
             "已手动停止生成纪要，可随时重试" if target is MeetingState.PARTIAL_READY else None
         )
@@ -298,6 +299,7 @@ def retranscribe_meeting(meeting_id: str, request: Request) -> MeetingResponse:
         )
         meeting.has_unconfirmed_speakers = False
         meeting.processing_step = None
+        meeting.processing_detail = None
         meeting.processing_error = None
         meeting.state = queued.value
 

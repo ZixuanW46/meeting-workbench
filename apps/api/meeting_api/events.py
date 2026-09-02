@@ -22,6 +22,7 @@ router = APIRouter(prefix="/api/meetings")
 class ProgressEvent:
     state: str
     processing_step: str | None
+    detail: str | None
     seq: int
 
 
@@ -41,19 +42,21 @@ class EventStore:
         meeting_id: str,
         state: str,
         processing_step: str | None,
+        detail: str | None = None,
     ) -> ProgressEvent:
         with self._condition:
-            return self._publish_locked(meeting_id, state, processing_step)
+            return self._publish_locked(meeting_id, state, processing_step, detail)
 
     def current(
         self,
         meeting_id: str,
         state: str,
         processing_step: str | None,
+        detail: str | None = None,
     ) -> ProgressEvent:
         """返回最新事件；没有历史时用数据库当前值补一个快照。"""
         with self._condition:
-            return self._ensure_current_locked(meeting_id, state, processing_step)
+            return self._ensure_current_locked(meeting_id, state, processing_step, detail)
 
     def iter_events(
         self,
@@ -62,6 +65,7 @@ class EventStore:
         after_seq: int,
         state: str,
         processing_step: str | None,
+        detail: str | None = None,
     ) -> Iterator[str]:
         """先重放断点后的历史，再等待并推送后续事件。"""
         with self._condition:
@@ -69,6 +73,7 @@ class EventStore:
                 meeting_id,
                 state,
                 processing_step,
+                detail,
                 minimum_seq=after_seq + 1,
             )
 
@@ -97,6 +102,7 @@ class EventStore:
         meeting_id: str,
         state: str,
         processing_step: str | None,
+        detail: str | None = None,
         *,
         minimum_seq: int = 1,
     ) -> ProgressEvent:
@@ -108,18 +114,20 @@ class EventStore:
         # 历史为空，或断点来自重启前更大的 seq：把 seq 抬过断点再补一条库快照，
         # 否则重连客户端会把后续事件全部过滤掉。
         self._sequences[meeting_id] = max(self._sequences[meeting_id], minimum_seq - 1)
-        return self._publish_locked(meeting_id, state, processing_step)
+        return self._publish_locked(meeting_id, state, processing_step, detail)
 
     def _publish_locked(
         self,
         meeting_id: str,
         state: str,
         processing_step: str | None,
+        detail: str | None = None,
     ) -> ProgressEvent:
         self._sequences[meeting_id] += 1
         event = ProgressEvent(
             state=state,
             processing_step=processing_step,
+            detail=detail,
             seq=self._sequences[meeting_id],
         )
         self._events[meeting_id].append(event)
@@ -157,6 +165,7 @@ def get_events(
         after_seq=last_event_id or 0,
         state=meeting.state,
         processing_step=meeting.processing_step,
+        detail=meeting.processing_detail,
     )
     return StreamingResponse(
         stream,
@@ -173,5 +182,6 @@ def get_progress(meeting_id: str, request: Request) -> ProgressResponse:
         meeting.id,
         meeting.state,
         meeting.processing_step,
+        meeting.processing_detail,
     )
     return ProgressResponse(**asdict(current))

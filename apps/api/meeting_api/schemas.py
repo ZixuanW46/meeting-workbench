@@ -84,4 +84,6 @@ class UploadResponse(BaseModel):
 class ProgressResponse(BaseModel):
     state: str
     processing_step: str | None
+    # 步骤内进度，如清洗「3/12」；没有就是 None。
+    detail: str | None = None
     seq: int

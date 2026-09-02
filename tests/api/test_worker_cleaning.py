@@ -4,6 +4,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
+from meeting_api import worker as worker_module
 from meeting_api.minutes.adapter import MinutesCliError
 from meeting_api.models import CleanedTranscriptBlock
 from meeting_api.worker import Worker
@@ -256,3 +257,29 @@ def test_reopened_review_only_cleans_blocks_whose_text_changed(client):
     assert client.get(f"/api/meetings/{meeting_id}").json()["state"] == "READY"
     assert "这是清洗后的第一段" in minutes.prompts[0]
     assert "这是清洗后的第二段" in minutes.prompts[0]
+
+
+def test_cleaning_publishes_batch_progress_detail(client, monkeypatch):
+    # 长会议清洗十几批要跑好几分钟，进度事件得说清到第几批，否则像挂了。
+    meeting_id = _prepare_generating_minutes(client)
+    monkeypatch.setattr(
+        worker_module,
+        "chunk_indexed_blocks",
+        lambda blocks: [[(index, block)] for index, block in enumerate(blocks)],
+    )
+    cleaner = StaticCleaner('{"0": "清洗一", "1": "清洗二"}')
+    details: list[str | None] = []
+
+    class SpyCleaner:
+        def generate(self, transcript: str) -> str:
+            details.append(client.get(f"/api/meetings/{meeting_id}/progress").json()["detail"])
+            return cleaner.generate(transcript)
+
+    _replace_worker(client, cleaner_adapter=SpyCleaner(), minutes_adapter=RecordingMinutes())
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    assert details == ["1/2", "2/2"]
+    final = client.get(f"/api/meetings/{meeting_id}/progress").json()
+    assert final["state"] == "READY"
+    assert final["detail"] is None

@@ -153,7 +153,7 @@ def test_sse_returns_json_progress_events_with_monotonic_ids(client):
     assert ids == sorted(ids)
     assert len(set(ids)) == len(ids)
     for event_id, data in events:
-        assert data.keys() == {"state", "processing_step", "seq"}
+        assert data.keys() == {"state", "processing_step", "detail", "seq"}
         assert data["seq"] == event_id
 
 
@@ -182,7 +182,7 @@ def test_progress_polling_returns_current_value(client):
     response = client.get(f"/api/meetings/{meeting_id}/progress")
 
     assert response.status_code == 200
-    assert response.json().keys() == {"state", "processing_step", "seq"}
+    assert response.json().keys() == {"state", "processing_step", "detail", "seq"}
     assert response.json()["state"] == "AWAITING_SPEAKER_REVIEW"
     assert response.json()["processing_step"] == "PREPARING_REVIEW"
     assert isinstance(response.json()["seq"], int)
@@ -203,6 +203,7 @@ def test_worker_progress_change_is_read_from_an_open_event_stream(client):
     assert events[1][1] == {
         "state": "PROCESSING",
         "processing_step": "VALIDATING",
+        "detail": None,
         "seq": events[1][0],
     }
 
@@ -253,4 +254,4 @@ def test_sse_reconnect_with_stale_last_event_id_after_restart_gets_fresh_snapsho
 
     event_id, data = _parse_event(_next_chunk(stream))
     assert event_id == 8
-    assert data == {"state": "PROCESSING", "processing_step": "ASR", "seq": 8}
+    assert data == {"state": "PROCESSING", "processing_step": "ASR", "detail": None, "seq": 8}

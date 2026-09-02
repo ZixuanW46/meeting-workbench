@@ -9,7 +9,7 @@ from meeting_domain.fragment_absorption import (
     FRAGMENT_ABSORB_MAX_DISTANCE,
     plan_fragment_absorption,
 )
-from meeting_domain.hotwords import snapshot
+from meeting_domain.hotwords import snapshot, strip_hotword_echo
 from meeting_domain.sampling import REVIEW_CLIP_LIMIT, select_spread_windows
 from meeting_domain.speaker_review import (
     DecisionKind,
@@ -82,5 +82,6 @@ __all__ = [
     "review_complete",
     "select_spread_windows",
     "snapshot",
+    "strip_hotword_echo",
     "transition",
 ]

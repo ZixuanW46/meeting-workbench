@@ -631,3 +631,56 @@ def test_cluster_embeddings_persisted_for_later_assignment(client):
         cluster.embedding is not None and len(cluster.embedding) > 0
         for cluster in clusters
     )
+
+
+def test_worker_drops_hotword_echo_segments_and_skips_sub_second_turns(client):
+    """ASR 对极短片段会回吐热词表；这种片段不进逐字稿，亚秒轮次也不再单独重转。"""
+    from meeting_api.pipeline.asr import AsrSegment, FakeAsrBackend
+    from meeting_api.pipeline.diarization import FakeDiarizationBackend, SpeakerSegment
+
+    created = client.post(
+        "/api/meetings", json={"title": "回声测试", "hotwords": ["荣兴园", "见山", "咖彼"]}
+    )
+    meeting_id = created.json()["id"]
+    uploaded = client.post(
+        f"/api/meetings/{meeting_id}/upload",
+        files={"file": ("meeting.wav", b"fake audio bytes", "audio/wav")},
+    )
+    assert uploaded.status_code == 200
+
+    class EchoAsr(FakeAsrBackend):
+        def transcribe(self, audio_path, hotwords=()):
+            if not self._loaded:
+                raise RuntimeError("未加载")
+            return [
+                AsrSegment(0.0, 5.0, "正常的一句话。"),
+                AsrSegment(5.0, 5.3, "咖彼, 荣兴园, 见山。"),
+                AsrSegment(6.0, 10.0, "另一句正常的话。咖彼, 荣兴园, 见山。结尾"),
+            ]
+
+    class TwoSpeakers(FakeDiarizationBackend):
+        def diarize(self, audio_path, expected_speakers=None):
+            if not self._loaded:
+                raise RuntimeError("未加载")
+            return [
+                SpeakerSegment(0.0, 5.0, "S1"),
+                SpeakerSegment(5.0, 5.3, "S2"),
+                SpeakerSegment(6.0, 10.0, "S2"),
+            ]
+
+    worker = Worker(
+        client.app.state.session_factory,
+        client.app.state.settings,
+        asr_backend=EchoAsr(),
+        diarization_backend=TwoSpeakers(),
+        event_store=client.app.state.events,
+    )
+    assert worker.process_next() == meeting_id
+
+    with client.app.state.session_factory() as session:
+        texts = session.scalars(
+            select(TranscriptSegment.text)
+            .where(TranscriptSegment.meeting_id == meeting_id)
+            .order_by(TranscriptSegment.start_seconds)
+        ).all()
+    assert texts == ["正常的一句话。", "另一句正常的话。结尾"]

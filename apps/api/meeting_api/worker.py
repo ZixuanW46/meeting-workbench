@@ -81,6 +81,7 @@ from meeting_domain import (
     plan_fragment_absorption,
     select_spread_windows,
     snapshot,
+    strip_hotword_echo,
     transition,
 )
 
@@ -96,12 +97,27 @@ class ProcessingCanceled(Exception):
     """会议状态在处理期间被别处改掉（用户取消）：放弃本轮，不覆盖新状态。"""
 
 
+# 逐轮重转写时，短于此的轮次装不下一个字，只会让 ASR 回吐热词表。
+MIN_RETRANSCRIBE_TURN_SECONDS = 0.25
+
 # 声纹模板的代表性试听切片上限（秒）：够人听出是谁，又不臃肿。
 VOICEPRINT_CLIP_MAX_SECONDS = 10.0
 TITLE_MAX_LENGTH = 200
 MODEL_DATE_PREFIX_RE = re.compile(
     r"^(?:(?:\d{2}|\d{4})-\d{2}-\d{2}\s*[：:]?\s*|\d{2}-\d{2}\s*会议\s*[：:]?\s*)+"
 )
+
+
+def _drop_hotword_echoes(
+    segments: Sequence[AsrSegment], hotwords: Sequence[str]
+) -> list[AsrSegment]:
+    """去掉 ASR 回吐的热词表；整段都是回声的片段直接丢弃。"""
+    cleaned: list[AsrSegment] = []
+    for segment in segments:
+        text = strip_hotword_echo(segment.text, hotwords)
+        if text:
+            cleaned.append(AsrSegment(segment.start, segment.end, text))
+    return cleaned
 
 
 def _best_clip_window(cluster: SpeakerCluster) -> TimeWindow | None:
@@ -261,6 +277,7 @@ class Worker:
                 hotwords = tuple(json.loads(meeting.hotword_snapshot_json))
                 with self.model_slot.use(self.asr_backend) as asr:
                     asr_segments = asr.transcribe(audio_path, hotwords=hotwords)
+                asr_segments = _drop_hotword_echoes(asr_segments, hotwords)
 
                 self._set_step(session, meeting, STEP_DIARIZATION)
                 # 离开上一个槽上下文后 ASR 已卸载，才能加载切分模型。
@@ -568,6 +585,8 @@ class Worker:
             pieces: list[tuple[SpeakerSegment, Path]] = []
             try:
                 for index, turn in enumerate(turns):
+                    if turn.end - turn.start < MIN_RETRANSCRIBE_TURN_SECONDS:
+                        continue
                     piece_path = Path(scratch) / f"turn-{index:04d}.wav"
                     _write_wav_slice(audio_path, turn.start, turn.end, piece_path)
                     pieces.append((turn, piece_path))
@@ -577,10 +596,13 @@ class Worker:
             retranscribed: list[AsrSegment] = []
             with self.model_slot.use(self.asr_backend) as asr:
                 for turn, piece_path in pieces:
+                    if turn.end - turn.start < MIN_RETRANSCRIBE_TURN_SECONDS:
+                        continue
                     text = "".join(
                         piece.text
                         for piece in asr.transcribe(piece_path, hotwords=tuple(hotwords))
                     ).strip()
+                    text = strip_hotword_echo(text, hotwords)
                     if text:
                         retranscribed.append(AsrSegment(turn.start, turn.end, text))
         return retranscribed or asr_segments

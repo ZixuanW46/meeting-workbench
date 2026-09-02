@@ -37,6 +37,7 @@ from meeting_api.models import (
     TranscriptSegment,
     Voiceprint,
 )
+from meeting_api.peaks import PeaksUnavailable, load_or_compute_peaks
 from meeting_api.pipeline.asr import AsrBackend, AsrSegment, get_asr_backend
 from meeting_api.pipeline.diarization import (
     DiarizationBackend,
@@ -286,6 +287,11 @@ class Worker:
                 self._set_step(session, meeting, STEP_PREPARING_REVIEW)
                 turns = self._absorb_fragment_clusters(session, meeting_id, turns)
                 self._prepare_review_samples(session, meeting_id, turns)
+                # 波形峰值提前算好落盘，确认页一打开就有；算不出只是没波形。
+                try:
+                    load_or_compute_peaks(self.settings, meeting_id, audio_path)
+                except PeaksUnavailable:
+                    pass
 
                 self._ensure_state_unchanged(session, meeting)
                 meeting.state = transition(

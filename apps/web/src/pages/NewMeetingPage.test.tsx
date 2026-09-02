@@ -8,20 +8,21 @@ describe('新建会议表单', () => {
     window.location.hash = '#/new'
   })
 
-  it('标题为空时拦截提交并提示', async () => {
-    let posted = false
+  it('标题可留空：提交不带 title，由后端按文件名与纪要自动命名', async () => {
+    let body: Record<string, unknown> | null = null
     server.use(
-      http.post('/api/meetings', () => {
-        posted = true
-        return HttpResponse.json({}, { status: 201 })
+      http.post('/api/meetings', async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ id: 'm-new' }, { status: 201 })
       }),
     )
 
     render(<NewMeetingPage />)
     fireEvent.click(screen.getByRole('button', { name: '创建会议' }))
 
-    expect(await screen.findByText('请输入标题')).toBeInTheDocument()
-    expect(posted).toBe(false)
+    await waitFor(() => expect(body).not.toBeNull())
+    expect(body).toEqual({ hotwords: [], meeting_date: localToday() })
+    expect(screen.queryByText('请输入标题')).not.toBeInTheDocument()
   })
 
   it('人数默认「不确定」，热词回车成标签，提交后跳转工作台', async () => {

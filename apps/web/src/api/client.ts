@@ -21,7 +21,8 @@ export interface Meeting {
 }
 
 export interface MeetingCreateInput {
-  title: string
+  /** 选填：留空则后端先占位，上传后取文件名、纪要后自动命名 */
+  title?: string
   hotwords: string[]
   /** 会议发生日（YYYY-MM-DD）；不传则后端按文件名或创建日推断 */
   meeting_date?: string

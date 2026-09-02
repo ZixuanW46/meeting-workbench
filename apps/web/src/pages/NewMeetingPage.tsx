@@ -3,8 +3,8 @@ import { createMeeting, formatApiError, localToday } from '../api/client'
 import { Icon } from '../components/Icon'
 
 export function NewMeetingPage() {
+  // 标题选填：留空先占位，上传后取录音文件名，纪要生成后自动命名
   const [title, setTitle] = useState('')
-  const [titleError, setTitleError] = useState<string | null>(null)
   // 会议发生日：纪要标题与「明天」「下周二」换算都以它为锚点，默认今天
   const [meetingDate, setMeetingDate] = useState(localToday())
   const [hotwords, setHotwords] = useState<string[]>([])
@@ -30,17 +30,12 @@ export function NewMeetingPage() {
   }
 
   const handleSubmit = async () => {
-    // 体验层拦截：标题必填；最终校验以后端 422 为准
-    if (title.trim() === '') {
-      setTitleError('请输入标题')
-      return
-    }
-    setTitleError(null)
     setError(null)
     setSubmitting(true)
     try {
+      const trimmed = title.trim()
       const meeting = await createMeeting({
-        title: title.trim(),
+        ...(trimmed !== '' ? { title: trimmed } : {}),
         hotwords,
         ...(meetingDate !== '' ? { meeting_date: meetingDate } : {}),
       })
@@ -77,17 +72,14 @@ export function NewMeetingPage() {
           <label htmlFor="meeting-title">标题</label>
           <input
             id="meeting-title"
-            className={`input${titleError !== null ? ' invalid' : ''}`}
+            className="input"
             value={title}
-            placeholder="例如：产品周会"
-            onChange={(event) => {
-              setTitle(event.target.value)
-              if (titleError !== null && event.target.value.trim() !== '') {
-                setTitleError(null)
-              }
-            }}
+            placeholder="可留空，纪要生成后自动命名"
+            onChange={(event) => setTitle(event.target.value)}
           />
-          {titleError !== null && <span className="form-error">{titleError}</span>}
+          <span className="form-hint">
+            留空则上传后先用录音文件名，纪要生成后按「日期：主题」自动命名；填了就以你的为准
+          </span>
         </div>
 
         <div className="form-field">

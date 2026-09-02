@@ -91,6 +91,10 @@ STEP_PREPARING_REVIEW = "PREPARING_REVIEW"
 STEP_CLEANING_TRANSCRIPT = "CLEANING_TRANSCRIPT"
 STEP_GENERATING_MINUTES = "GENERATING_MINUTES"
 
+class ProcessingCanceled(Exception):
+    """会议状态在处理期间被别处改掉（用户取消）：放弃本轮，不覆盖新状态。"""
+
+
 # 声纹模板的代表性试听切片上限（秒）：够人听出是谁，又不臃肿。
 VOICEPRINT_CLIP_MAX_SECONDS = 10.0
 TITLE_MAX_LENGTH = 200
@@ -282,12 +286,26 @@ class Worker:
                 turns = self._absorb_fragment_clusters(session, meeting_id, turns)
                 self._prepare_review_samples(session, meeting_id, turns)
 
+                self._ensure_state_unchanged(session, meeting)
                 meeting.state = transition(
                     MeetingState(meeting.state),
                     MeetingState.AWAITING_SPEAKER_REVIEW,
                 ).value
                 session.commit()
                 self._publish(meeting)
+            except ProcessingCanceled:
+                # 用户取消：半途产物清掉，状态以取消接口写下的为准。
+                session.rollback()
+                session.execute(
+                    delete(TranscriptSegment).where(TranscriptSegment.meeting_id == meeting_id)
+                )
+                session.execute(
+                    delete(SpeakerCluster).where(SpeakerCluster.meeting_id == meeting_id)
+                )
+                session.commit()
+                meeting = session.get(Meeting, meeting_id)
+                if meeting is not None:
+                    self._publish(meeting)
             except Exception as exc:
                 session.rollback()
                 meeting = session.get(Meeting, meeting_id)
@@ -354,6 +372,8 @@ class Worker:
                     meeting_date=meeting_date,
                 )
             )
+            # CLI 跑了几分钟，期间用户可能已停止：停止后的结果不落盘。
+            self._ensure_state_unchanged(session, meeting)
             auto_title = _auto_title_from_minutes(markdown, meeting_date)
             if auto_title is not None and not meeting.title_user_edited:
                 meeting.title = auto_title
@@ -365,6 +385,11 @@ class Worker:
             ).value
             session.commit()
             self._publish(meeting)
+        except ProcessingCanceled:
+            session.rollback()
+            meeting = session.get(Meeting, meeting_id)
+            if meeting is not None:
+                self._publish(meeting)
         except MinutesCliError as exc:
             session.rollback()
             meeting = session.get(Meeting, meeting_id)
@@ -467,13 +492,13 @@ class Worker:
                     cleaned_by_index[block_index] = cleaned_text
 
             session.commit()
+        except ProcessingCanceled:
+            session.rollback()
+            raise
         except Exception:
             session.rollback()
 
-        try:
-            self._set_step(session, meeting, STEP_GENERATING_MINUTES)
-        except Exception:
-            session.rollback()
+        self._set_step(session, meeting, STEP_GENERATING_MINUTES)
         return cleaned_by_index
 
     @staticmethod
@@ -552,9 +577,18 @@ class Worker:
         return audio_path
 
     def _set_step(self, session: Session, meeting: Meeting, step: str) -> None:
+        self._ensure_state_unchanged(session, meeting)
         meeting.processing_step = step
         session.commit()
         self._publish(meeting)
+
+    @staticmethod
+    def _ensure_state_unchanged(session: Session, meeting: Meeting) -> None:
+        """步骤边界重读状态：被取消接口改过就放弃本轮，绝不拿旧状态覆盖回去。"""
+        expected = meeting.state
+        session.refresh(meeting, attribute_names=["state"])
+        if meeting.state != expected:
+            raise ProcessingCanceled(meeting.id)
 
     def _publish(self, meeting: Meeting) -> None:
         self.events.publish(meeting.id, meeting.state, meeting.processing_step)

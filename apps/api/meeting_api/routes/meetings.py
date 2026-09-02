@@ -214,6 +214,42 @@ def delete_meeting(meeting_id: str, request: Request) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+# 取消处理：排队/转写中 → CANCELED；生成纪要中 → PARTIAL_READY（转写与确认不丢，可重试）。
+CANCEL_TARGETS: dict[MeetingState, MeetingState] = {
+    MeetingState.QUEUED: MeetingState.CANCELED,
+    MeetingState.PROCESSING: MeetingState.CANCELED,
+    MeetingState.GENERATING_MINUTES: MeetingState.PARTIAL_READY,
+}
+
+
+@router.post("/{meeting_id}/cancel", response_model=MeetingResponse)
+def cancel_meeting(meeting_id: str, request: Request) -> MeetingResponse:
+    """只改状态；正在跑的 worker 会在下一个步骤边界看到并放弃本轮（协作式取消）。"""
+    session_factory = request.app.state.session_factory
+    with session_factory() as session:
+        meeting = session.get(Meeting, meeting_id)
+        if meeting is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会议不存在")
+        current = MeetingState(meeting.state) if meeting.state in MeetingState else None
+        target = CANCEL_TARGETS.get(current) if current is not None else None
+        if target is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="只有排队中、处理中或生成纪要中的会议可以取消",
+            )
+        meeting.state = transition(current, target).value
+        meeting.processing_step = None
+        meeting.processing_error = (
+            "已手动停止生成纪要，可随时重试" if target is MeetingState.PARTIAL_READY else None
+        )
+        session.commit()
+        session.refresh(meeting)
+        request.app.state.events.publish(meeting.id, meeting.state, meeting.processing_step)
+        return _to_response(
+            meeting, _speaker_summaries(session, [meeting.id]).get(meeting.id, ([], 0))
+        )
+
+
 @router.post("/{meeting_id}/retranscribe", response_model=MeetingResponse)
 def retranscribe_meeting(meeting_id: str, request: Request) -> MeetingResponse:
     session_factory = request.app.state.session_factory

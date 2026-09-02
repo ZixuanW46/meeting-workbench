@@ -7,7 +7,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class MeetingCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
+    # 选填：留空或空白 = 未命名，上传后取文件名、纪要后自动命名；填了就是用户命名。
+    title: str | None = Field(default=None, max_length=200)
     # 会议发生日；不填则按音频文件名或创建日推断。
     meeting_date: date | None = None
     expected_speakers: int | None = Field(default=None, ge=1)
@@ -15,11 +16,11 @@ class MeetingCreate(BaseModel):
 
     @field_validator("title")
     @classmethod
-    def title_not_blank(cls, value: str) -> str:
+    def blank_title_as_none(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         stripped = value.strip()
-        if not stripped:
-            raise ValueError("标题不能为空")
-        return stripped
+        return stripped or None
 
     @field_validator("hotwords")
     @classmethod

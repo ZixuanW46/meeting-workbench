@@ -25,6 +25,7 @@ from meeting_api.storage import (
     save_stream,
     transcode_audio_if_needed,
 )
+from meeting_api.titles import apply_filename_title
 from meeting_domain import InvalidTransition, MeetingState, transition
 
 router = APIRouter(prefix="/api/meetings")
@@ -183,6 +184,7 @@ def upload_audio(
         meeting.audio_filename = saved.filename
         meeting.audio_sha256 = saved.sha256
         meeting.audio_size = saved.size
+        apply_filename_title(meeting, file.filename)
         meeting.state = uploading.value
         meeting.state = transition(uploading, MeetingState.QUEUED).value
         session.commit()
@@ -327,6 +329,7 @@ async def patch_tus_upload(
             meeting.audio_filename = saved.filename
             meeting.audio_sha256 = saved.sha256
             meeting.audio_size = saved.size
+            apply_filename_title(meeting, pending.filename)
             meeting.state = transition(MeetingState(meeting.state), MeetingState.QUEUED).value
             session.commit()
             remove_pending_upload(

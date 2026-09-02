@@ -24,9 +24,10 @@ NOTE = "纪要文本会发送到 Claude/OpenAI 云端，音频不会上传"
 
 
 def _prepare_generating_minutes(client, *, keep_unknown: bool = False) -> str:
+    # 不填标题：创建时填了标题就视为用户命名，纪要不再自动改名。
     created = client.post(
         "/api/meetings",
-        json={"title": "纪要生成测试", "expected_speakers": 2},
+        json={"expected_speakers": 2},
     )
     assert created.status_code == 201
     meeting_id = created.json()["id"]

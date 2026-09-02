@@ -24,6 +24,7 @@ from meeting_api.schemas import (
     MeetingUpdate,
 )
 from meeting_api.storage import meeting_dir
+from meeting_api.titles import DEFAULT_MEETING_TITLE
 from meeting_domain import RETRANSCRIBABLE_STATES, MeetingState, snapshot, transition
 
 router = APIRouter(prefix="/api/meetings")
@@ -119,7 +120,8 @@ def create_meeting(payload: MeetingCreate, request: Request) -> MeetingResponse:
     session_factory = request.app.state.session_factory
     with session_factory() as session:
         meeting = Meeting(
-            title=payload.title,
+            title=payload.title or DEFAULT_MEETING_TITLE,
+            title_user_edited=payload.title is not None,
             meeting_date=payload.meeting_date,
             expected_speakers=payload.expected_speakers,
             hotwords_json=json.dumps(payload.hotwords, ensure_ascii=False),

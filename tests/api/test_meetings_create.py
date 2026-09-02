@@ -31,13 +31,47 @@ def test_create_meeting_without_expected_speakers(client):
     assert response.json()["expected_speakers"] is None
 
 
-def test_create_meeting_rejects_empty_title(client):
+def test_create_meeting_without_title_uses_placeholder_and_stays_auto_named(client):
+    # 标题选填：留空先占位，上传后取文件名，纪要生成后自动命名。
     response = client.post(
         "/api/meetings",
         json={"title": "", "expected_speakers": 4, "hotwords": []},
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 201
+    assert response.json()["title"] == "未命名会议"
+    with client.app.state.session_factory() as session:
+        meeting = session.get(Meeting, response.json()["id"])
+        assert meeting is not None
+        assert meeting.title_user_edited is False
+
+    omitted = client.post("/api/meetings", json={"hotwords": []})
+    assert omitted.status_code == 201
+    assert omitted.json()["title"] == "未命名会议"
+
+
+def test_create_meeting_with_title_counts_as_user_edited(client):
+    response = client.post("/api/meetings", json={"title": "周会"})
+
+    assert response.status_code == 201
+    with client.app.state.session_factory() as session:
+        meeting = session.get(Meeting, response.json()["id"])
+        assert meeting is not None
+        assert meeting.title_user_edited is True
+
+
+def test_upload_filename_names_untitled_meeting_but_not_user_titled_one(client):
+    untitled = client.post("/api/meetings", json={}).json()["id"]
+    titled = client.post("/api/meetings", json={"title": "复盘会"}).json()["id"]
+    for meeting_id in (untitled, titled):
+        response = client.post(
+            f"/api/meetings/{meeting_id}/upload",
+            files={"file": ("2026-08-31_merged.wav", b"fake audio bytes", "audio/wav")},
+        )
+        assert response.status_code == 200
+
+    assert client.get(f"/api/meetings/{untitled}").json()["title"] == "2026-08-31_merged"
+    assert client.get(f"/api/meetings/{titled}").json()["title"] == "复盘会"
 
 
 def test_get_meeting_detail_and_missing_meeting(client):
@@ -169,12 +203,13 @@ def test_list_meetings_in_reverse_creation_order(client):
     assert [item["id"] for item in items] == [second["id"], first["id"]]
     assert items == [second, first]
 
-def test_create_meeting_rejects_blank_title(client):
+def test_create_meeting_treats_blank_title_as_untitled(client):
     response = client.post(
         "/api/meetings",
         json={"title": "   ", "expected_speakers": 4, "hotwords": []},
     )
-    assert response.status_code == 422
+    assert response.status_code == 201
+    assert response.json()["title"] == "未命名会议"
 
 
 def test_create_meeting_rejects_zero_expected_speakers(client):

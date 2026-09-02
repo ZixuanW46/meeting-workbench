@@ -10,37 +10,39 @@ afterEach(() => {
   resetPlaybackForTests()
 })
 
-// 后端导出为 PLAUD 风格段落块：标签行「{说话人} {mm:ss}-{mm:ss}」+ 文本行，块间空行。
-const RAW_MARKDOWN = [
-  '# 会议转写',
-  '',
-  '已知用户 1 00:00-00:58',
-  '嗯，大家好，今天今天对齐三件事。首先是上线时间。',
-  '',
-  '说话人S2（未确认） 00:58-01:40',
-  '呃，我这边周五可以发布。',
-  '',
-  '李四（就近归属） 1:08:10-1:08:45',
-  '收到。',
-].join('\n')
+// 后端给块级 JSON：起止秒、公开标签、原文、清洗文本（没有就 null）。
+const RAW_BLOCKS = [
+  {
+    start_seconds: 0,
+    end_seconds: 58,
+    label: '已知用户 1',
+    text: '嗯，大家好，今天今天对齐三件事。首先是上线时间。',
+  },
+  {
+    start_seconds: 58,
+    end_seconds: 100,
+    label: '说话人S2（未确认）',
+    text: '呃，我这边周五可以发布。',
+  },
+  { start_seconds: 4090, end_seconds: 4125, label: '李四（就近归属）', text: '收到。' },
+]
 
-const CLEANED_MARKDOWN = [
-  '# 会议转写',
-  '',
-  '已知用户 1 00:00-00:58',
+const CLEANED_TEXTS = [
   '大家好，今天对齐三件事。首先是上线时间。',
-  '',
-  '说话人S2（未确认） 00:58-01:40',
   '我这边周五可以发布。',
-  '',
-  '李四（就近归属） 1:08:10-1:08:45',
   '收到。',
-].join('\n')
+]
 
-function mockTranscript(raw: string, cleaned: string | null) {
+function mockTranscript(withCleaned: boolean, blocks = RAW_BLOCKS) {
   server.use(
     http.get('/api/meetings/m1/transcript', () =>
-      HttpResponse.json({ raw_markdown: raw, cleaned_markdown: cleaned }),
+      HttpResponse.json({
+        blocks: blocks.map((block, index) => ({
+          ...block,
+          cleaned_text: withCleaned ? CLEANED_TEXTS[index] : null,
+        })),
+        cleaned_available: withCleaned,
+      }),
     ),
   )
 }
@@ -59,8 +61,8 @@ function renderView(
 }
 
 describe('转写视图', () => {
-  it('把段落块解析成「时间 / 说话人 / 文本」行，时间戳原样展示', async () => {
-    mockTranscript(RAW_MARKDOWN, null)
+  it('把块渲染成「时间 / 说话人 / 文本」行，秒数格式化成 mm:ss 或 h:mm:ss', async () => {
+    mockTranscript(false)
 
     renderView('cleaned')
 
@@ -74,12 +76,10 @@ describe('转写视图', () => {
     // 超一小时的 h:mm:ss 时间戳同样可解析。
     expect(screen.getByText('李四（就近归属）')).toBeInTheDocument()
     expect(screen.getByText('1:08:10 – 1:08:45')).toBeInTheDocument()
-    // 标题行不产生转写行。
-    expect(screen.queryByText(/会议转写/)).not.toBeInTheDocument()
   })
 
   it('有清洗版且口径为 cleaned 时展示清洗文本，并上报清洗版可用', async () => {
-    mockTranscript(RAW_MARKDOWN, CLEANED_MARKDOWN)
+    mockTranscript(true)
     const reported: boolean[] = []
 
     renderView('cleaned', (available) => reported.push(available))
@@ -94,7 +94,7 @@ describe('转写视图', () => {
   })
 
   it('口径为 raw 时展示 ASR 直出文本', async () => {
-    mockTranscript(RAW_MARKDOWN, CLEANED_MARKDOWN)
+    mockTranscript(true)
 
     renderView('raw')
 
@@ -107,7 +107,7 @@ describe('转写视图', () => {
   })
 
   it('没有清洗版时展示原文并上报不可用', async () => {
-    mockTranscript(RAW_MARKDOWN, null)
+    mockTranscript(false)
     const reported: boolean[] = []
 
     renderView('cleaned', (available) => reported.push(available))
@@ -116,18 +116,37 @@ describe('转写视图', () => {
     expect(reported).toEqual([false])
   })
 
-  it('解析不出任何块时原样展示全文兜底', async () => {
-    mockTranscript('（本场会议没有可解析的逐字稿）', null)
+  it('一个块都没有时给空态说明', async () => {
+    mockTranscript(false, [])
+
+    renderView('cleaned')
+
+    expect(await screen.findByText('本场会议没有逐字稿')).toBeInTheDocument()
+  })
+
+  it('某块清洗失败回退原文时，清洗口径下该行显示原文', async () => {
+    server.use(
+      http.get('/api/meetings/m1/transcript', () =>
+        HttpResponse.json({
+          blocks: [
+            { ...RAW_BLOCKS[0], cleaned_text: CLEANED_TEXTS[0] },
+            { ...RAW_BLOCKS[1], cleaned_text: null },
+          ],
+          cleaned_available: true,
+        }),
+      ),
+    )
 
     renderView('cleaned')
 
     expect(
-      await screen.findByText('（本场会议没有可解析的逐字稿）'),
+      await screen.findByText('大家好，今天对齐三件事。首先是上线时间。'),
     ).toBeInTheDocument()
+    expect(screen.getByText('呃，我这边周五可以发布。')).toBeInTheDocument()
   })
 
   it('点行首播放键 seek 到块起点，同刻只有一行在播', async () => {
-    mockTranscript(RAW_MARKDOWN, null)
+    mockTranscript(false)
 
     renderView('raw')
 
@@ -156,7 +175,7 @@ describe('转写视图', () => {
   })
 
   it('元数据加载完成前已暂停的行不会开播', async () => {
-    mockTranscript(RAW_MARKDOWN, null)
+    mockTranscript(false)
 
     renderView('raw')
 
@@ -176,7 +195,7 @@ describe('转写视图', () => {
   })
 
   it('播到块尾自动停，再点当前行则暂停', async () => {
-    mockTranscript(RAW_MARKDOWN, null)
+    mockTranscript(false)
 
     renderView('raw')
 

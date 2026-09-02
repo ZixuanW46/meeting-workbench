@@ -48,8 +48,10 @@ describe('工作台页', () => {
       ),
       http.get('/api/meetings/m1/transcript', () =>
         HttpResponse.json({
-          raw_markdown: '张三 00:00-00:01\n先对齐进度',
-          cleaned_markdown: null,
+          blocks: [
+            { start_seconds: 0, end_seconds: 1, label: '张三', text: '先对齐进度', cleaned_text: null },
+          ],
+          cleaned_available: false,
         }),
       ),
     )
@@ -70,8 +72,16 @@ describe('工作台页', () => {
       ),
       http.get('/api/meetings/m1/transcript', () =>
         HttpResponse.json({
-          raw_markdown: '张三 00:00-00:01\n嗯，先对齐进度',
-          cleaned_markdown: '张三 00:00-00:01\n先对齐进度',
+          blocks: [
+            {
+              start_seconds: 0,
+              end_seconds: 1,
+              label: '张三',
+              text: '嗯，先对齐进度',
+              cleaned_text: '先对齐进度',
+            },
+          ],
+          cleaned_available: true,
         }),
       ),
     )
@@ -93,8 +103,10 @@ describe('工作台页', () => {
       ),
       http.get('/api/meetings/m1/transcript', () =>
         HttpResponse.json({
-          raw_markdown: '张三 00:00-00:01\n先对齐进度',
-          cleaned_markdown: null,
+          blocks: [
+            { start_seconds: 0, end_seconds: 1, label: '张三', text: '先对齐进度', cleaned_text: null },
+          ],
+          cleaned_available: false,
         }),
       ),
     )
@@ -372,7 +384,12 @@ describe('工作台页', () => {
         }),
       ),
       http.get('/api/meetings/m1/transcript', () =>
-        HttpResponse.json({ raw_markdown: '张三 00:00-00:01\n先对齐进度', cleaned_markdown: null }),
+        HttpResponse.json({
+          blocks: [
+            { start_seconds: 0, end_seconds: 1, label: '张三', text: '先对齐进度', cleaned_text: null },
+          ],
+          cleaned_available: false,
+        }),
       ),
     )
 
@@ -420,8 +437,10 @@ describe('工作台页', () => {
       ),
       http.get('/api/meetings/m1/transcript', () =>
         HttpResponse.json({
-          raw_markdown: '张三 00:00-00:01\n先对齐进度',
-          cleaned_markdown: null,
+          blocks: [
+            { start_seconds: 0, end_seconds: 1, label: '张三', text: '先对齐进度', cleaned_text: null },
+          ],
+          cleaned_available: false,
         }),
       ),
     )

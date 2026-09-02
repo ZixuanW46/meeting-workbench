@@ -319,11 +319,21 @@ export function retryMinutes(meetingId: string): Promise<{ state: string }> {
 /** 转写版本：cleaned=LLM 清洗版（去语气词、修标点，不改语义），raw=ASR 原文 */
 export type TranscriptVariant = 'cleaned' | 'raw'
 
+export interface TranscriptBlock {
+  start_seconds: number
+  end_seconds: number
+  /** 公开说话人标签：确认后的名字或「说话人 N」 */
+  label: string
+  /** ASR 原文 */
+  text: string
+  /** LLM 清洗文本；该块清洗失败或哈希对不上时为 null，展示时回退原文 */
+  cleaned_text: string | null
+}
+
 export interface TranscriptResult {
-  /** ASR 原文的 PLAUD 段落块 markdown */
-  raw_markdown: string
-  /** LLM 清洗版；本场没有可用清洗块（清洗失败或已关闭）时为 null */
-  cleaned_markdown: string | null
+  blocks: TranscriptBlock[]
+  /** 至少有一块有清洗文本；工具栏据此决定是否出切换按钮 */
+  cleaned_available: boolean
 }
 
 export function getTranscript(meetingId: string): Promise<TranscriptResult> {

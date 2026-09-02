@@ -3,6 +3,7 @@ import {
   audioUrl,
   formatApiError,
   getTranscript,
+  type TranscriptBlock,
   type TranscriptResult,
   type TranscriptVariant,
 } from '../api/client'
@@ -17,40 +18,26 @@ interface TranscriptRow {
   endSeconds: number
 }
 
-// 后端导出为 PLAUD 风格段落块：标签行「{说话人} {mm:ss}-{mm:ss}」（超一小时为
-// h:mm:ss）+ 合并文本行，块间空行；时间戳已格式化，前端只反解秒数供回听。
-const HEADER_PATTERN = /^(.+?)\s+(\d+:\d{2}(?::\d{2})?)-(\d+:\d{2}(?::\d{2})?)$/
-
-function timestampSeconds(value: string): number {
-  return value
-    .split(':')
-    .map(Number)
-    .reduce((total, part) => total * 60 + part, 0)
+/** 秒 → mm:ss，超一小时 h:mm:ss；与后端导出口径一致 */
+export function formatClock(seconds: number): string {
+  const total = Math.floor(seconds)
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const rest = total % 60
+  const mmss = `${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`
+  return hours > 0 ? `${hours}:${mmss}` : mmss
 }
 
-function parseTranscript(markdown: string): TranscriptRow[] {
-  const rows: TranscriptRow[] = []
-  let current: TranscriptRow | null = null
-  for (const raw of markdown.split('\n')) {
-    const line = raw.trim()
-    if (line === '' || line.startsWith('#')) {
-      continue
-    }
-    const match = HEADER_PATTERN.exec(line)
-    if (match !== null) {
-      current = {
-        time: `${match[2]} – ${match[3]}`,
-        speaker: match[1],
-        text: '',
-        startSeconds: timestampSeconds(match[2]),
-        endSeconds: timestampSeconds(match[3]),
-      }
-      rows.push(current)
-    } else if (current !== null) {
-      current.text = current.text === '' ? line : `${current.text} ${line}`
-    }
-  }
-  return rows
+function toRows(blocks: TranscriptBlock[], variant: TranscriptVariant): TranscriptRow[] {
+  return blocks.map((block) => ({
+    time: `${formatClock(block.start_seconds)} – ${formatClock(block.end_seconds)}`,
+    speaker: block.label,
+    // 清洗口径下单块没有清洗文本就回退原文，其余块不受影响
+    text:
+      variant === 'cleaned' && block.cleaned_text !== null ? block.cleaned_text : block.text,
+    startSeconds: block.start_seconds,
+    endSeconds: block.end_seconds,
+  }))
 }
 
 export function TranscriptView({
@@ -81,7 +68,7 @@ export function TranscriptView({
       .then((data) => {
         if (!stale) {
           setTranscript(data)
-          onCleanedAvailable?.(data.cleaned_markdown !== null)
+          onCleanedAvailable?.(data.cleaned_available)
         }
       })
       .catch((e: unknown) => {
@@ -181,16 +168,9 @@ export function TranscriptView({
     return <p className="section-desc">加载转写…</p>
   }
 
-  // 没有可用清洗版时只有原文一个口径；切换按钮在工作台工具栏。
-  const showCleaned =
-    transcript.cleaned_markdown !== null && variant === 'cleaned'
-  const markdown = showCleaned
-    ? (transcript.cleaned_markdown as string)
-    : transcript.raw_markdown
-
-  const rows = parseTranscript(markdown)
+  const rows = toRows(transcript.blocks, variant)
   if (rows.length === 0) {
-    return <pre className="speaker-text">{markdown}</pre>
+    return <p className="section-desc">本场会议没有逐字稿</p>
   }
   return (
     <div className="card">

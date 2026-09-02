@@ -6,7 +6,7 @@
 
 - **后端 / 领域 / 迁移 / API 测试**：Codex 实现，Box 审，Fable 5 再审。
 - **产品前端 `apps/web/`**：只由 **Claude Fable 5** 写。Codex **禁止**改 `apps/web/`（含页面、样式、组件、前端测试）。
-- 前端视觉参考 [Linear](https://linear.app)：克制、紧凑、浅色安静表面、细边框、列表优先，不要 Ant Design 默认企业后台（大蓝顶栏、厚阴影、宽留白）。Fable 5 可以换掉 AntD 默认壳；业务判断仍以后端为准。
+- 前端视觉参考 [Linear](https://linear.app)：克制、紧凑、近黑画布与发丝线分层（见 `docs/LINEAR-DESIGN.md`）、细边框、列表优先，不要 Ant Design 默认企业后台（大蓝顶栏、厚阴影、宽留白）。Fable 5 可以换掉 AntD 默认壳；业务判断仍以后端为准。
 
 ## 工作流（每个 milestone 固定四步）
 

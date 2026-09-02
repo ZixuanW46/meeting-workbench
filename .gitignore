@@ -26,6 +26,9 @@ data/
 .idea/
 .vscode/
 
+# Claude Code 本地 worktree
+.claude/worktrees/
+
 # Codex/Claude 验收记录（走 cloud-jobs/，不入库）
 RESULT.md
 RED.txt

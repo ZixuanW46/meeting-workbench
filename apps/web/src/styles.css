@@ -804,16 +804,17 @@ a {
   opacity: 1;
 }
 
-/* ---------- 进度：占满内容区、垂直居中的舞台，不做小条 ---------- */
+/* ---------- 进度：占满内容区的舞台，不做小条 ---------- */
 
+/* 居中基准是「页头下沿 → 视口底部」，不是整页：页头约 145px、页底留白 64px */
 .progress-stage {
-  min-height: 60vh;
+  min-height: calc(100vh - 145px - 64px);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 24px;
-  padding: 24px 0;
+  gap: 28px;
+  padding: 16px 0;
 }
 
 .progress-hero {
@@ -821,7 +822,7 @@ a {
   flex-direction: column;
   align-items: center;
   text-align: center;
-  width: min(420px, 100%);
+  width: min(980px, 100%);
 }
 
 /* 大环：hairline 底 + primary 弧，慢转 */
@@ -846,48 +847,81 @@ a {
   margin-top: 6px;
   font-size: 13px;
   color: var(--ink-subtle);
-  max-width: 360px;
+  max-width: 420px;
   line-height: 1.5;
 }
 
-/* 步骤清单：竖排，dot + 标签；完成打勾、当前呼吸、未到灰 */
+/* 步骤：横向时间轴铺满宽度，dot 在线上、标签在下；完成实心打勾、当前呼吸、未到灰 */
 .progress-steps {
   list-style: none;
-  margin: 26px 0 0;
+  margin: 40px 0 0;
   padding: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  align-items: flex-start;
   width: 100%;
-  text-align: left;
 }
 
 .progress-step {
+  position: relative;
+  flex: 1;
+  min-width: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 12px;
-  padding: 7px 12px;
-  border-radius: var(--radius-md);
-  font-size: 14px;
+  padding: 0 6px;
+  font-size: 13px;
   color: var(--ink-tertiary);
-  transition: color 0.2s var(--ease), background 0.2s var(--ease);
+  text-align: center;
+  transition: color 0.2s var(--ease);
+}
+
+/* 连接线：从上一个 dot 中心到本 dot 中心 */
+.progress-step::before {
+  content: '';
+  position: absolute;
+  top: 9px;
+  left: -50%;
+  right: 50%;
+  height: 1px;
+  background: var(--hairline-strong);
+}
+
+.progress-step:first-child::before {
+  display: none;
+}
+
+/* 已走过的段落连线染成 primary */
+.progress-step-done::before,
+.progress-step-current::before {
+  background: var(--primary);
 }
 
 .progress-step-dot {
+  position: relative;
+  z-index: 1;
   width: 18px;
   height: 18px;
   border-radius: 50%;
   border: 1px solid var(--hairline-strong);
+  background: var(--canvas);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  color: var(--inverse-ink);
   transition: background 0.2s var(--ease), border-color 0.2s var(--ease);
 }
 
+.progress-step-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 .progress-step-done {
-  color: var(--ink-muted);
+  color: var(--ink-subtle);
 }
 
 .progress-step-done .progress-step-dot {
@@ -899,7 +933,6 @@ a {
 .progress-step-current {
   color: var(--ink);
   font-weight: 500;
-  background: var(--hover-wash);
 }
 
 .progress-step-current .progress-step-dot {
@@ -910,6 +943,30 @@ a {
 
 .progress-step-pending .progress-step-dot {
   opacity: 0.6;
+}
+
+/* 窄窗口回到竖排清单 */
+@media (max-width: 720px) {
+  .progress-steps {
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+  }
+
+  .progress-step {
+    flex-direction: row;
+    align-items: center;
+    padding: 7px 12px;
+    border-radius: var(--radius-md);
+  }
+
+  .progress-step::before {
+    display: none;
+  }
+
+  .progress-step-current {
+    background: var(--hover-wash);
+  }
 }
 
 .progress-cancel {
@@ -934,7 +991,7 @@ a {
 }
 
 .progress-degraded {
-  margin-top: 14px;
+  margin-top: 16px;
   font-size: 12px;
   color: var(--ink-tertiary);
 }

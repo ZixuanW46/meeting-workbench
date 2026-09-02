@@ -3,6 +3,7 @@ import {
   formatApiError,
   getMeeting,
   reopenReview,
+  updateMeeting,
   updateMeetingTitle,
   type Meeting,
   type TranscriptVariant,
@@ -37,6 +38,10 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [savingTitle, setSavingTitle] = useState(false)
+  // 会议日期就地编辑：与标题同一套交互
+  const [editingDate, setEditingDate] = useState(false)
+  const [dateDraft, setDateDraft] = useState('')
+  const [savingDate, setSavingDate] = useState(false)
   const meetingStateRef = useRef<string | null>(null)
   meetingStateRef.current = meeting?.state ?? null
 
@@ -77,6 +82,26 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
       setError(formatApiError(e))
     } finally {
       setSavingTitle(false)
+    }
+  }
+
+  const saveDate = async () => {
+    if (meeting === null || dateDraft === '') return
+    if (dateDraft === meeting.meeting_date && meeting.meeting_date_source === 'user') {
+      setEditingDate(false)
+      return
+    }
+    setSavingDate(true)
+    try {
+      const updated = await updateMeeting(meetingId, { meeting_date: dateDraft })
+      setMeeting(updated)
+      setEditingDate(false)
+      setError(null)
+      toast('会议日期已更新')
+    } catch (e: unknown) {
+      setError(formatApiError(e))
+    } finally {
+      setSavingDate(false)
     }
   }
 
@@ -166,6 +191,69 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
           )}
           <div className="meta-row" style={{ marginTop: 4 }}>
             <StateBadge state={meeting.state} />
+            <span className="divider-dot" />
+            {editingDate ? (
+              <span className="meta-edit-row">
+                <input
+                  type="date"
+                  className="input input-date"
+                  aria-label="会议日期"
+                  value={dateDraft}
+                  disabled={savingDate}
+                  autoFocus
+                  onChange={(event) => setDateDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      void saveDate()
+                    }
+                    if (event.key === 'Escape') {
+                      setEditingDate(false)
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={savingDate || dateDraft === ''}
+                  onClick={() => {
+                    void saveDate()
+                  }}
+                >
+                  保存
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={savingDate}
+                  onClick={() => setEditingDate(false)}
+                >
+                  取消
+                </button>
+              </span>
+            ) : (
+              <span className="meta-date">
+                <span>{`会议日期 ${meeting.meeting_date}`}</span>
+                {meeting.meeting_date_source !== 'user' && (
+                  <span className="meta-hint">
+                    {meeting.meeting_date_source === 'filename'
+                      ? '按文件名推断'
+                      : '按创建日'}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-ghost meta-edit-btn"
+                  aria-label="修改会议日期"
+                  onClick={() => {
+                    setDateDraft(meeting.meeting_date)
+                    setEditingDate(true)
+                  }}
+                >
+                  <Icon name="edit" size={11} />
+                </button>
+              </span>
+            )}
             {meeting.speakers.length + meeting.unknown_speaker_count > 0 && (
               <>
                 <span className="divider-dot" />

@@ -11,6 +11,8 @@ const MEETING = {
   expected_speakers: null,
   hotwords: [],
   created_at: '2026-08-26T08:00:00Z',
+  meeting_date: '2026-08-26',
+  meeting_date_source: 'created',
   speakers: [],
   unknown_speaker_count: 0,
 }
@@ -131,6 +133,37 @@ describe('工作台页', () => {
       await screen.findByRole('heading', { name: '08-30 团队战略会' }),
     ).toBeInTheDocument()
     expect(patchedTitle).toBe('08-30 团队战略会')
+  })
+
+  it('元信息行展示会议日期与推断来源，可就地改日期', async () => {
+    let patched: Record<string, unknown> | null = null
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json(
+          patched === null
+            ? { ...MEETING, meeting_date: '2026-08-31', meeting_date_source: 'filename' }
+            : { ...MEETING, ...patched, meeting_date_source: 'user' },
+        ),
+      ),
+      http.patch('/api/meetings/m1', async ({ request }) => {
+        patched = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ ...MEETING, ...patched, meeting_date_source: 'user' })
+      }),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    expect(await screen.findByText(/会议日期 2026-08-31/)).toBeInTheDocument()
+    expect(screen.getByText(/按文件名推断/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '修改会议日期' }))
+    const input = screen.getByLabelText('会议日期')
+    fireEvent.change(input, { target: { value: '2026-08-30' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(await screen.findByText(/会议日期 2026-08-30/)).toBeInTheDocument()
+    expect(patched).toEqual({ meeting_date: '2026-08-30' })
+    expect(screen.queryByText(/按文件名推断/)).not.toBeInTheDocument()
   })
 
   it('编辑标题按 Esc 取消，不发请求', async () => {

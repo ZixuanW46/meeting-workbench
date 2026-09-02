@@ -62,8 +62,36 @@ describe('新建会议表单', () => {
     expect(body).toEqual({
       title: '周会',
       hotwords: ['声纹', 'MLX'],
+      meeting_date: localToday(),
     })
     await waitFor(() => expect(window.location.hash).toBe('#/meetings/m-new'))
   })
 
+  it('会议日期默认今天，可改成录音当天并随表单提交', async () => {
+    let body: Record<string, unknown> | null = null
+    server.use(
+      http.post('/api/meetings', async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ id: 'm-new' }, { status: 201 })
+      }),
+    )
+
+    render(<NewMeetingPage />)
+
+    const dateInput = screen.getByLabelText('会议日期') as HTMLInputElement
+    expect(dateInput.value).toBe(localToday())
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '周会' } })
+    fireEvent.change(dateInput, { target: { value: '2026-08-30' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建会议' }))
+
+    await waitFor(() => expect(body).not.toBeNull())
+    expect(body).toMatchObject({ meeting_date: '2026-08-30' })
+  })
 })
+
+function localToday(): string {
+  const now = new Date()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${day}`
+}

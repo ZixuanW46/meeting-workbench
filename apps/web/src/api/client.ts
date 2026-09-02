@@ -8,6 +8,10 @@ export interface Meeting {
   expected_speakers: number | null
   hotwords: string[]
   created_at: string
+  /** 生效的会议日期（YYYY-MM-DD）：纪要标题与相对日期换算的锚点 */
+  meeting_date: string
+  /** user=用户填写 / filename=按音频文件名推断 / created=按创建日 */
+  meeting_date_source: 'user' | 'filename' | 'created'
   /** 已确认身份的参会人显示名，按累计发言时长降序；未完成确认时为空 */
   speakers: string[]
   /** 确认后仍未落名的说话人簇数 */
@@ -17,6 +21,13 @@ export interface Meeting {
 export interface MeetingCreateInput {
   title: string
   hotwords: string[]
+  /** 会议发生日（YYYY-MM-DD）；不传则后端按文件名或创建日推断 */
+  meeting_date?: string
+}
+
+export interface MeetingUpdateInput {
+  title?: string
+  meeting_date?: string
 }
 
 export interface ReviewSample {
@@ -225,12 +236,27 @@ export function createMeeting(input: MeetingCreateInput): Promise<Meeting> {
   return postJson<Meeting>('/api/meetings', input)
 }
 
-export function updateMeetingTitle(meetingId: string, title: string): Promise<Meeting> {
+export function updateMeeting(
+  meetingId: string,
+  patch: MeetingUpdateInput,
+): Promise<Meeting> {
   return apiFetch<Meeting>(`/api/meetings/${meetingId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify(patch),
   })
+}
+
+export function updateMeetingTitle(meetingId: string, title: string): Promise<Meeting> {
+  return updateMeeting(meetingId, { title })
+}
+
+/** 本机时区的今天，YYYY-MM-DD；日期输入框默认值用。 */
+export function localToday(): string {
+  const now = new Date()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${day}`
 }
 
 export function deleteMeeting(meetingId: string): Promise<void> {

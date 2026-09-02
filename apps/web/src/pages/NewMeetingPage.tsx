@@ -1,10 +1,12 @@
 import { useState, type KeyboardEvent } from 'react'
-import { createMeeting, formatApiError } from '../api/client'
+import { createMeeting, formatApiError, localToday } from '../api/client'
 import { Icon } from '../components/Icon'
 
 export function NewMeetingPage() {
   const [title, setTitle] = useState('')
   const [titleError, setTitleError] = useState<string | null>(null)
+  // 会议发生日：纪要标题与「明天」「下周二」换算都以它为锚点，默认今天
+  const [meetingDate, setMeetingDate] = useState(localToday())
   const [hotwords, setHotwords] = useState<string[]>([])
   const [hotwordInput, setHotwordInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -40,6 +42,7 @@ export function NewMeetingPage() {
       const meeting = await createMeeting({
         title: title.trim(),
         hotwords,
+        ...(meetingDate !== '' ? { meeting_date: meetingDate } : {}),
       })
       window.location.hash = `#/meetings/${meeting.id}`
     } catch (e: unknown) {
@@ -85,6 +88,20 @@ export function NewMeetingPage() {
             }}
           />
           {titleError !== null && <span className="form-error">{titleError}</span>}
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="meeting-date">会议日期</label>
+          <input
+            id="meeting-date"
+            type="date"
+            className="input input-date"
+            value={meetingDate}
+            onChange={(event) => setMeetingDate(event.target.value)}
+          />
+          <span className="form-hint">
+            录音是哪天开的会；纪要标题与「明天」「下周二」的换算都以此为准
+          </span>
         </div>
 
         <div className="form-field">

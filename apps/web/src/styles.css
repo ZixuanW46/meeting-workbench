@@ -1516,6 +1516,54 @@ svg.clip-wave {
   font-size: 12px;
 }
 
+/* 元信息行里的会议日期：来源提示更淡，编辑入口悬停才浮现（与标题同性格） */
+.meta-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.meta-hint {
+  color: var(--ink-tertiary);
+  opacity: 0.75;
+}
+
+.meta-hint::before {
+  content: '·';
+  margin-right: 6px;
+}
+
+.meta-edit-btn {
+  opacity: 0;
+  padding: 2px 4px;
+}
+
+.meta-date:hover .meta-edit-btn,
+.meta-edit-btn:focus-visible {
+  opacity: 1;
+}
+
+.meta-edit-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.meta-edit-row .btn {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.input-date {
+  width: fit-content;
+  font-variant-numeric: tabular-nums;
+}
+
+.meta-edit-row .input-date {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
 .divider-dot::before {
   content: '·';
   color: var(--ink-tertiary);

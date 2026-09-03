@@ -1,6 +1,17 @@
-import { useState, type KeyboardEvent } from 'react'
-import { createMeeting, formatApiError, localToday, type MeetingLanguage } from '../api/client'
+import { useEffect, useState, type KeyboardEvent } from 'react'
+import {
+  createMeeting,
+  createProject,
+  formatApiError,
+  listProjects,
+  localToday,
+  type MeetingLanguage,
+  type Project,
+} from '../api/client'
 import { Icon } from '../components/Icon'
+
+// <select> 里的哨兵值：选中它就地展开新建项目输入
+const NEW_PROJECT_OPTION = '__new__'
 
 export function NewMeetingPage() {
   // 标题选填：留空先占位，上传后取录音文件名，纪要生成后自动命名
@@ -9,10 +20,56 @@ export function NewMeetingPage() {
   const [meetingDate, setMeetingDate] = useState(localToday())
   // 转写目标语言：默认中文，决定后续转写识别的语言
   const [language, setLanguage] = useState<MeetingLanguage>('zh')
+  // 归属项目：空串 = 无项目；决定这场会议叠加哪份项目热词
+  const [projects, setProjects] = useState<Project[]>([])
+  const [projectId, setProjectId] = useState('')
+  const [creatingProject, setCreatingProject] = useState(false)
+  const [newProjectName, setNewProjectName] = useState('')
+  const [savingProject, setSavingProject] = useState(false)
   const [hotwords, setHotwords] = useState<string[]>([])
   const [hotwordInput, setHotwordInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let stale = false
+    listProjects()
+      .then((items) => {
+        if (!stale) {
+          setProjects(items)
+        }
+      })
+      .catch(() => {
+        if (!stale) {
+          setProjects([])
+        }
+      })
+    return () => {
+      stale = true
+    }
+  }, [])
+
+  const submitNewProject = () => {
+    const name = newProjectName.trim()
+    if (name === '' || savingProject) {
+      return
+    }
+    setSavingProject(true)
+    setError(null)
+    createProject(name)
+      .then((created) => {
+        setProjects((current) => [...current, created])
+        setProjectId(created.id)
+        setNewProjectName('')
+        setCreatingProject(false)
+      })
+      .catch((e: unknown) => {
+        setError(formatApiError(e))
+      })
+      .finally(() => {
+        setSavingProject(false)
+      })
+  }
 
   const addHotword = () => {
     const word = hotwordInput.trim()
@@ -41,6 +98,7 @@ export function NewMeetingPage() {
         hotwords,
         ...(meetingDate !== '' ? { meeting_date: meetingDate } : {}),
         language,
+        ...(projectId !== '' ? { project_id: projectId } : {}),
       })
       window.location.hash = `#/meetings/${meeting.id}`
     } catch (e: unknown) {
@@ -118,6 +176,77 @@ export function NewMeetingPage() {
             </button>
           </div>
           <span className="form-hint">决定转写识别的语言；创建后仍可在工作台修改，下次转写才生效</span>
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="meeting-project">项目</label>
+          <select
+            id="meeting-project"
+            className="select"
+            value={creatingProject ? NEW_PROJECT_OPTION : projectId}
+            onChange={(event) => {
+              const value = event.target.value
+              if (value === NEW_PROJECT_OPTION) {
+                setCreatingProject(true)
+                return
+              }
+              setCreatingProject(false)
+              setProjectId(value)
+            }}
+          >
+            <option value="">无项目</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+            <option value={NEW_PROJECT_OPTION}>新建项目…</option>
+          </select>
+          {creatingProject && (
+            <div className="inline-create">
+              <input
+                className="input"
+                aria-label="新项目名字"
+                placeholder="项目名字，回车创建"
+                value={newProjectName}
+                disabled={savingProject}
+                autoFocus
+                onChange={(event) => setNewProjectName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    submitNewProject()
+                  }
+                  if (event.key === 'Escape') {
+                    setCreatingProject(false)
+                    setNewProjectName('')
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="btn"
+                disabled={savingProject || newProjectName.trim() === ''}
+                onClick={submitNewProject}
+              >
+                创建
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={savingProject}
+                onClick={() => {
+                  setCreatingProject(false)
+                  setNewProjectName('')
+                }}
+              >
+                取消
+              </button>
+            </div>
+          )}
+          <span className="form-hint">
+            项目决定这场会议叠加哪份项目热词；不选就是无项目，只用通用词库
+          </span>
         </div>
 
         <div className="form-field">

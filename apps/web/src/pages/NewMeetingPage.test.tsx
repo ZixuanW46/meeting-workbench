@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
-import { server } from '../test/server'
+import { server, useProjects } from '../test/server'
 import { NewMeetingPage } from './NewMeetingPage'
 
 describe('新建会议表单', () => {
@@ -112,6 +112,69 @@ describe('新建会议表单', () => {
 
     await waitFor(() => expect(body).not.toBeNull())
     expect(body).toMatchObject({ meeting_date: '2026-08-30' })
+  })
+  it('选中项目后随表单提交 project_id；不选则整个字段不出现', async () => {
+    let body: Record<string, unknown> | null = null
+    useProjects()
+    server.use(
+      http.post('/api/meetings', async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ id: 'm-new' }, { status: 201 })
+      }),
+    )
+
+    render(<NewMeetingPage />)
+    const select = await screen.findByLabelText('项目')
+    expect((select as HTMLSelectElement).value).toBe('')
+    await screen.findByRole('option', { name: '声纹研究' })
+
+    fireEvent.change(select, { target: { value: 'p2' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建会议' }))
+
+    await waitFor(() => expect(body).not.toBeNull())
+    expect(body).toMatchObject({ project_id: 'p2' })
+  })
+
+  it('选「新建项目…」就地创建，创建完自动选中并随表单提交', async () => {
+    let posted: { name: string } | null = null
+    let body: Record<string, unknown> | null = null
+    useProjects()
+    server.use(
+      http.post('/api/projects', async ({ request }) => {
+        posted = (await request.json()) as { name: string }
+        return HttpResponse.json(
+          {
+            id: 'p9',
+            name: posted.name,
+            created_at: '2026-09-03T00:00:00Z',
+            meeting_count: 0,
+            hotword_count: 0,
+          },
+          { status: 201 },
+        )
+      }),
+      http.post('/api/meetings', async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ id: 'm-new' }, { status: 201 })
+      }),
+    )
+
+    render(<NewMeetingPage />)
+    const select = await screen.findByLabelText('项目')
+    await screen.findByRole('option', { name: '声纹研究' })
+
+    fireEvent.change(select, { target: { value: '__new__' } })
+    const nameInput = screen.getByLabelText('新项目名字')
+    fireEvent.change(nameInput, { target: { value: '内网基建' } })
+    fireEvent.keyDown(nameInput, { key: 'Enter' })
+
+    await waitFor(() => expect((select as HTMLSelectElement).value).toBe('p9'))
+    expect(posted).toEqual({ name: '内网基建' })
+    expect(screen.queryByLabelText('新项目名字')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '创建会议' }))
+    await waitFor(() => expect(body).not.toBeNull())
+    expect(body).toMatchObject({ project_id: 'p9' })
   })
 })
 

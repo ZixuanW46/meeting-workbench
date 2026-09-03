@@ -52,3 +52,19 @@ def test_real_mentions_of_hotwords_are_untouched():
 def test_three_consecutive_in_snapshot_order_is_the_threshold():
     assert strip_hotword_echo("CUES, Eddie, Leo", SNAPSHOT) == ""
     assert strip_hotword_echo("CUES, Eddie 来了", SNAPSHOT) == "CUES, Eddie 来了"
+
+
+def test_snapshot_merges_any_number_of_word_groups():
+    # 全局词库 + 项目热词 + 本场热词三层叠加，语义仍是合并去重稳定排序。
+    frozen = snapshot(
+        ["全局词", "共同词"],
+        ["项目词", "共同词"],
+        ["本场词", " 共同词 "],
+    )
+
+    assert frozen == ("全局词", "共同词", "本场词", "项目词")
+
+
+def test_snapshot_accepts_single_group_and_no_group():
+    assert snapshot() == ()
+    assert snapshot(["只有一组", "只有一组"]) == ("只有一组",)

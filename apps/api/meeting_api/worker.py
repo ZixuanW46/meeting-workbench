@@ -16,6 +16,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from meeting_api.config import Settings
 from meeting_api.events import EventStore
+from meeting_api.hotword_layers import (
+    global_hotword_words,
+    merged_hotword_notes,
+    project_hotword_words,
+)
 from meeting_api.meeting_date import resolve_meeting_date
 from meeting_api.minutes.adapter import (
     MinutesAdapter,
@@ -30,7 +35,6 @@ from meeting_api.minutes.prompt import (
 )
 from meeting_api.models import (
     CleanedTranscriptBlock,
-    HotwordEntry,
     Meeting,
     Person,
     SpeakerCluster,
@@ -250,10 +254,12 @@ class Worker:
                 return self._generate_minutes(session, meeting)
 
             meeting_id = meeting.id
-            global_words = session.scalars(
-                select(HotwordEntry.word).order_by(HotwordEntry.word, HotwordEntry.id)
-            ).all()
-            hotwords = snapshot(global_words, json.loads(meeting.hotwords_json))
+            # 三层叠加：全局词库 + 会议所属项目的热词 + 本场热词。
+            hotwords = snapshot(
+                global_hotword_words(session),
+                project_hotword_words(session, meeting.project_id),
+                json.loads(meeting.hotwords_json),
+            )
             meeting.hotword_snapshot_json = json.dumps(hotwords, ensure_ascii=False)
             meeting.state = transition(
                 MeetingState(meeting.state), MeetingState.PROCESSING
@@ -352,16 +358,8 @@ class Worker:
         try:
             labeled = self._labeled_segments(session, meeting_id)
             blocks = build_transcript_blocks(labeled)
-            hotword_entries = [
-                tuple(row)
-                for row in session.execute(
-                    select(HotwordEntry.word, HotwordEntry.note).order_by(
-                        HotwordEntry.word, HotwordEntry.id
-                    )
-                )
-            ]
             glossary = build_minutes_glossary(
-                hotword_entries,
+                merged_hotword_notes(session, meeting.project_id),
                 load_minutes_glossary(self.settings.data_dir),
             )
             cleaned_by_index = self._clean_transcript_blocks(

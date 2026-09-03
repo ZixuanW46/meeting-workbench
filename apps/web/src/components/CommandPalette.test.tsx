@@ -13,6 +13,8 @@ const MEETINGS = [
     created_at: '2026-08-26T08:00:00Z',
     speakers: ['Will'],
     unknown_speaker_count: 0,
+    project_id: null,
+    project_name: null,
   },
   {
     id: 'm2',
@@ -23,6 +25,8 @@ const MEETINGS = [
     created_at: '2026-08-25T02:30:00Z',
     speakers: [],
     unknown_speaker_count: 0,
+    project_id: null,
+    project_name: null,
   },
 ]
 

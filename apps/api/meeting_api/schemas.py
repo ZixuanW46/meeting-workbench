@@ -14,6 +14,8 @@ class MeetingCreate(BaseModel):
     expected_speakers: int | None = Field(default=None, ge=1)
     # 会议语言：英文会议转写与清洗输出英文原文，纪要仍用中文撰写。
     language: Literal["zh", "en"] = "zh"
+    # 所属项目；不给或给 null 都表示「无项目」。
+    project_id: str | None = None
     hotwords: list[str] = Field(default_factory=list)
 
     @field_validator("title")
@@ -37,12 +39,14 @@ class MeetingCreate(BaseModel):
 
 
 class MeetingUpdate(BaseModel):
-    """PATCH 只改给出的字段：标题、会议日期、语言各自可选，但至少要给一个。"""
+    """PATCH 只改给出的字段：标题、会议日期、语言、项目各自可选，但至少要给一个。"""
 
     title: str | None = Field(default=None, min_length=1, max_length=200)
     meeting_date: date | None = None
     # 改语言不触发任何状态迁移，仅在下一次转写/重转写时生效。
     language: Literal["zh", "en"] | None = None
+    # 「没给」= 保持原样；「给了 null」= 改成无项目。用 model_fields_set 区分。
+    project_id: str | None = None
 
     @field_validator("title")
     @classmethod
@@ -56,8 +60,13 @@ class MeetingUpdate(BaseModel):
 
     @model_validator(mode="after")
     def at_least_one_field(self) -> Self:
-        if not self.model_fields_set & {"title", "meeting_date", "language"}:
-            raise ValueError("至少提供 title、meeting_date 或 language 之一")
+        if not self.model_fields_set & {
+            "title",
+            "meeting_date",
+            "language",
+            "project_id",
+        }:
+            raise ValueError("至少提供 title、meeting_date、language 或 project_id 之一")
         return self
 
 
@@ -67,6 +76,9 @@ class MeetingResponse(BaseModel):
     state: str
     expected_speakers: int | None
     language: Literal["zh", "en"]
+    # 所属项目；未挂项目时两者都是 null。
+    project_id: str | None
+    project_name: str | None
     hotwords: list[str]
     created_at: datetime
     # 生效的会议日期与来源：user=用户填写 / filename=音频文件名 / created=创建日。

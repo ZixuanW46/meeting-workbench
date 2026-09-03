@@ -15,7 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from meeting_api.db import Base
 from meeting_domain import MeetingState
@@ -27,6 +27,30 @@ def _new_id() -> str:
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+class Project(Base):
+    """会议归属的项目；项目有自己的一层热词，会议可不挂项目。"""
+
+    __tablename__ = "projects"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class ProjectHotword(Base):
+    """项目级热词：介于全局词库与本场热词之间的第二层。"""
+
+    __tablename__ = "project_hotwords"
+    __table_args__ = (UniqueConstraint("project_id", "word"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    word: Mapped[str] = mapped_column(String(200))
+    note: Mapped[str | None] = mapped_column(Text, default=None)
 
 
 class Meeting(Base):
@@ -44,6 +68,11 @@ class Meeting(Base):
     # 会议语言：zh=中文 / en=英文。英文会议转写与清洗保留英文原文，纪要仍写中文。
     # 改语言不触发状态迁移，只在下一次转写/重转写时生效。
     language: Mapped[str] = mapped_column(String(8), default="zh", server_default="zh")
+    # 会议所属项目；None = 无项目。删项目时置空（路由显式置空 + 数据库 SET NULL）。
+    project_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"), default=None, index=True
+    )
+    project: Mapped[Project | None] = relationship(lazy="joined")
     # 预计人数是先验，不是硬约束；None = 不确定
     expected_speakers: Mapped[int | None] = mapped_column(default=None)
     hotwords_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]")

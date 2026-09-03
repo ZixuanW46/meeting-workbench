@@ -6,16 +6,17 @@ import re
 from collections.abc import Iterable, Sequence
 
 
-def snapshot(
-    global_words: Iterable[str],
-    meeting_words: Iterable[str],
-) -> tuple[str, ...]:
-    """合并、去重并稳定排序，返回与输入容器无共享状态的值对象。"""
+def snapshot(*word_groups: Iterable[str]) -> tuple[str, ...]:
+    """合并任意多层词表（全局词库 / 项目热词 / 本场热词）成不可变快照。
+
+    去重、去首尾空白、稳定排序，返回与输入容器无共享状态的值对象。
+    """
     return tuple(
         sorted(
             {
                 stripped
-                for word in (*global_words, *meeting_words)
+                for group in word_groups
+                for word in group
                 if (stripped := word.strip())
             }
         )

@@ -7,12 +7,13 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
+from meeting_api.hotword_layers import global_hotword_words, project_hotword_words
 from meeting_api.meeting_date import resolve_meeting_date
 from meeting_api.models import (
     CleanedTranscriptBlock,
-    HotwordEntry,
     Meeting,
     Person,
+    Project,
     SpeakerCluster,
     TranscriptSegment,
     Voiceprint,
@@ -40,6 +41,13 @@ BUSY_MEETING_STATES: frozenset[MeetingState] = frozenset(
         MeetingState.GENERATING_MINUTES,
     }
 )
+
+
+def _require_project(session: Session, project_id: str) -> Project:
+    project = session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在")
+    return project
 
 
 def _speaker_summaries(
@@ -106,6 +114,8 @@ def _to_response(
         state=meeting.state,
         expected_speakers=meeting.expected_speakers,
         language=meeting.language,
+        project_id=meeting.project_id,
+        project_name=meeting.project.name if meeting.project is not None else None,
         hotwords=json.loads(meeting.hotwords_json),
         created_at=meeting.created_at,
         meeting_date=meeting_date,
@@ -120,12 +130,15 @@ def _to_response(
 def create_meeting(payload: MeetingCreate, request: Request) -> MeetingResponse:
     session_factory = request.app.state.session_factory
     with session_factory() as session:
+        if payload.project_id is not None:
+            _require_project(session, payload.project_id)
         meeting = Meeting(
             title=payload.title or DEFAULT_MEETING_TITLE,
             title_user_edited=payload.title is not None,
             meeting_date=payload.meeting_date,
             expected_speakers=payload.expected_speakers,
             language=payload.language,
+            project_id=payload.project_id,
             hotwords_json=json.dumps(payload.hotwords, ensure_ascii=False),
         )
         session.add(meeting)
@@ -177,6 +190,11 @@ def update_meeting(
         # 改语言只影响下一次转写/重转写，不触发任何状态迁移。
         if payload.language is not None:
             meeting.language = payload.language
+        # 改挂项目任何状态都允许，不触发状态迁移，也不回溯已冻结的热词快照。
+        if "project_id" in payload.model_fields_set:
+            if payload.project_id is not None:
+                _require_project(session, payload.project_id)
+            meeting.project_id = payload.project_id
         session.commit()
         session.refresh(meeting)
         summary = _speaker_summaries(session, [meeting.id]).get(meeting.id, ([], 0))
@@ -287,10 +305,11 @@ def retranscribe_meeting(meeting_id: str, request: Request) -> MeetingResponse:
             )
         queued = transition(current, MeetingState.QUEUED)
 
-        global_words = session.scalars(
-            select(HotwordEntry.word).order_by(HotwordEntry.word, HotwordEntry.id)
-        ).all()
-        frozen = snapshot(global_words, json.loads(meeting.hotwords_json))
+        frozen = snapshot(
+            global_hotword_words(session),
+            project_hotword_words(session, meeting.project_id),
+            json.loads(meeting.hotwords_json),
+        )
         meeting.hotword_snapshot_json = json.dumps(frozen, ensure_ascii=False)
 
         session.execute(

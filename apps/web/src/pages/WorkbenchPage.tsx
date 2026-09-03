@@ -3,12 +3,14 @@ import {
   cancelMeeting,
   formatApiError,
   getMeeting,
+  listProjects,
   reopenReview,
   retranscribeMeeting,
   updateMeeting,
   updateMeetingTitle,
   type Meeting,
   type MeetingLanguage,
+  type Project,
   type TranscriptVariant,
 } from '../api/client'
 import { ResultActionsMenu } from '../components/ResultActionsMenu'
@@ -49,6 +51,11 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
   const [editingLanguage, setEditingLanguage] = useState(false)
   const [languageDraft, setLanguageDraft] = useState<MeetingLanguage>('zh')
   const [savingLanguage, setSavingLanguage] = useState(false)
+  // 项目就地编辑：同一套交互，草稿用 <select>；改挂不改状态，热词下次转写才生效
+  const [projects, setProjects] = useState<Project[]>([])
+  const [editingProject, setEditingProject] = useState(false)
+  const [projectDraft, setProjectDraft] = useState('')
+  const [savingProject, setSavingProject] = useState(false)
   const [canceling, setCanceling] = useState(false)
   const meetingStateRef = useRef<string | null>(null)
   meetingStateRef.current = meeting?.state ?? null
@@ -74,6 +81,25 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  // 项目只用于改挂的下拉选项：拉不到就当没有项目，不打断工作台
+  useEffect(() => {
+    let stale = false
+    listProjects()
+      .then((items) => {
+        if (!stale) {
+          setProjects(items)
+        }
+      })
+      .catch(() => {
+        if (!stale) {
+          setProjects([])
+        }
+      })
+    return () => {
+      stale = true
+    }
+  }, [])
 
   const saveTitle = async () => {
     if (meeting === null) return
@@ -134,6 +160,27 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
       setError(formatApiError(e))
     } finally {
       setSavingLanguage(false)
+    }
+  }
+
+  const saveProject = async () => {
+    if (meeting === null) return
+    const next = projectDraft === '' ? null : projectDraft
+    if (next === meeting.project_id) {
+      setEditingProject(false)
+      return
+    }
+    setSavingProject(true)
+    try {
+      const updated = await updateMeeting(meetingId, { project_id: next })
+      setMeeting(updated)
+      setEditingProject(false)
+      setError(null)
+      toast('项目已更新，热词在下次转写生效')
+    } catch (e: unknown) {
+      setError(formatApiError(e))
+    } finally {
+      setSavingProject(false)
     }
   }
 
@@ -350,6 +397,59 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
                   onClick={() => {
                     setLanguageDraft(meeting.language)
                     setEditingLanguage(true)
+                  }}
+                >
+                  <Icon name="edit" size={11} />
+                </button>
+              </span>
+            )}
+            <span className="divider-dot" />
+            {editingProject ? (
+              <span className="meta-edit-row">
+                <select
+                  className="select meta-select"
+                  aria-label="会议项目"
+                  value={projectDraft}
+                  disabled={savingProject}
+                  autoFocus
+                  onChange={(event) => setProjectDraft(event.target.value)}
+                >
+                  <option value="">无项目</option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={savingProject}
+                  onClick={() => {
+                    void saveProject()
+                  }}
+                >
+                  保存
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={savingProject}
+                  onClick={() => setEditingProject(false)}
+                >
+                  取消
+                </button>
+              </span>
+            ) : (
+              <span className="meta-date">
+                <span>{`项目 ${meeting.project_name ?? '无项目'}`}</span>
+                <button
+                  type="button"
+                  className="btn btn-ghost meta-edit-btn"
+                  aria-label="修改会议项目"
+                  onClick={() => {
+                    setProjectDraft(meeting.project_id ?? '')
+                    setEditingProject(true)
                   }}
                 >
                   <Icon name="edit" size={11} />

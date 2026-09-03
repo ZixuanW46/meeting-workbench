@@ -20,6 +20,7 @@ from meeting_api.routes import (
     hotwords,
     meetings,
     minutes,
+    projects,
     review,
     upload,
     voiceprints,
@@ -100,6 +101,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(doctor_router)
     app.include_router(hotwords.router)
+    app.include_router(projects.router)
     app.include_router(voiceprints.router)
     app.include_router(meetings.router)
     app.include_router(upload.router)

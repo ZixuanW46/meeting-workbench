@@ -17,6 +17,10 @@ export interface Meeting {
   meeting_date_source: 'user' | 'filename' | 'created'
   /** 改动不影响当前状态，只有下一次转写/重转写才生效 */
   language: MeetingLanguage
+  /** 归属项目；null=无项目 */
+  project_id: string | null
+  /** 归属项目名，随 project_id 一起为 null */
+  project_name: string | null
   /** 已确认身份的参会人显示名，按累计发言时长降序；未完成确认时为空 */
   speakers: string[]
   /** 确认后仍未落名的说话人簇数 */
@@ -33,12 +37,16 @@ export interface MeetingCreateInput {
   meeting_date?: string
   /** 不传则后端默认 zh */
   language?: MeetingLanguage
+  /** 归属项目；不传或 null 都是无项目 */
+  project_id?: string | null
 }
 
 export interface MeetingUpdateInput {
   title?: string
   meeting_date?: string
   language?: MeetingLanguage
+  /** 传 null=改为无项目；不传=不动。改挂项目不改状态，热词快照不回溯 */
+  project_id?: string | null
 }
 
 export interface ReviewSample {
@@ -396,6 +404,78 @@ export function updateHotwordNote(
 
 export function deleteHotword(hotwordId: string): Promise<void> {
   return apiFetch<void>(`/api/hotwords/${hotwordId}`, { method: 'DELETE' })
+}
+
+/** 项目：会议的归属分组，同时是一份只对该项目会议生效的热词作用域 */
+export interface Project {
+  id: string
+  name: string
+  created_at: string
+  /** 归属该项目的会议数 */
+  meeting_count: number
+  /** 该项目下的项目热词数 */
+  hotword_count: number
+}
+
+/** 项目热词：形状与全局词库完全一致，只是作用域限定在这个项目 */
+export type ProjectHotword = Hotword
+
+export async function listProjects(): Promise<Project[]> {
+  const data = await apiFetch<{ items: Project[] }>('/api/projects')
+  return data.items
+}
+
+export function createProject(name: string): Promise<Project> {
+  return postJson<Project>('/api/projects', { name })
+}
+
+export function renameProject(projectId: string, name: string): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${projectId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+}
+
+/** 删项目：该项目的会议变「无项目」，项目热词一并删除（已存的快照不回溯） */
+export function deleteProject(projectId: string): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}`, { method: 'DELETE' })
+}
+
+export async function listProjectHotwords(projectId: string): Promise<ProjectHotword[]> {
+  const data = await apiFetch<{ items: ProjectHotword[] }>(
+    `/api/projects/${projectId}/hotwords`,
+  )
+  return data.items
+}
+
+export function createProjectHotword(
+  projectId: string,
+  word: string,
+  note?: string,
+): Promise<ProjectHotword> {
+  return postJson<ProjectHotword>(
+    `/api/projects/${projectId}/hotwords`,
+    note === undefined ? { word } : { word, note },
+  )
+}
+
+export function updateProjectHotwordNote(
+  projectId: string,
+  hotwordId: string,
+  note: string | null,
+): Promise<ProjectHotword> {
+  return apiFetch<ProjectHotword>(`/api/projects/${projectId}/hotwords/${hotwordId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ note }),
+  })
+}
+
+export function deleteProjectHotword(projectId: string, hotwordId: string): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/hotwords/${hotwordId}`, {
+    method: 'DELETE',
+  })
 }
 
 /** 整场音频的波形峰值（后端算一次并缓存）：≤2000 桶、0～1，附时长秒数 */

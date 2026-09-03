@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { makeDoctorReport } from '../test/doctor'
-import { server } from '../test/server'
+import { server, useProjects } from '../test/server'
 import { MeetingListPage } from './MeetingListPage'
 
 const MEETINGS = [
@@ -15,6 +15,8 @@ const MEETINGS = [
     speakers: [],
     unknown_speaker_count: 0,
     language: 'zh',
+    project_id: 'p1',
+    project_name: '会议工作台',
   },
   {
     id: 'm2',
@@ -26,10 +28,17 @@ const MEETINGS = [
     speakers: ['Will', 'Leo', 'Eddie'],
     unknown_speaker_count: 1,
     language: 'en',
+    project_id: null,
+    project_name: null,
   },
 ]
 
 describe('会议列表页', () => {
+  beforeEach(() => {
+    // 项目筛选记在 localStorage 里，用例之间不能互相污染
+    localStorage.clear()
+  })
+
   it('从 /api/meetings 渲染真数据', async () => {
     server.use(
       http.get('/api/meetings', () => HttpResponse.json({ items: MEETINGS })),
@@ -186,5 +195,68 @@ describe('会议列表页', () => {
     render(<MeetingListPage />)
 
     expect(await screen.findByText('还没有会议')).toBeInTheDocument()
+  })
+  it('列表行在标题旁挂项目名标签，无项目的行不出标签', async () => {
+    server.use(http.get('/api/meetings', () => HttpResponse.json({ items: MEETINGS })))
+
+    render(<MeetingListPage />)
+
+    const withProject = (await screen.findByText('产品周会')).closest('.list-row')
+    const without = screen.getByText('架构评审').closest('.list-row')
+    expect(withProject?.querySelector('.badge-project')).toHaveTextContent('会议工作台')
+    expect(without?.querySelector('.badge-project')).toBeNull()
+  })
+
+  it('没有项目时不出筛选条', async () => {
+    server.use(http.get('/api/meetings', () => HttpResponse.json({ items: MEETINGS })))
+
+    render(<MeetingListPage />)
+    await screen.findByText('产品周会')
+
+    expect(screen.queryByLabelText('按项目筛选')).not.toBeInTheDocument()
+  })
+
+  it('项目筛选在本地过滤：选项目只留该项目，选无项目只留没挂项目的', async () => {
+    let listCalls = 0
+    useProjects()
+    server.use(
+      http.get('/api/meetings', () => {
+        listCalls += 1
+        return HttpResponse.json({ items: MEETINGS })
+      }),
+    )
+
+    render(<MeetingListPage />)
+    await screen.findByText('产品周会')
+    await screen.findByLabelText('按项目筛选')
+
+    fireEvent.click(screen.getByRole('button', { name: '会议工作台' }))
+    expect(screen.getByText('产品周会')).toBeInTheDocument()
+    expect(screen.queryByText('架构评审')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '无项目' }))
+    expect(screen.getByText('架构评审')).toBeInTheDocument()
+    expect(screen.queryByText('产品周会')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '全部' }))
+    expect(screen.getByText('产品周会')).toBeInTheDocument()
+    expect(screen.getByText('架构评审')).toBeInTheDocument()
+    // 纯本地筛选：切 pill 不再打后端
+    expect(listCalls).toBe(1)
+  })
+
+  it('筛选选中值记进 localStorage，下次进来还在', async () => {
+    useProjects()
+    server.use(http.get('/api/meetings', () => HttpResponse.json({ items: MEETINGS })))
+
+    const first = render(<MeetingListPage />)
+    await screen.findByLabelText('按项目筛选')
+    fireEvent.click(screen.getByRole('button', { name: '声纹研究' }))
+    first.unmount()
+
+    render(<MeetingListPage />)
+    await screen.findByLabelText('按项目筛选')
+    expect(screen.getByRole('button', { name: '声纹研究' })).toHaveClass('active')
+    expect(await screen.findByText('这个项目下还没有会议')).toBeInTheDocument()
   })
 })

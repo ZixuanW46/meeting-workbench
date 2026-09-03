@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { makeDoctorReport } from '../test/doctor'
-import { server } from '../test/server'
+import { server, useProjects } from '../test/server'
 import { WorkbenchPage } from './WorkbenchPage'
 
 const MEETING = {
@@ -14,6 +14,8 @@ const MEETING = {
   meeting_date: '2026-08-26',
   meeting_date_source: 'created',
   language: 'zh',
+  project_id: null,
+  project_name: null,
   speakers: [],
   unknown_speaker_count: 0,
 }
@@ -502,5 +504,86 @@ describe('工作台页', () => {
     expect(
       screen.queryByRole('menuitem', { name: '导出纪要 MD' }),
     ).not.toBeInTheDocument()
+  })
+  it('元信息行展示项目，可就地改挂到别的项目', async () => {
+    let patched: Record<string, unknown> | null = null
+    useProjects()
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json(patched === null ? MEETING : { ...MEETING, ...patched }),
+      ),
+      http.patch('/api/meetings/m1', async ({ request }) => {
+        patched = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({
+          ...MEETING,
+          project_id: 'p1',
+          project_name: '会议工作台',
+        })
+      }),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    expect(await screen.findByText('项目 无项目')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '修改会议项目' }))
+    const select = await screen.findByLabelText('会议项目')
+    await screen.findByRole('option', { name: '会议工作台' })
+    fireEvent.change(select, { target: { value: 'p1' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByText('项目 会议工作台')).toBeInTheDocument()
+    expect(patched).toEqual({ project_id: 'p1' })
+  })
+
+  it('改挂项目点取消不发请求', async () => {
+    let patchCalled = false
+    useProjects()
+    server.use(
+      http.get('/api/meetings/m1', () => HttpResponse.json(MEETING)),
+      http.patch('/api/meetings/m1', () => {
+        patchCalled = true
+        return HttpResponse.json(MEETING)
+      }),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    expect(await screen.findByText('项目 无项目')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '修改会议项目' }))
+    const select = await screen.findByLabelText('会议项目')
+    await screen.findByRole('option', { name: '声纹研究' })
+    fireEvent.change(select, { target: { value: 'p2' } })
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+    expect(screen.getByText('项目 无项目')).toBeInTheDocument()
+    expect(patchCalled).toBe(false)
+  })
+
+  it('已挂项目的会议可以改回无项目：PATCH 带 project_id null', async () => {
+    let patched: Record<string, unknown> | null = null
+    const attached = { ...MEETING, project_id: 'p1', project_name: '会议工作台' }
+    useProjects()
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json(patched === null ? attached : { ...MEETING }),
+      ),
+      http.patch('/api/meetings/m1', async ({ request }) => {
+        patched = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(MEETING)
+      }),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    expect(await screen.findByText('项目 会议工作台')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '修改会议项目' }))
+    const select = await screen.findByLabelText('会议项目')
+    expect((select as HTMLSelectElement).value).toBe('p1')
+    fireEvent.change(select, { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByText('项目 无项目')).toBeInTheDocument()
+    expect(patched).toEqual({ project_id: null })
   })
 })

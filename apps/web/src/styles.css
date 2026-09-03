@@ -624,6 +624,220 @@ a {
   flex-shrink: 0;
 }
 
+/* 项目标签：列表行里跟在标题旁的哑光小标签，与 .badge-lang 同一性格 */
+.badge-project {
+  display: inline-flex;
+  align-items: center;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--ink-tertiary);
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  padding: 1px 5px;
+  line-height: 1.5;
+  flex-shrink: 0;
+}
+
+/* 标题与项目标签同一行，标题自己吃省略号 */
+.list-row-headline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 筛选 pill 行：贴在页头下方，与结果视图切换共用 .tabs/.tab */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+/* 表单里就地新建（如新建会议的「新建项目…」）：输入 + 确认/取消一排 */
+.inline-create {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.inline-create .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.inline-create .btn {
+  flex-shrink: 0;
+}
+
+/* ---------- 词库：左范围栏 + 右词条栏 ---------- */
+
+.hotword-layout {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.scope-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: sticky;
+  top: 32px;
+}
+
+.scope-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scope-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.scope-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--ink-subtle);
+  border-radius: var(--radius-md);
+  padding: 6px 8px;
+  cursor: pointer;
+  transition: background 0.12s var(--ease), color 0.12s var(--ease);
+}
+
+.scope-item:hover {
+  background: var(--hover-wash);
+  color: var(--ink);
+}
+
+/* 选中 = 表面抬升（surface-2），与侧栏导航同一性格，不用色彩 */
+.scope-item.active {
+  background: var(--surface-2);
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.scope-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scope-count {
+  font-size: 11px;
+  color: var(--ink-tertiary);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+/* 重命名 / 删除入口安静存在：悬停该行才浮现 */
+.scope-actions {
+  display: inline-flex;
+  opacity: 0;
+  flex-shrink: 0;
+}
+
+.scope-row:hover .scope-actions,
+.scope-actions:focus-within {
+  opacity: 1;
+}
+
+.scope-action-btn {
+  padding: 3px 5px;
+}
+
+.scope-rename .input {
+  width: 100%;
+  font-size: 13px;
+  padding: 5px 8px;
+}
+
+.scope-confirm {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scope-confirm-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-subtle);
+}
+
+.scope-confirm-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.scope-confirm-actions .btn {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.scope-new {
+  display: flex;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+}
+
+.scope-new .input {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  padding: 5px 8px;
+}
+
+.scope-new-btn {
+  padding: 5px 8px;
+  flex-shrink: 0;
+}
+
+.scope-panel-head {
+  margin-bottom: 12px;
+}
+
+.scope-panel-head .section-desc {
+  margin-bottom: 0;
+}
+
+/* 窄窗口：范围栏落回顶部，整页回单栏；行内操作直接常驻（没有 hover） */
+@media (max-width: 860px) {
+  .hotword-layout {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .scope-rail {
+    position: static;
+  }
+
+  .scope-actions {
+    opacity: 1;
+  }
+}
+
 /* 声纹库：按人分组的多模板列表 */
 .voiceprint-groups {
   display: flex;
@@ -1762,6 +1976,13 @@ svg.clip-wave {
 .meta-edit-row .input-date {
   padding: 4px 8px;
   font-size: 12px;
+}
+
+/* 元信息行里的下拉（项目）：压到与就地编辑按钮同一节奏 */
+.meta-select {
+  padding: 4px 24px 4px 8px;
+  font-size: 12px;
+  max-width: 180px;
 }
 
 .divider-dot::before {

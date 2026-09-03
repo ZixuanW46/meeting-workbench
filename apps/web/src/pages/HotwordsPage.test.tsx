@@ -8,6 +8,19 @@ const ITEMS = [
   { id: 'h2', word: '声纹库', note: null },
 ]
 
+/** 左栏从上到下的范围名（含固定在第一的「通用」） */
+function railNames(container: HTMLElement): string[] {
+  return Array.from(container.querySelectorAll('.scope-row .scope-name')).map(
+    (node) => node.textContent ?? '',
+  )
+}
+
+/** p2 在前、p1 在后的重排结果，供 PUT /api/projects/order 回吐 */
+const SWAPPED = [
+  { ...PROJECTS[1], position: 0 },
+  { ...PROJECTS[0], position: 1 },
+]
+
 describe('词库页', () => {
   it('列出全局词语并说明快照语义', async () => {
     server.use(
@@ -204,6 +217,7 @@ describe('词库页', () => {
             created_at: '2026-09-03T00:00:00Z',
             meeting_count: 0,
             hotword_count: 0,
+            position: 2,
           },
           { status: 201 },
         )
@@ -394,5 +408,91 @@ describe('词库页', () => {
     expect(
       await screen.findByText(/通用词库对所有会议生效；项目热词只对该项目的会议生效/),
     ).toBeInTheDocument()
+  })
+
+  it('左栏项目按后端返回的顺序排，不再按名字重排', async () => {
+    useProjects(SWAPPED)
+    server.use(http.get('/api/hotwords', () => HttpResponse.json({ items: ITEMS })))
+
+    const { container } = render(<HotwordsPage />)
+    await screen.findByRole('button', { name: /^声纹研究/ })
+
+    expect(railNames(container)).toEqual(['通用', '声纹研究', '会议工作台'])
+  })
+
+  it('把手上按 ⌥↓ 下移一位：乐观换序并把新顺序 PUT 给后端', async () => {
+    let ordered: string[] | null = null
+    useProjects()
+    server.use(
+      http.get('/api/hotwords', () => HttpResponse.json({ items: [] })),
+      http.put('/api/projects/order', async ({ request }) => {
+        const body = (await request.json()) as { ids: string[] }
+        ordered = body.ids
+        return HttpResponse.json({ items: SWAPPED })
+      }),
+    )
+
+    const { container } = render(<HotwordsPage />)
+    const grip = await screen.findByRole('button', { name: '拖动排序 会议工作台' })
+
+    // 已经在第一位，⌥↑ 是空操作，不该打后端
+    fireEvent.keyDown(grip, { key: 'ArrowUp', altKey: true })
+    expect(ordered).toBeNull()
+    expect(railNames(container)).toEqual(['通用', '会议工作台', '声纹研究'])
+
+    fireEvent.keyDown(grip, { key: 'ArrowDown', altKey: true })
+    expect(railNames(container)).toEqual(['通用', '声纹研究', '会议工作台'])
+
+    await waitFor(() => expect(ordered).toEqual(['p2', 'p1']))
+    expect(railNames(container)).toEqual(['通用', '声纹研究', '会议工作台'])
+  })
+
+  it('拖拽排序：拖动中出插入线，松手后落到目标位置', async () => {
+    let ordered: string[] | null = null
+    useProjects()
+    server.use(
+      http.get('/api/hotwords', () => HttpResponse.json({ items: [] })),
+      http.put('/api/projects/order', async ({ request }) => {
+        const body = (await request.json()) as { ids: string[] }
+        ordered = body.ids
+        return HttpResponse.json({ items: SWAPPED })
+      }),
+    )
+
+    const { container } = render(<HotwordsPage />)
+    await screen.findByRole('button', { name: '拖动排序 声纹研究' })
+
+    // rows[0] 是不参与排序的「通用」
+    const rows = container.querySelectorAll('.scope-row')
+    fireEvent.dragStart(rows[1])
+    expect(rows[1]).toHaveClass('dragging')
+
+    fireEvent.dragOver(rows[2])
+    expect(rows[2]).toHaveClass('drop-after')
+
+    fireEvent.drop(rows[2])
+
+    await waitFor(() => expect(ordered).toEqual(['p2', 'p1']))
+    expect(railNames(container)).toEqual(['通用', '声纹研究', '会议工作台'])
+    expect(container.querySelector('.scope-row.dragging')).toBeNull()
+  })
+
+  it('排序失败：左栏顺序回滚并给出错误提示', async () => {
+    useProjects()
+    server.use(
+      http.get('/api/hotwords', () => HttpResponse.json({ items: [] })),
+      http.put('/api/projects/order', () =>
+        HttpResponse.json({ detail: '项目顺序不完整' }, { status: 422 }),
+      ),
+    )
+
+    const { container } = render(<HotwordsPage />)
+    const grip = await screen.findByRole('button', { name: '拖动排序 会议工作台' })
+
+    fireEvent.keyDown(grip, { key: 'ArrowDown', altKey: true })
+    expect(railNames(container)).toEqual(['通用', '声纹研究', '会议工作台'])
+
+    expect(await screen.findByText('项目顺序不完整')).toBeInTheDocument()
+    expect(railNames(container)).toEqual(['通用', '会议工作台', '声纹研究'])
   })
 })

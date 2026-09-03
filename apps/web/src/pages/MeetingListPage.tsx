@@ -69,11 +69,23 @@ export function MeetingListPage() {
 
   // 选中的是具体项目时，给一条去词库管理它的出口（「全部」「无项目」没有对应项目）
   const activeProject = projects.find((project) => project.id === projectFilter) ?? null
+  // 「无项目」只有真有无项目会议时才值得占一颗 pill
+  const hasUnassigned =
+    meetings !== null && meetings.some((meeting) => meeting.project_id === null)
 
   const pickFilter = (value: string) => {
     setProjectFilter(value)
     storeFilter(value)
   }
+
+  // 记住的筛选是「无项目」但这批会议全都挂了项目：回到「全部」，
+  // 否则会停在一个选中却看不见的筛选上，列表还空着
+  useEffect(() => {
+    if (meetings !== null && projectFilter === 'none' && !hasUnassigned) {
+      setProjectFilter('all')
+      storeFilter('all')
+    }
+  }, [meetings, projectFilter, hasUnassigned])
 
   const onDelete = (meetingId: string, title: string) => {
     setDeletingId(meetingId)
@@ -164,13 +176,7 @@ export function MeetingListPage() {
             >
               全部
             </button>
-            <button
-              type="button"
-              className={`tab${projectFilter === 'none' ? ' active' : ''}`}
-              onClick={() => pickFilter('none')}
-            >
-              无项目
-            </button>
+            {/* 项目按后端返回的顺序排（用户在词库页拖出来的），前端不再按名字重排 */}
             {projects.map((project) => (
               <button
                 key={project.id}
@@ -181,6 +187,15 @@ export function MeetingListPage() {
                 {project.name}
               </button>
             ))}
+            {hasUnassigned && (
+              <button
+                type="button"
+                className={`tab${projectFilter === 'none' ? ' active' : ''}`}
+                onClick={() => pickFilter('none')}
+              >
+                无项目
+              </button>
+            )}
           </div>
         )}
         <InlineProjectCreate

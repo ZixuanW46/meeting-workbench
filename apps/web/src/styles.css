@@ -779,6 +779,86 @@ a {
   gap: 2px;
 }
 
+/* 项目行：常驻拖拽把手 + 范围按钮；插入线画在行本身上 */
+.scope-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.scope-row.dragging {
+  opacity: 0.4;
+}
+
+.scope-row .scope-item {
+  width: auto;
+  flex: 1;
+  min-width: 0;
+}
+
+/* 插入线：2px 薰衣草，指出松手后落在哪 */
+.scope-row.drop-before::before,
+.scope-row.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 18px;
+  right: 0;
+  height: 2px;
+  background: var(--primary);
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+.scope-row.drop-before::before {
+  top: -2px;
+}
+
+.scope-row.drop-after::after {
+  bottom: -2px;
+}
+
+/* 把手与「通用」行的等宽占位：常驻可见，不靠 hover 浮现 */
+.scope-grip,
+.scope-grip-spacer {
+  width: 16px;
+  height: 22px;
+  flex: none;
+}
+
+.scope-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink-tertiary);
+  border-radius: 4px;
+  cursor: grab;
+  transition: color 0.12s var(--ease);
+}
+
+.scope-grip:hover {
+  color: var(--ink-subtle);
+}
+
+.scope-grip:active {
+  cursor: grabbing;
+}
+
+.scope-grip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+/* 排序失败的回滚提示：贴在左栏下方，字号跟着范围栏收紧 */
+.scope-error {
+  font-size: 12px;
+  padding: 6px 8px;
+  line-height: 1.5;
+}
+
 .scope-item {
   width: 100%;
   display: flex;

@@ -415,6 +415,8 @@ export interface Project {
   meeting_count: number
   /** 该项目下的项目热词数 */
   hotword_count: number
+  /** 用户拖出来的展示顺序，后端已按它排好序返回；前端一律直接用返回顺序 */
+  position: number
 }
 
 /** 项目热词：形状与全局词库完全一致，只是作用域限定在这个项目 */
@@ -435,6 +437,19 @@ export function renameProject(projectId: string, name: string): Promise<Project>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
   })
+}
+
+/**
+ * 重排项目：body 是全部项目 id 的新顺序，后端整体落库并回全量列表。
+ * 顺序是全局的，词库页左栏、筛选 pill、各处下拉都跟着它走。
+ */
+export async function reorderProjects(ids: string[]): Promise<Project[]> {
+  const data = await apiFetch<{ items: Project[] }>('/api/projects/order', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  })
+  return data.items
 }
 
 /** 删项目：该项目的会议变「无项目」，项目热词一并删除（已存的快照不回溯） */

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   createHotword,
   createProject,
@@ -11,16 +11,13 @@ import {
   listProjectHotwords,
   listProjects,
   renameProject,
+  reorderProjects,
   updateHotwordNote,
   updateProjectHotwordNote,
   type Hotword,
   type Project,
 } from '../api/client'
 import { Icon } from '../components/Icon'
-
-function byName(a: Project, b: Project): number {
-  return a.name.localeCompare(b.name, 'zh')
-}
 
 function byWord(a: Hotword, b: Hotword): number {
   return a.word.localeCompare(b.word, 'zh')
@@ -60,6 +57,15 @@ export function HotwordsPage({
   const [savingRename, setSavingRename] = useState(false)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null)
+  // 拖拽排序：draggingId 是被拖的行，dropHint 是插入线画在哪一行的哪一侧
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [dropHint, setDropHint] = useState<{ id: string; side: 'before' | 'after' } | null>(
+    null,
+  )
+  // 排序失败单独提示在左栏，不挤掉右栏的词条错误
+  const [reorderError, setReorderError] = useState<string | null>(null)
+  // 连按 ⌥↓ 会有多个请求在飞，只认最后一次的回包，免得旧回包把新顺序盖回去
+  const reorderSeq = useRef(0)
 
   // 通用范围随时可拉；项目范围要等项目列表回来，确认这个 id 真的存在
   const scopeReady = scopeId === null || projectsLoaded
@@ -71,7 +77,8 @@ export function HotwordsPage({
     listProjects()
       .then((items) => {
         if (!stale) {
-          setProjects([...items].sort(byName))
+          // 后端已按 position 排好序，前端一律直接用返回顺序
+          setProjects(items)
           // URL 指名的项目已不存在（或从没存在过）：回到通用，别停在空范围上
           setScopeId((current) =>
             current !== null && !items.some((item) => item.id === current) ? null : current,
@@ -225,7 +232,8 @@ export function HotwordsPage({
     setError(null)
     createProject(name)
       .then((created) => {
-        setProjects((current) => [...current, created].sort(byName))
+        // 后端把新项目追加到末尾，前端跟着放最后
+        setProjects((current) => [...current, created])
         setNewProjectName('')
         setScopeId(created.id)
       })
@@ -247,7 +255,7 @@ export function HotwordsPage({
     renameProject(projectId, name)
       .then((updated) => {
         setProjects((current) =>
-          current.map((project) => (project.id === projectId ? updated : project)).sort(byName),
+          current.map((project) => (project.id === projectId ? updated : project)),
         )
         setRenamingId(null)
       })
@@ -256,6 +264,35 @@ export function HotwordsPage({
       })
       .finally(() => {
         setSavingRename(false)
+      })
+  }
+
+  /**
+   * 把某个项目挪到 toIndex：先乐观改本地顺序，再把全量 id 顺序 PUT 给后端。
+   * 失败就回滚到动之前的顺序，并在左栏给一条错误提示。
+   */
+  const moveProject = (projectId: string, toIndex: number) => {
+    const from = projects.findIndex((project) => project.id === projectId)
+    if (from < 0 || toIndex < 0 || toIndex >= projects.length || toIndex === from) {
+      return
+    }
+    const next = [...projects]
+    const [moved] = next.splice(from, 1)
+    next.splice(toIndex, 0, moved)
+    const previous = projects
+    setProjects(next)
+    setReorderError(null)
+    reorderSeq.current += 1
+    const seq = reorderSeq.current
+    reorderProjects(next.map((project) => project.id))
+      .then((items) => {
+        if (seq === reorderSeq.current) {
+          setProjects(items)
+        }
+      })
+      .catch((e: unknown) => {
+        setProjects(previous)
+        setReorderError(formatApiError(e))
       })
   }
 
@@ -294,28 +331,101 @@ export function HotwordsPage({
       <div className="hotword-layout">
         <div className="scope-rail">
           <div className="scope-list">
-            <button
-              type="button"
-              className={`scope-item${scopeId === null ? ' active' : ''}`}
-              aria-current={scopeId === null}
-              onClick={() => setScopeId(null)}
-            >
-              <span className="scope-name">通用</span>
-            </button>
-
-            {projects.map((project) => (
+            {/* 「通用」固定第一，不参与排序；留一个和把手同宽的占位让名字对齐 */}
+            <div className="scope-row">
+              <span className="scope-grip-spacer" aria-hidden="true" />
               <button
-                key={project.id}
                 type="button"
-                className={`scope-item${scopeId === project.id ? ' active' : ''}`}
-                aria-current={scopeId === project.id}
-                onClick={() => setScopeId(project.id)}
+                className={`scope-item${scopeId === null ? ' active' : ''}`}
+                aria-current={scopeId === null}
+                onClick={() => setScopeId(null)}
               >
-                <span className="scope-name">{project.name}</span>
-                <span className="scope-count">{project.hotword_count}</span>
+                <span className="scope-name">通用</span>
               </button>
+            </div>
+
+            {projects.map((project, index) => (
+              <div
+                key={project.id}
+                className={[
+                  'scope-row',
+                  draggingId === project.id ? 'dragging' : '',
+                  dropHint !== null && dropHint.id === project.id
+                    ? `drop-${dropHint.side}`
+                    : '',
+                ]
+                  .filter((name) => name !== '')
+                  .join(' ')}
+                draggable
+                onDragStart={(event) => {
+                  setDraggingId(project.id)
+                  const transfer: DataTransfer | undefined = event.dataTransfer
+                  if (transfer !== undefined) {
+                    transfer.effectAllowed = 'move'
+                    transfer.setData('text/plain', project.id)
+                  }
+                }}
+                onDragOver={(event) => {
+                  if (draggingId === null || draggingId === project.id) {
+                    return
+                  }
+                  // 只有 preventDefault 过的元素才收得到 drop
+                  event.preventDefault()
+                  const from = projects.findIndex((item) => item.id === draggingId)
+                  setDropHint({ id: project.id, side: from < index ? 'after' : 'before' })
+                }}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  const moving = draggingId
+                  setDraggingId(null)
+                  setDropHint(null)
+                  if (moving !== null && moving !== project.id) {
+                    moveProject(moving, index)
+                  }
+                }}
+                onDragEnd={() => {
+                  setDraggingId(null)
+                  setDropHint(null)
+                }}
+              >
+                <button
+                  type="button"
+                  className="scope-grip"
+                  aria-label={`拖动排序 ${project.name}`}
+                  title="拖动排序，或按 ⌥↑ / ⌥↓ 上下移动"
+                  onKeyDown={(event) => {
+                    // 键盘可达的等价操作：⌥↑ / ⌥↓ 各移一位
+                    if (!event.altKey) {
+                      return
+                    }
+                    if (event.key === 'ArrowUp') {
+                      event.preventDefault()
+                      moveProject(project.id, index - 1)
+                    }
+                    if (event.key === 'ArrowDown') {
+                      event.preventDefault()
+                      moveProject(project.id, index + 1)
+                    }
+                  }}
+                >
+                  <Icon name="grip" size={12} />
+                </button>
+                <button
+                  type="button"
+                  className={`scope-item${scopeId === project.id ? ' active' : ''}`}
+                  aria-current={scopeId === project.id}
+                  onClick={() => setScopeId(project.id)}
+                >
+                  <span className="scope-name">{project.name}</span>
+                  <span className="scope-count">{project.hotword_count}</span>
+                </button>
+              </div>
             ))}
           </div>
+
+          {reorderError !== null && (
+            <div className="notice notice-error scope-error">{reorderError}</div>
+          )}
 
           <div className="scope-new">
             <input

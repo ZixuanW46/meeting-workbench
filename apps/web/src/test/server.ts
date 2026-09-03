@@ -12,9 +12,18 @@ export const server = setupServer(
   ),
   // 项目默认为空：不关心项目的页面测试不必自己注册 handler
   http.get('/api/projects', () => HttpResponse.json({ items: [] })),
+  // 重排默认按请求的 ids 把 fixture 重新排好并回全量列表，position 重新编号
+  http.put('/api/projects/order', async ({ request }) => {
+    const body = (await request.json()) as { ids: string[] }
+    const items = body.ids
+      .map((id) => PROJECTS.find((project) => project.id === id))
+      .filter((project): project is (typeof PROJECTS)[number] => project !== undefined)
+      .map((project, index) => ({ ...project, position: index }))
+    return HttpResponse.json({ items })
+  }),
 )
 
-/** 项目 fixture：词库页 / 会议列表 / 新建会议 / 工作台测试共用同一批项目 */
+/** 项目 fixture：词库页 / 会议列表 / 新建会议 / 工作台测试共用同一批项目（position 即返回顺序） */
 export const PROJECTS = [
   {
     id: 'p1',
@@ -22,6 +31,7 @@ export const PROJECTS = [
     created_at: '2026-08-20T08:00:00Z',
     meeting_count: 3,
     hotword_count: 2,
+    position: 0,
   },
   {
     id: 'p2',
@@ -29,6 +39,7 @@ export const PROJECTS = [
     created_at: '2026-08-22T08:00:00Z',
     meeting_count: 1,
     hotword_count: 0,
+    position: 1,
   },
 ]
 

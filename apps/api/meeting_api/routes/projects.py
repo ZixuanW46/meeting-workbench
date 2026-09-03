@@ -18,6 +18,7 @@ PROJECT_NOT_FOUND = "项目不存在"
 PROJECT_DUPLICATE = "项目已存在"
 HOTWORD_NOT_FOUND = "词语不存在"
 HOTWORD_DUPLICATE = "词语已存在"
+PROJECT_ORDER_INVALID = "ids 必须包含全部项目且不重复"
 
 
 def _strip_or_reject(value: str, message: str) -> str:
@@ -55,10 +56,17 @@ class ProjectResponse(BaseModel):
     created_at: datetime
     meeting_count: int
     hotword_count: int
+    position: int
 
 
 class ProjectListResponse(BaseModel):
     items: list[ProjectResponse]
+
+
+class ProjectOrderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ids: list[str]
 
 
 class ProjectHotwordCreate(BaseModel):
@@ -136,6 +144,7 @@ def _to_response(project: Project, counts: tuple[int, int] = (0, 0)) -> ProjectR
         created_at=project.created_at,
         meeting_count=meeting_count,
         hotword_count=hotword_count,
+        position=project.position,
     )
 
 
@@ -148,25 +157,33 @@ def _require_project(session: Session, project_id: str) -> Project:
     return project
 
 
+def _list_projects(session: Session) -> ProjectListResponse:
+    """列表统一按 (position, name, id) 排；position 相同时退回名字保证稳定。"""
+    projects = session.scalars(
+        select(Project).order_by(Project.position, Project.name, Project.id)
+    ).all()
+    counts = _counts(session, [project.id for project in projects])
+    return ProjectListResponse(
+        items=[
+            _to_response(project, counts.get(project.id, (0, 0)))
+            for project in projects
+        ]
+    )
+
+
 @router.get("", response_model=ProjectListResponse)
 def list_projects(request: Request) -> ProjectListResponse:
     with request.app.state.session_factory() as session:
-        projects = session.scalars(
-            select(Project).order_by(Project.name, Project.id)
-        ).all()
-        counts = _counts(session, [project.id for project in projects])
-        return ProjectListResponse(
-            items=[
-                _to_response(project, counts.get(project.id, (0, 0)))
-                for project in projects
-            ]
-        )
+        return _list_projects(session)
 
 
 @router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 def create_project(payload: ProjectCreate, request: Request) -> ProjectResponse:
     with request.app.state.session_factory() as session:
-        project = Project(name=payload.name)
+        # 追加到末尾：取当前最大 position + 1，没有项目时从 0 开始。
+        max_position = session.scalar(select(func.max(Project.position)))
+        position = 0 if max_position is None else max_position + 1
+        project = Project(name=payload.name, position=position)
         session.add(project)
         try:
             session.commit()
@@ -177,6 +194,28 @@ def create_project(payload: ProjectCreate, request: Request) -> ProjectResponse:
             ) from exc
         session.refresh(project)
         return _to_response(project)
+
+
+@router.put("/order", response_model=ProjectListResponse)
+def reorder_projects(
+    payload: ProjectOrderRequest, request: Request
+) -> ProjectListResponse:
+    """按给定顺序重排项目。ids 必须恰好是全部现有项目 id 的一个排列。"""
+    with request.app.state.session_factory() as session:
+        existing = set(session.scalars(select(Project.id)).all())
+        if len(set(payload.ids)) != len(payload.ids) or set(payload.ids) != existing:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=PROJECT_ORDER_INVALID,
+            )
+        for position, project_id in enumerate(payload.ids):
+            session.execute(
+                update(Project)
+                .where(Project.id == project_id)
+                .values(position=position)
+            )
+        session.commit()
+        return _list_projects(session)
 
 
 @router.patch("/{project_id}", response_model=ProjectResponse)

@@ -160,6 +160,7 @@ describe('新建会议表单', () => {
             created_at: '2026-09-03T00:00:00Z',
             meeting_count: 0,
             hotword_count: 0,
+            position: 2,
           },
           { status: 201 },
         )

@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { makeDoctorReport } from '../test/doctor'
-import { server, useProjects } from '../test/server'
+import { PROJECTS, server, useProjects } from '../test/server'
 import { MeetingListPage } from './MeetingListPage'
 
 const MEETINGS = [
@@ -231,6 +231,7 @@ describe('会议列表页', () => {
             created_at: '2026-09-03T00:00:00Z',
             meeting_count: 0,
             hotword_count: 0,
+            position: 2,
           },
           { status: 201 },
         )
@@ -316,5 +317,56 @@ describe('会议列表页', () => {
     await screen.findByLabelText('按项目筛选')
     expect(screen.getByRole('button', { name: '声纹研究' })).toHaveClass('active')
     expect(await screen.findByText('这个项目下还没有会议')).toBeInTheDocument()
+  })
+
+  it('筛选 pill 顺序：全部 → 各项目（后端顺序）→ 无项目垫底', async () => {
+    // 故意给一个与名字序相反的顺序，证明前端直接用 API 顺序、不再自己重排
+    useProjects([
+      { ...PROJECTS[1], position: 0 },
+      { ...PROJECTS[0], position: 1 },
+    ])
+    server.use(http.get('/api/meetings', () => HttpResponse.json({ items: MEETINGS })))
+
+    render(<MeetingListPage />)
+    const bar = await screen.findByLabelText('按项目筛选')
+    await waitFor(() => expect(within(bar).getAllByRole('button')).toHaveLength(4))
+
+    expect(within(bar).getAllByRole('button').map((pill) => pill.textContent)).toEqual([
+      '全部',
+      '声纹研究',
+      '会议工作台',
+      '无项目',
+    ])
+  })
+
+  it('会议全都挂了项目时不出「无项目」pill', async () => {
+    useProjects()
+    server.use(
+      http.get('/api/meetings', () => HttpResponse.json({ items: [MEETINGS[0]] })),
+    )
+
+    render(<MeetingListPage />)
+    await screen.findByLabelText('按项目筛选')
+
+    expect(screen.queryByRole('button', { name: '无项目' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+  })
+
+  it('记住的筛选是「无项目」但此刻没有无项目会议：回退到「全部」', async () => {
+    localStorage.setItem('meeting-workbench.project-filter', 'none')
+    useProjects()
+    server.use(
+      http.get('/api/meetings', () => HttpResponse.json({ items: [MEETINGS[0]] })),
+    )
+
+    render(<MeetingListPage />)
+    expect(await screen.findByText('产品周会')).toBeInTheDocument()
+
+    // 不能停在一个选中却看不见的筛选上
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '全部' })).toHaveClass('active'),
+    )
+    expect(screen.queryByRole('button', { name: '无项目' })).not.toBeInTheDocument()
+    expect(localStorage.getItem('meeting-workbench.project-filter')).toBe('all')
   })
 })

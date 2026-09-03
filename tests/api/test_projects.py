@@ -77,15 +77,17 @@ def test_project_crud_lists_sorted_with_counts(client):
     listed = client.get("/api/projects")
     assert listed.status_code == 200
     items = listed.json()["items"]
-    assert [item["name"] for item in items] == ["Alpha 项目", "Beta 项目"]
-    assert items[1]["meeting_count"] == 1
-    assert items[1]["hotword_count"] == 1
+    # 顺序按 position（创建先后），不是名字：先建的 Beta 仍排在前面。
+    assert [item["name"] for item in items] == ["Beta 项目", "Alpha 项目"]
+    assert items[0]["meeting_count"] == 1
+    assert items[0]["hotword_count"] == 1
     assert set(items[0]) == {
         "id",
         "name",
         "created_at",
         "meeting_count",
         "hotword_count",
+        "position",
     }
 
 
@@ -131,6 +133,101 @@ def test_delete_project_clears_meeting_project_id_and_keeps_meeting(client):
 
     with client.app.state.session_factory() as session:
         assert session.query(ProjectHotword).count() == 0
+
+
+# --- 项目排序 ----------------------------------------------------------------
+
+
+def test_new_project_is_appended_to_the_end_of_the_order(client):
+    first = client.post("/api/projects", json={"name": "先建"}).json()
+    second = client.post("/api/projects", json={"name": "Ahead 后建"}).json()
+
+    assert first["position"] == 0
+    assert second["position"] == 1
+
+    items = client.get("/api/projects").json()["items"]
+    # 名字排在前面的「Ahead 后建」也要排到后面：顺序看 position，不看名字。
+    assert [item["id"] for item in items] == [first["id"], second["id"]]
+
+
+def test_reorder_projects_persists_and_returns_new_order(client):
+    alpha = _create_project(client, "Alpha")
+    beta = _create_project(client, "Beta")
+    gamma = _create_project(client, "Gamma")
+
+    reordered = client.put(
+        "/api/projects/order", json={"ids": [gamma, alpha, beta]}
+    )
+    assert reordered.status_code == 200, reordered.text
+    items = reordered.json()["items"]
+    assert [item["id"] for item in items] == [gamma, alpha, beta]
+    assert [item["position"] for item in items] == [0, 1, 2]
+
+    listed = client.get("/api/projects").json()["items"]
+    assert [item["id"] for item in listed] == [gamma, alpha, beta]
+
+
+def test_reorder_rejects_incomplete_unknown_or_duplicated_ids(client):
+    alpha = _create_project(client, "Alpha")
+    beta = _create_project(client, "Beta")
+
+    missing = client.put("/api/projects/order", json={"ids": [alpha]})
+    assert missing.status_code == 422
+    assert missing.json()["detail"] == "ids 必须包含全部项目且不重复"
+
+    unknown = client.put(
+        "/api/projects/order", json={"ids": [alpha, beta, "not-a-project"]}
+    )
+    assert unknown.status_code == 422
+    assert unknown.json()["detail"] == "ids 必须包含全部项目且不重复"
+
+    duplicated = client.put("/api/projects/order", json={"ids": [alpha, alpha]})
+    assert duplicated.status_code == 422
+    assert duplicated.json()["detail"] == "ids 必须包含全部项目且不重复"
+
+    # 校验失败不能改动既有顺序。
+    listed = client.get("/api/projects").json()["items"]
+    assert [item["id"] for item in listed] == [alpha, beta]
+
+
+def test_reorder_with_empty_ids_and_no_projects_is_ok(client):
+    response = client.put("/api/projects/order", json={"ids": []})
+    assert response.status_code == 200
+    assert response.json() == {"items": []}
+
+
+def test_reorder_route_is_not_shadowed_by_project_id_route(client):
+    """/order 必须先于 /{project_id} 命中，否则会被当成项目 id 走 404。"""
+    project_id = _create_project(client, "唯一项目")
+
+    response = client.put("/api/projects/order", json={"ids": [project_id]})
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["items"]] == [project_id]
+
+
+def test_delete_project_keeps_remaining_order(client):
+    alpha = _create_project(client, "Alpha")
+    beta = _create_project(client, "Beta")
+    gamma = _create_project(client, "Gamma")
+    assert client.put(
+        "/api/projects/order", json={"ids": [gamma, beta, alpha]}
+    ).status_code == 200
+
+    assert client.delete(f"/api/projects/{beta}").status_code == 204
+
+    # position 留空洞没关系，剩下的相对顺序不变。
+    listed = client.get("/api/projects").json()["items"]
+    assert [item["id"] for item in listed] == [gamma, alpha]
+
+    # 删除后新建的项目仍然追加到末尾（取最大 position + 1）。
+    delta = client.post("/api/projects", json={"name": "Delta"}).json()
+    assert delta["position"] == 3
+    assert [item["id"] for item in client.get("/api/projects").json()["items"]] == [
+        gamma,
+        alpha,
+        delta["id"],
+    ]
 
 
 # --- 项目热词 ----------------------------------------------------------------

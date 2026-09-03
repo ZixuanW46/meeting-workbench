@@ -37,6 +37,11 @@ class Project(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
     name: Mapped[str] = mapped_column(String(200), unique=True)
     created_at: Mapped[datetime] = mapped_column(default=_now)
+    # 用户自定义顺序，越小越靠前；新项目追加到末尾。删项目留下的空洞不压缩，
+    # 因为排序只看相对大小。
+    position: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
 
 
 class ProjectHotword(Base):

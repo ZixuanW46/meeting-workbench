@@ -21,6 +21,7 @@ export const ICON_NAMES = [
   'edit',
   'search',
   'more',
+  'grip',
 ] as const
 
 export type IconName = (typeof ICON_NAMES)[number]
@@ -53,6 +54,10 @@ const PATHS: Record<IconName, ReactNode> = {
   ),
   check: <path d="m3.5 8.5 3 3 6-7" />,
   more: <path d="M3.25 8h.01M8 8h.01M12.75 8h.01" />,
+  // 拖拽把手：两列三行共 6 点，圆头描边正好成点
+  grip: (
+    <path d="M6.25 4h.01M9.75 4h.01M6.25 8h.01M9.75 8h.01M6.25 12h.01M9.75 12h.01" />
+  ),
   search: (
     <>
       <circle cx="7" cy="7" r="4.5" />

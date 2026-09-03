@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import App from './App'
-import { server } from './test/server'
+import { server, useProjects } from './test/server'
 
 describe('App 壳', () => {
   it('默认路由渲染会议列表', async () => {
@@ -29,6 +29,24 @@ describe('App 壳', () => {
     render(<App />)
 
     expect(await screen.findByText('声纹库是空的')).toBeInTheDocument()
+    window.location.hash = ''
+  })
+
+  it('#/hotwords?project=<id> 直达词库并选中该项目', async () => {
+    window.location.hash = '#/hotwords?project=p2'
+    useProjects()
+    server.use(
+      http.get('/api/projects/p2/hotwords', () =>
+        HttpResponse.json({ items: [{ id: 'ph2', word: '说话人簇', note: null }] }),
+      ),
+    )
+
+    render(<App />)
+
+    expect(await screen.findByText('说话人簇')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '声纹研究' })).toBeInTheDocument()
+    // 带查询串也算词库路由：侧栏照旧高亮
+    expect(screen.getByRole('link', { name: '词库' })).toHaveClass('active')
     window.location.hash = ''
   })
 

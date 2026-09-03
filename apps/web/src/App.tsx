@@ -9,7 +9,7 @@ import { VoiceprintsPage } from './pages/VoiceprintsPage'
 import { WorkbenchPage } from './pages/WorkbenchPage'
 
 // 极简 hash 路由：#/ 列表、#/new 新建、#/meetings/{id} 工作台、
-// #/voiceprints 声纹库、#/hotwords 词库
+// #/voiceprints 声纹库、#/hotwords 词库（可带 ?project=<id> 直达某项目）
 function useHashRoute(): string {
   const [hash, setHash] = useState(window.location.hash)
   useEffect(() => {
@@ -22,7 +22,11 @@ function useHashRoute(): string {
 
 export default function App() {
   const route = useHashRoute()
-  const meetingMatch = /^\/meetings\/([^/]+)$/.exec(route)
+  // 路由可以带查询串（如 #/hotwords?project=p1）：路径与参数分开解析，路径匹配照旧
+  const queryAt = route.indexOf('?')
+  const path = queryAt === -1 ? route : route.slice(0, queryAt)
+  const params = new URLSearchParams(queryAt === -1 ? '' : route.slice(queryAt + 1))
+  const meetingMatch = /^\/meetings\/([^/]+)$/.exec(path)
   const [paletteOpen, setPaletteOpen] = useState(false)
 
   // Linear 惯例：⌘K / Ctrl+K 呼出命令面板
@@ -37,13 +41,15 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
+  const hotwordsProject = params.get('project')
   let page = <MeetingListPage />
-  if (route === '/new') {
+  if (path === '/new') {
     page = <NewMeetingPage />
-  } else if (route === '/voiceprints') {
+  } else if (path === '/voiceprints') {
     page = <VoiceprintsPage />
-  } else if (route === '/hotwords') {
-    page = <HotwordsPage />
+  } else if (path === '/hotwords') {
+    // key 让 ?project= 换值时重新挂载，初始范围跟着 URL 走
+    page = <HotwordsPage key={hotwordsProject ?? '-'} projectId={hotwordsProject} />
   } else if (meetingMatch !== null) {
     page = <WorkbenchPage key={meetingMatch[1]} meetingId={meetingMatch[1]} />
   }
@@ -66,9 +72,9 @@ export default function App() {
             href="#/"
             className={
               meetingMatch === null &&
-              route !== '/new' &&
-              route !== '/voiceprints' &&
-              route !== '/hotwords'
+              path !== '/new' &&
+              path !== '/voiceprints' &&
+              path !== '/hotwords'
                 ? 'active'
                 : ''
             }
@@ -76,11 +82,11 @@ export default function App() {
             <Icon name="meetings" />
             会议
           </a>
-          <a href="#/voiceprints" className={route === '/voiceprints' ? 'active' : ''}>
+          <a href="#/voiceprints" className={path === '/voiceprints' ? 'active' : ''}>
             <Icon name="voiceprints" />
             声纹库
           </a>
-          <a href="#/hotwords" className={route === '/hotwords' ? 'active' : ''}>
+          <a href="#/hotwords" className={path === '/hotwords' ? 'active' : ''}>
             <Icon name="hotwords" />
             词库
           </a>

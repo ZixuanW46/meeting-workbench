@@ -27,13 +27,21 @@ function byWord(a: Hotword, b: Hotword): number {
 }
 
 /**
- * 词库：左栏选范围（通用 / 各项目），右栏是该范围的词条。
+ * 词库：左栏选范围（通用 / 各项目），右栏是该范围的词条与该项目的重命名 / 删除。
  * 通用词随每场会议快照进入转写；项目词只跟着该项目的会议走；两者与本场热词叠加。
+ *
+ * projectId 来自 #/hotwords?project=<id>：打开时直接选中它，项目不存在就回到通用。
  */
-export function HotwordsPage() {
+export function HotwordsPage({
+  projectId: initialProjectId = null,
+}: {
+  projectId?: string | null
+}) {
   const [projects, setProjects] = useState<Project[]>([])
   // 当前范围：null = 通用词库，其余是项目 id
-  const [scopeId, setScopeId] = useState<string | null>(null)
+  const [scopeId, setScopeId] = useState<string | null>(initialProjectId)
+  // 项目列表回来之前不敢信 URL 带来的 id，先不拉它的词
+  const [projectsLoaded, setProjectsLoaded] = useState(false)
   const [hotwords, setHotwords] = useState<Hotword[] | null>(null)
   const [input, setInput] = useState('')
   const [noteInput, setNoteInput] = useState('')
@@ -44,7 +52,7 @@ export function HotwordsPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingNote, setEditingNote] = useState('')
   const [savingNote, setSavingNote] = useState(false)
-  // 左栏项目维护：新建 / 重命名 / 删除（删除走二次确认）
+  // 项目维护：左栏新建，右栏头部重命名 / 删除（删除走二次确认）
   const [newProjectName, setNewProjectName] = useState('')
   const [creatingProject, setCreatingProject] = useState(false)
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -53,6 +61,8 @@ export function HotwordsPage() {
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null)
 
+  // 通用范围随时可拉；项目范围要等项目列表回来，确认这个 id 真的存在
+  const scopeReady = scopeId === null || projectsLoaded
   const scope = projects.find((project) => project.id === scopeId) ?? null
   const scopeName = scopeId === null ? '通用' : (scope?.name ?? '项目')
 
@@ -62,11 +72,17 @@ export function HotwordsPage() {
       .then((items) => {
         if (!stale) {
           setProjects([...items].sort(byName))
+          // URL 指名的项目已不存在（或从没存在过）：回到通用，别停在空范围上
+          setScopeId((current) =>
+            current !== null && !items.some((item) => item.id === current) ? null : current,
+          )
+          setProjectsLoaded(true)
         }
       })
       .catch((e: unknown) => {
         if (!stale) {
           setError(formatApiError(e))
+          setProjectsLoaded(true)
         }
       })
     return () => {
@@ -79,6 +95,11 @@ export function HotwordsPage() {
     let stale = false
     setHotwords(null)
     setEditingId(null)
+    setRenamingId(null)
+    setConfirmingDeleteId(null)
+    if (!scopeReady) {
+      return
+    }
     const loading = scopeId === null ? listHotwords() : listProjectHotwords(scopeId)
     loading
       .then((items) => {
@@ -94,7 +115,7 @@ export function HotwordsPage() {
     return () => {
       stale = true
     }
-  }, [scopeId])
+  }, [scopeId, scopeReady])
 
   // 左栏计数跟着右栏增删走，省一次列表请求
   const bumpCount = (projectId: string | null, delta: number) => {
@@ -273,107 +294,27 @@ export function HotwordsPage() {
       <div className="hotword-layout">
         <div className="scope-rail">
           <div className="scope-list">
-            <div className="scope-row">
-              <button
-                type="button"
-                className={`scope-item${scopeId === null ? ' active' : ''}`}
-                aria-current={scopeId === null}
-                onClick={() => setScopeId(null)}
-              >
-                <span className="scope-name">通用</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              className={`scope-item${scopeId === null ? ' active' : ''}`}
+              aria-current={scopeId === null}
+              onClick={() => setScopeId(null)}
+            >
+              <span className="scope-name">通用</span>
+            </button>
 
-            {projects.map((project) => {
-              if (confirmingDeleteId === project.id) {
-                return (
-                  <div key={project.id} className="scope-confirm">
-                    <div className="scope-confirm-text">
-                      删除「{project.name}」？该项目的会议会变成无项目，项目热词一并删除。
-                    </div>
-                    <div className="scope-confirm-actions">
-                      <button
-                        type="button"
-                        className="btn btn-danger"
-                        disabled={deletingProjectId === project.id}
-                        onClick={() => onDeleteProject(project.id)}
-                      >
-                        确认删除
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        disabled={deletingProjectId === project.id}
-                        onClick={() => setConfirmingDeleteId(null)}
-                      >
-                        取消
-                      </button>
-                    </div>
-                  </div>
-                )
-              }
-              if (renamingId === project.id) {
-                return (
-                  <div key={project.id} className="scope-rename">
-                    <input
-                      className="input"
-                      aria-label={`项目新名字 ${project.name}`}
-                      value={renameDraft}
-                      disabled={savingRename}
-                      autoFocus
-                      onChange={(event) => setRenameDraft(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault()
-                          onRenameProject(project.id)
-                        }
-                        if (event.key === 'Escape') {
-                          setRenamingId(null)
-                        }
-                      }}
-                    />
-                  </div>
-                )
-              }
-              return (
-                <div key={project.id} className="scope-row">
-                  <button
-                    type="button"
-                    className={`scope-item${scopeId === project.id ? ' active' : ''}`}
-                    aria-current={scopeId === project.id}
-                    onClick={() => setScopeId(project.id)}
-                  >
-                    <span className="scope-name">{project.name}</span>
-                    <span className="scope-count">{project.hotword_count}</span>
-                  </button>
-                  <span className="scope-actions">
-                    <button
-                      type="button"
-                      className="btn btn-ghost scope-action-btn"
-                      aria-label={`重命名项目 ${project.name}`}
-                      onClick={() => {
-                        setRenameDraft(project.name)
-                        setConfirmingDeleteId(null)
-                        setRenamingId(project.id)
-                      }}
-                    >
-                      <Icon name="edit" size={11} />
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost scope-action-btn"
-                      aria-label={`删除项目 ${project.name}`}
-                      onClick={() => {
-                        setRenamingId(null)
-                        setConfirmingDeleteId(project.id)
-                      }}
-                    >
-                      <Icon name="trash" size={11} />
-                    </button>
-                  </span>
-                </div>
-              )
-            })}
+            {projects.map((project) => (
+              <button
+                key={project.id}
+                type="button"
+                className={`scope-item${scopeId === project.id ? ' active' : ''}`}
+                aria-current={scopeId === project.id}
+                onClick={() => setScopeId(project.id)}
+              >
+                <span className="scope-name">{project.name}</span>
+                <span className="scope-count">{project.hotword_count}</span>
+              </button>
+            ))}
           </div>
 
           <div className="scope-new">
@@ -404,7 +345,82 @@ export function HotwordsPage() {
 
         <div className="scope-panel">
           <div className="scope-panel-head">
-            <h2 className="section-title">{scopeName}</h2>
+            {/* 范围头部：项目名与它的重命名 / 删除常驻同一行，不再靠左栏悬停才浮现 */}
+            <div className="scope-head">
+              {scope !== null && renamingId === scope.id ? (
+                <input
+                  className="input scope-head-input"
+                  aria-label={`项目新名字 ${scope.name}`}
+                  value={renameDraft}
+                  disabled={savingRename}
+                  autoFocus
+                  onChange={(event) => setRenameDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      onRenameProject(scope.id)
+                    }
+                    if (event.key === 'Escape') {
+                      setRenamingId(null)
+                    }
+                  }}
+                />
+              ) : (
+                <h2 className="section-title">{scopeName}</h2>
+              )}
+              {scope !== null && renamingId !== scope.id && (
+                <div className="scope-head-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      setRenameDraft(scope.name)
+                      setConfirmingDeleteId(null)
+                      setRenamingId(scope.id)
+                    }}
+                  >
+                    重命名
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      setRenamingId(null)
+                      setConfirmingDeleteId(scope.id)
+                    }}
+                  >
+                    删除
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {scope !== null && confirmingDeleteId === scope.id && (
+              <div className="scope-confirm scope-head-confirm">
+                <div className="scope-confirm-text">
+                  删除「{scope.name}」？该项目的会议会变成无项目，项目热词一并删除。
+                </div>
+                <div className="scope-confirm-actions">
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    disabled={deletingProjectId === scope.id}
+                    onClick={() => onDeleteProject(scope.id)}
+                  >
+                    确认删除
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={deletingProjectId === scope.id}
+                    onClick={() => setConfirmingDeleteId(null)}
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
+
             <p className="section-desc">
               通用词库对所有会议生效；项目热词只对该项目的会议生效；两者加上本场热词，在转写时叠加使用
             </p>

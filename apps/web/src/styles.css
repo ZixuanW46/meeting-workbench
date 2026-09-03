@@ -698,6 +698,18 @@ a {
   color: var(--ink);
 }
 
+/* 「管理项目」比「+ 新建项目」再轻一档：纯链接，不描边、不抢视线 */
+.filter-manage {
+  font-size: 13px;
+  color: var(--ink-tertiary);
+  padding: 4px 6px;
+  transition: color 0.12s var(--ease);
+}
+
+.filter-manage:hover {
+  color: var(--ink);
+}
+
 /* 就地新建（InlineProjectCreate）：输入 + 创建/取消一排，错误另起一行 */
 .inline-create {
   display: inline-flex;
@@ -767,15 +779,8 @@ a {
   gap: 2px;
 }
 
-.scope-row {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
 .scope-item {
-  flex: 1;
-  min-width: 0;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -815,28 +820,6 @@ a {
   color: var(--ink-tertiary);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
-}
-
-/* 重命名 / 删除入口安静存在：悬停该行才浮现 */
-.scope-actions {
-  display: inline-flex;
-  opacity: 0;
-  flex-shrink: 0;
-}
-
-.scope-row:hover .scope-actions,
-.scope-actions:focus-within {
-  opacity: 1;
-}
-
-.scope-action-btn {
-  padding: 3px 5px;
-}
-
-.scope-rename .input {
-  width: 100%;
-  font-size: 13px;
-  padding: 5px 8px;
 }
 
 .scope-confirm {
@@ -892,7 +875,43 @@ a {
   margin-bottom: 0;
 }
 
-/* 窄窗口：范围栏落回顶部，整页回单栏；行内操作直接常驻（没有 hover） */
+/* 范围头部：项目名 + 常驻的重命名 / 删除，是项目维护的唯一入口 */
+.scope-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 26px;
+  margin-bottom: 4px;
+}
+
+.scope-head .section-title {
+  margin: 0;
+}
+
+.scope-head-actions {
+  display: inline-flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.scope-head-actions .btn {
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+.scope-head-input {
+  max-width: 260px;
+  font-size: 14px;
+  padding: 3px 8px;
+}
+
+.scope-head-confirm {
+  max-width: 420px;
+  margin-bottom: 8px;
+}
+
+/* 窄窗口：范围栏落回顶部，整页回单栏 */
 @media (max-width: 860px) {
   .hotword-layout {
     grid-template-columns: 1fr;
@@ -901,10 +920,6 @@ a {
 
   .scope-rail {
     position: static;
-  }
-
-  .scope-actions {
-    opacity: 1;
   }
 }
 

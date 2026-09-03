@@ -283,6 +283,26 @@ describe('会议列表页', () => {
     expect(listCalls).toBe(1)
   })
 
+  it('筛选选中具体项目时出现「管理项目」直达链接，全部 / 无项目不出', async () => {
+    useProjects()
+    server.use(http.get('/api/meetings', () => HttpResponse.json({ items: MEETINGS })))
+
+    render(<MeetingListPage />)
+    await screen.findByLabelText('按项目筛选')
+
+    // 默认「全部」：没有具体项目可管
+    expect(screen.queryByRole('link', { name: '管理项目' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '会议工作台' }))
+    expect(screen.getByRole('link', { name: '管理项目' })).toHaveAttribute(
+      'href',
+      '#/hotwords?project=p1',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '无项目' }))
+    expect(screen.queryByRole('link', { name: '管理项目' })).not.toBeInTheDocument()
+  })
+
   it('筛选选中值记进 localStorage，下次进来还在', async () => {
     useProjects()
     server.use(http.get('/api/meetings', () => HttpResponse.json({ items: MEETINGS })))

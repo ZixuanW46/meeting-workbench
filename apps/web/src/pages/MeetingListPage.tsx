@@ -67,6 +67,9 @@ export function MeetingListPage() {
           return meeting.project_id === projectFilter
         })
 
+  // 选中的是具体项目时，给一条去词库管理它的出口（「全部」「无项目」没有对应项目）
+  const activeProject = projects.find((project) => project.id === projectFilter) ?? null
+
   const pickFilter = (value: string) => {
     setProjectFilter(value)
     storeFilter(value)
@@ -187,6 +190,14 @@ export function MeetingListPage() {
             pickFilter(created.id)
           }}
         />
+        {activeProject !== null && (
+          <a
+            className="filter-manage"
+            href={`#/hotwords?project=${encodeURIComponent(activeProject.id)}`}
+          >
+            管理项目
+          </a>
+        )}
       </div>
 
       {error !== null && <div className="notice notice-error">{error}</div>}

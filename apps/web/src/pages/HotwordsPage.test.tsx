@@ -222,11 +222,33 @@ describe('词库页', () => {
     expect(posted).toEqual({ name: '内网基建' })
   })
 
-  it('重命名项目：就地改名，PATCH 生效', async () => {
+  it('选中项目后右栏头部常驻「重命名」「删除」；通用范围没有这两个按钮', async () => {
+    useProjects()
+    server.use(
+      http.get('/api/hotwords', () => HttpResponse.json({ items: ITEMS })),
+      http.get('/api/projects/p1/hotwords', () => HttpResponse.json({ items: [] })),
+    )
+
+    render(<HotwordsPage />)
+    await screen.findByText('Qwen3')
+
+    expect(screen.getByRole('heading', { name: '通用' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重命名' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '删除' })).not.toBeInTheDocument()
+
+    fireEvent.click(await screen.findByRole('button', { name: /^会议工作台/ }))
+
+    expect(await screen.findByRole('heading', { name: '会议工作台' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重命名' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '删除' })).toBeInTheDocument()
+  })
+
+  it('头部「重命名」就地改名：回车保存，标题与左栏同时更新', async () => {
     let patched: { id: string; name: string } | null = null
     useProjects()
     server.use(
       http.get('/api/hotwords', () => HttpResponse.json({ items: [] })),
+      http.get('/api/projects/p2/hotwords', () => HttpResponse.json({ items: [] })),
       http.patch('/api/projects/:id', async ({ params, request }) => {
         const body = (await request.json()) as { name: string }
         patched = { id: String(params.id), name: body.name }
@@ -235,21 +257,51 @@ describe('词库页', () => {
     )
 
     render(<HotwordsPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '重命名项目 声纹研究' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^声纹研究/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '重命名' }))
 
     const input = screen.getByLabelText('项目新名字 声纹研究')
     fireEvent.change(input, { target: { value: '声纹与说话人' } })
     fireEvent.keyDown(input, { key: 'Enter' })
 
-    expect(await screen.findByRole('button', { name: /^声纹与说话人/ })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { name: '声纹与说话人' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^声纹与说话人/ })).toBeInTheDocument()
     expect(patched).toEqual({ id: 'p2', name: '声纹与说话人' })
   })
 
-  it('删除项目要二次确认，文案说明会议变无项目、项目热词一并删', async () => {
+  it('头部重命名按 Esc 取消：名字不变，也不发 PATCH', async () => {
+    let patchCalls = 0
+    useProjects()
+    server.use(
+      http.get('/api/hotwords', () => HttpResponse.json({ items: [] })),
+      http.get('/api/projects/p2/hotwords', () => HttpResponse.json({ items: [] })),
+      http.patch('/api/projects/:id', () => {
+        patchCalls += 1
+        return HttpResponse.json(PROJECTS[1])
+      }),
+    )
+
+    render(<HotwordsPage />)
+    fireEvent.click(await screen.findByRole('button', { name: /^声纹研究/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '重命名' }))
+
+    const input = screen.getByLabelText('项目新名字 声纹研究')
+    fireEvent.change(input, { target: { value: '改一半' } })
+    fireEvent.keyDown(input, { key: 'Escape' })
+
+    expect(screen.getByRole('heading', { name: '声纹研究' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重命名' })).toBeInTheDocument()
+    expect(patchCalls).toBe(0)
+  })
+
+  it('头部「删除」就地二次确认，文案说明会议变无项目、项目热词一并删', async () => {
     let deleted: string | null = null
     useProjects()
     server.use(
       http.get('/api/hotwords', () => HttpResponse.json({ items: [] })),
+      http.get('/api/projects/p2/hotwords', () => HttpResponse.json({ items: [] })),
       http.delete('/api/projects/:id', ({ params }) => {
         deleted = String(params.id)
         return new HttpResponse(null, { status: 204 })
@@ -257,13 +309,21 @@ describe('词库页', () => {
     )
 
     render(<HotwordsPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '删除项目 声纹研究' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^声纹研究/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '删除' }))
 
     expect(
       screen.getByText(/该项目的会议会变成无项目，项目热词一并删除/),
     ).toBeInTheDocument()
     expect(deleted).toBeNull()
 
+    // 先验证「取消」收起确认，再重新走一遍到「确认删除」
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(
+      screen.queryByText(/该项目的会议会变成无项目/),
+    ).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
 
     await waitFor(() => expect(deleted).toBe('p2'))
@@ -284,10 +344,46 @@ describe('词库页', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^会议工作台/ }))
     await screen.findByText('亚秒轮次')
 
-    fireEvent.click(screen.getByRole('button', { name: '删除项目 会议工作台' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
 
     expect(await screen.findByText('Qwen3')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '通用' })).toBeInTheDocument()
+  })
+
+  it('projectId 直达：打开就选中该项目，右栏拉的是它的词', async () => {
+    useProjects()
+    server.use(
+      http.get('/api/hotwords', () => HttpResponse.json({ items: ITEMS })),
+      http.get('/api/projects/p2/hotwords', () =>
+        HttpResponse.json({ items: [{ id: 'ph2', word: '说话人簇', note: null }] }),
+      ),
+    )
+
+    render(<HotwordsPage projectId="p2" />)
+
+    expect(await screen.findByText('说话人簇')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '声纹研究' })).toBeInTheDocument()
+    expect(screen.queryByText('Qwen3')).not.toBeInTheDocument()
+  })
+
+  it('projectId 指向不存在的项目时退回通用，不去拉那个项目的词', async () => {
+    let projectHotwordCalls = 0
+    useProjects()
+    server.use(
+      http.get('/api/hotwords', () => HttpResponse.json({ items: ITEMS })),
+      http.get('/api/projects/:id/hotwords', () => {
+        projectHotwordCalls += 1
+        return HttpResponse.json({ detail: '项目不存在' }, { status: 404 })
+      }),
+    )
+
+    render(<HotwordsPage projectId="p404" />)
+
+    expect(await screen.findByText('Qwen3')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '通用' })).toBeInTheDocument()
+    expect(projectHotwordCalls).toBe(0)
+    expect(screen.queryByText(/项目不存在/)).not.toBeInTheDocument()
   })
 
   it('右栏说明三层热词如何叠加', async () => {

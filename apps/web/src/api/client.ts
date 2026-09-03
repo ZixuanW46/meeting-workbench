@@ -1,6 +1,9 @@
 // 统一的 fetch 封装：JSON 解析、错误对象化、缺卡 409 识别。
 // 业务规则（每卡必须有决定等）以后端为准，这里只做传输与错误翻译。
 
+/** 转写目标语言：zh=中文 / en=English */
+export type MeetingLanguage = 'zh' | 'en'
+
 export interface Meeting {
   id: string
   title: string
@@ -12,6 +15,8 @@ export interface Meeting {
   meeting_date: string
   /** user=用户填写 / filename=按音频文件名推断 / created=按创建日 */
   meeting_date_source: 'user' | 'filename' | 'created'
+  /** 改动不影响当前状态，只有下一次转写/重转写才生效 */
+  language: MeetingLanguage
   /** 已确认身份的参会人显示名，按累计发言时长降序；未完成确认时为空 */
   speakers: string[]
   /** 确认后仍未落名的说话人簇数 */
@@ -26,11 +31,14 @@ export interface MeetingCreateInput {
   hotwords: string[]
   /** 会议发生日（YYYY-MM-DD）；不传则后端按文件名或创建日推断 */
   meeting_date?: string
+  /** 不传则后端默认 zh */
+  language?: MeetingLanguage
 }
 
 export interface MeetingUpdateInput {
   title?: string
   meeting_date?: string
+  language?: MeetingLanguage
 }
 
 export interface ReviewSample {

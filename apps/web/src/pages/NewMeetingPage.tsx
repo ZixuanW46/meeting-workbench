@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent } from 'react'
-import { createMeeting, formatApiError, localToday } from '../api/client'
+import { createMeeting, formatApiError, localToday, type MeetingLanguage } from '../api/client'
 import { Icon } from '../components/Icon'
 
 export function NewMeetingPage() {
@@ -7,6 +7,8 @@ export function NewMeetingPage() {
   const [title, setTitle] = useState('')
   // 会议发生日：纪要标题与「明天」「下周二」换算都以它为锚点，默认今天
   const [meetingDate, setMeetingDate] = useState(localToday())
+  // 转写目标语言：默认中文，决定后续转写识别的语言
+  const [language, setLanguage] = useState<MeetingLanguage>('zh')
   const [hotwords, setHotwords] = useState<string[]>([])
   const [hotwordInput, setHotwordInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -38,6 +40,7 @@ export function NewMeetingPage() {
         ...(trimmed !== '' ? { title: trimmed } : {}),
         hotwords,
         ...(meetingDate !== '' ? { meeting_date: meetingDate } : {}),
+        language,
       })
       window.location.hash = `#/meetings/${meeting.id}`
     } catch (e: unknown) {
@@ -94,6 +97,27 @@ export function NewMeetingPage() {
           <span className="form-hint">
             录音是哪天开的会；纪要标题与「明天」「下周二」的换算都以此为准
           </span>
+        </div>
+
+        <div className="form-field">
+          <label id="meeting-language-label">语言</label>
+          <div className="tabs" aria-labelledby="meeting-language-label">
+            <button
+              type="button"
+              className={`tab${language === 'zh' ? ' active' : ''}`}
+              onClick={() => setLanguage('zh')}
+            >
+              中文
+            </button>
+            <button
+              type="button"
+              className={`tab${language === 'en' ? ' active' : ''}`}
+              onClick={() => setLanguage('en')}
+            >
+              English
+            </button>
+          </div>
+          <span className="form-hint">决定转写识别的语言；创建后仍可在工作台修改，下次转写才生效</span>
         </div>
 
         <div className="form-field">

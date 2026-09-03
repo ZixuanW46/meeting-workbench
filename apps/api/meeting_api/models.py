@@ -41,6 +41,9 @@ class Meeting(Base):
     # 用户显式填写的会议日期；None 表示未填，按文件名或创建日推断
     # （见 meeting_date.resolve_meeting_date）。
     meeting_date: Mapped[date | None] = mapped_column(Date, default=None)
+    # 会议语言：zh=中文 / en=英文。英文会议转写与清洗保留英文原文，纪要仍写中文。
+    # 改语言不触发状态迁移，只在下一次转写/重转写时生效。
+    language: Mapped[str] = mapped_column(String(8), default="zh", server_default="zh")
     # 预计人数是先验，不是硬约束；None = 不确定
     expected_speakers: Mapped[int | None] = mapped_column(default=None)
     hotwords_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]")

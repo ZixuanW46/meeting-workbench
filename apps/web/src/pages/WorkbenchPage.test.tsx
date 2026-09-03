@@ -13,6 +13,7 @@ const MEETING = {
   created_at: '2026-08-26T08:00:00Z',
   meeting_date: '2026-08-26',
   meeting_date_source: 'created',
+  language: 'zh',
   speakers: [],
   unknown_speaker_count: 0,
 }
@@ -176,6 +177,51 @@ describe('工作台页', () => {
     expect(await screen.findByText(/会议日期 2026-08-30/)).toBeInTheDocument()
     expect(patched).toEqual({ meeting_date: '2026-08-30' })
     expect(screen.queryByText(/按文件名推断/)).not.toBeInTheDocument()
+  })
+
+  it('元信息行展示语言，可就地改成 English', async () => {
+    let patched: Record<string, unknown> | null = null
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json(patched === null ? MEETING : { ...MEETING, ...patched }),
+      ),
+      http.patch('/api/meetings/m1', async ({ request }) => {
+        patched = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ ...MEETING, ...patched })
+      }),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    expect(await screen.findByText('语言 中文')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '修改会议语言' }))
+    fireEvent.click(screen.getByRole('button', { name: 'English' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByText('语言 English')).toBeInTheDocument()
+    expect(patched).toEqual({ language: 'en' })
+  })
+
+  it('改语言时点取消不发请求，语言保持不变', async () => {
+    let patchCalled = false
+    server.use(
+      http.get('/api/meetings/m1', () => HttpResponse.json(MEETING)),
+      http.patch('/api/meetings/m1', () => {
+        patchCalled = true
+        return HttpResponse.json(MEETING)
+      }),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    expect(await screen.findByText('语言 中文')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '修改会议语言' }))
+    fireEvent.click(screen.getByRole('button', { name: 'English' }))
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+    expect(screen.getByText('语言 中文')).toBeInTheDocument()
+    expect(patchCalled).toBe(false)
   })
 
   it('编辑标题按 Esc 取消，不发请求', async () => {

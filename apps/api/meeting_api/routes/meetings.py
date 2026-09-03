@@ -105,6 +105,7 @@ def _to_response(
         title=meeting.title,
         state=meeting.state,
         expected_speakers=meeting.expected_speakers,
+        language=meeting.language,
         hotwords=json.loads(meeting.hotwords_json),
         created_at=meeting.created_at,
         meeting_date=meeting_date,
@@ -124,6 +125,7 @@ def create_meeting(payload: MeetingCreate, request: Request) -> MeetingResponse:
             title_user_edited=payload.title is not None,
             meeting_date=payload.meeting_date,
             expected_speakers=payload.expected_speakers,
+            language=payload.language,
             hotwords_json=json.dumps(payload.hotwords, ensure_ascii=False),
         )
         session.add(meeting)
@@ -172,6 +174,9 @@ def update_meeting(
             meeting.title_user_edited = True
         if "meeting_date" in payload.model_fields_set:
             meeting.meeting_date = payload.meeting_date
+        # 改语言只影响下一次转写/重转写，不触发任何状态迁移。
+        if payload.language is not None:
+            meeting.language = payload.language
         session.commit()
         session.refresh(meeting)
         summary = _speaker_summaries(session, [meeting.id]).get(meeting.id, ([], 0))

@@ -21,7 +21,7 @@ describe('新建会议表单', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建会议' }))
 
     await waitFor(() => expect(body).not.toBeNull())
-    expect(body).toEqual({ hotwords: [], meeting_date: localToday() })
+    expect(body).toEqual({ hotwords: [], meeting_date: localToday(), language: 'zh' })
     expect(screen.queryByText('请输入标题')).not.toBeInTheDocument()
   })
 
@@ -64,8 +64,33 @@ describe('新建会议表单', () => {
       title: '周会',
       hotwords: ['声纹', 'MLX'],
       meeting_date: localToday(),
+      language: 'zh',
     })
     await waitFor(() => expect(window.location.hash).toBe('#/meetings/m-new'))
+  })
+
+  it('语言默认中文，选 English 后随表单提交', async () => {
+    let body: Record<string, unknown> | null = null
+    server.use(
+      http.post('/api/meetings', async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ id: 'm-new' }, { status: 201 })
+      }),
+    )
+
+    render(<NewMeetingPage />)
+
+    // 默认选中「中文」
+    expect(screen.getByRole('button', { name: '中文' })).toHaveClass('active')
+    expect(screen.getByRole('button', { name: 'English' })).not.toHaveClass('active')
+
+    fireEvent.click(screen.getByRole('button', { name: 'English' }))
+    expect(screen.getByRole('button', { name: 'English' })).toHaveClass('active')
+
+    fireEvent.click(screen.getByRole('button', { name: '创建会议' }))
+
+    await waitFor(() => expect(body).not.toBeNull())
+    expect(body).toMatchObject({ language: 'en' })
   })
 
   it('会议日期默认今天，可改成录音当天并随表单提交', async () => {

@@ -24,11 +24,20 @@ class AsrBackend(Protocol):
     @property
     def loaded(self) -> bool: ...
 
-    def transcribe(self, audio_path: Path, hotwords: Sequence[str] = ()) -> list[AsrSegment]: ...
+    def transcribe(
+        self,
+        audio_path: Path,
+        hotwords: Sequence[str] = (),
+        language: str = "zh",
+    ) -> list[AsrSegment]: ...
+
+
+# 会议语言到 Qwen3-ASR 语言名的映射；未知语言按中文处理。
+LANGUAGE_NAMES = {"zh": "Chinese", "en": "English"}
 
 
 class FakeAsrBackend:
-    """假转写：返回固定片段；hotwords 原样拼进文本，方便测词库快照生效。"""
+    """假转写：返回固定片段；hotwords 与非中文语言标记原样拼进文本，便于断言。"""
 
     name = "fake-asr"
 
@@ -45,10 +54,17 @@ class FakeAsrBackend:
     def loaded(self) -> bool:
         return self._loaded
 
-    def transcribe(self, audio_path: Path, hotwords: Sequence[str] = ()) -> list[AsrSegment]:
+    def transcribe(
+        self,
+        audio_path: Path,
+        hotwords: Sequence[str] = (),
+        language: str = "zh",
+    ) -> list[AsrSegment]:
         if not self._loaded:
             raise RuntimeError("ASR 后端未加载（先 load()）")
         suffix = f"（热词: {'、'.join(hotwords)}）" if hotwords else ""
+        if language != "zh":
+            suffix += f"（语言: {language}）"
         return [
             AsrSegment(0.0, 5.0, f"这是 {audio_path.name} 的假转写第一段{suffix}"),
             AsrSegment(5.0, 10.0, "这是假转写第二段"),
@@ -90,14 +106,19 @@ class Qwen3AsrMlxBackend:
     def loaded(self) -> bool:
         return self._model is not None
 
-    def transcribe(self, audio_path: Path, hotwords: Sequence[str] = ()) -> list[AsrSegment]:
+    def transcribe(
+        self,
+        audio_path: Path,
+        hotwords: Sequence[str] = (),
+        language: str = "zh",
+    ) -> list[AsrSegment]:
         if self._model is None:
             raise RuntimeError("ASR 后端未加载（先 load()）")
         # mlx-audio 的 Qwen3-ASR 提供官方 hotwords 参数（折进 system_prompt 做偏置）；
         # 快照由 worker 固定并传入，全程只在本机推理，不把数据发往云端。
         result = self._model.generate(
             str(audio_path),
-            language="Chinese",
+            language=LANGUAGE_NAMES.get(language, "Chinese"),
             hotwords=list(hotwords) or None,
         )
         segments = getattr(result, "segments", None) or []

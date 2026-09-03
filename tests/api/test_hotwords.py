@@ -114,6 +114,7 @@ class SnapshotProbeAsr(FakeAsrBackend):
         self,
         audio_path: Path,
         hotwords: Sequence[str] = (),
+        language: str = "zh",
     ) -> list[AsrSegment]:
         self.received_hotwords = tuple(hotwords)
         # 模拟快照落库之后全局词库发生变化；本次 ASR 不得看到这个新值。
@@ -122,7 +123,7 @@ class SnapshotProbeAsr(FakeAsrBackend):
         with self.session_factory() as session:
             session.add(HotwordEntry(word="事后新增"))
             session.commit()
-        return super().transcribe(audio_path, hotwords)
+        return super().transcribe(audio_path, hotwords, language)
 
 
 def test_worker_persists_combined_snapshot_and_asr_reads_only_that_snapshot(client):

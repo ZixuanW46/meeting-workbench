@@ -276,7 +276,9 @@ class Worker:
                 self._set_step(session, meeting, STEP_ASR)
                 hotwords = tuple(json.loads(meeting.hotword_snapshot_json))
                 with self.model_slot.use(self.asr_backend) as asr:
-                    asr_segments = asr.transcribe(audio_path, hotwords=hotwords)
+                    asr_segments = asr.transcribe(
+                        audio_path, hotwords=hotwords, language=meeting.language
+                    )
                 asr_segments = _drop_hotword_echoes(asr_segments, hotwords)
 
                 self._set_step(session, meeting, STEP_DIARIZATION)
@@ -292,7 +294,7 @@ class Worker:
                 # 发言轮次是逐轮重转写与试听/声纹时间窗的共同粒度。
                 turns = merge_adjacent_turns(speaker_segments)
                 asr_segments = self._retranscribe_blob_per_turn(
-                    audio_path, asr_segments, turns, hotwords
+                    audio_path, asr_segments, turns, hotwords, meeting.language
                 )
                 self._persist_segments(session, meeting_id, asr_segments, speaker_segments)
 
@@ -395,6 +397,7 @@ class Worker:
                     template=load_minutes_template(self.settings.data_dir),
                     glossary=glossary,
                     meeting_date=meeting_date,
+                    language=meeting.language,
                 )
             )
             # CLI 跑了几分钟，期间用户可能已停止：停止后的结果不落盘。
@@ -503,7 +506,7 @@ class Worker:
                 try:
                     parsed = parse_cleaning_response(
                         self.cleaner_adapter.generate(
-                            build_cleaning_prompt(chunk, glossary)
+                            build_cleaning_prompt(chunk, glossary, meeting.language)
                         ),
                         expected_indices,
                     )
@@ -570,6 +573,7 @@ class Worker:
         asr_segments: Sequence[AsrSegment],
         turns: Sequence[SpeakerSegment],
         hotwords: Sequence[str],
+        language: str = "zh",
     ) -> Sequence[AsrSegment]:
         """粗粒度转写按发言轮次切音频重转写。
 
@@ -600,7 +604,9 @@ class Worker:
                         continue
                     text = "".join(
                         piece.text
-                        for piece in asr.transcribe(piece_path, hotwords=tuple(hotwords))
+                        for piece in asr.transcribe(
+                            piece_path, hotwords=tuple(hotwords), language=language
+                        )
                     ).strip()
                     text = strip_hotword_echo(text, hotwords)
                     if text:

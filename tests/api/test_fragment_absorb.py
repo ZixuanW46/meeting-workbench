@@ -78,8 +78,8 @@ class ThreeClusterFragmentDiarization(FakeDiarizationBackend):
 
 
 class SegmentAlignedAsr(FakeAsrBackend):
-    def transcribe(self, audio_path: Path, hotwords=()):
-        del audio_path, hotwords
+    def transcribe(self, audio_path: Path, hotwords=(), language="zh"):
+        del audio_path, hotwords, language
         if not self.loaded:
             raise RuntimeError("ASR 后端未加载（先 load()）")
         return [

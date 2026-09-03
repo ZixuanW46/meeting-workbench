@@ -48,6 +48,13 @@ MINUTES_PROMPT_INSTRUCTIONS = """你是会议纪要助手。请根据下面的�
 - 说话人身份未确认时一律按逐字稿中的标签引用，不要猜测真实姓名。
 """
 
+# 英文会议附加说明：与 date_block 一样拼在指令之后，本机覆盖模板同样生效。
+MINUTES_ENGLISH_TRANSCRIPT_NOTE = (
+    "逐字稿为英文会议记录。纪要仍然用中文撰写；"
+    "人名、公司名、产品名、专业术语保留英文原文，不要音译；"
+    "直接引用的关键表态可保留英文原句。\n"
+)
+
 # 兼容旧引用：完整默认头 = 指令 + 逐字稿引导行。
 MINUTES_PROMPT_HEADER = f"{MINUTES_PROMPT_INSTRUCTIONS}\n会议逐字稿：\n"
 
@@ -58,6 +65,7 @@ def build_minutes_prompt(
     template: str | None = None,
     glossary: str | None = None,
     meeting_date: date | None = None,
+    language: str = "zh",
 ) -> str:
     """template 非空时覆盖默认指令头；逐字稿始终附在指令之后。"""
     instructions = (
@@ -70,13 +78,17 @@ def build_minutes_prompt(
         if meeting_date is not None
         else ""
     )
+    language_block = MINUTES_ENGLISH_TRANSCRIPT_NOTE if language == "en" else ""
     glossary_block = (
         "公司术语表（逐字稿为语音识别产物，其中的近音误写请按下表纠正为标准写法；"
         f"注解仅供理解，不要照抄进纪要）：\n{glossary.rstrip()}\n"
         if glossary
         else ""
     )
-    return f"{instructions}{date_block}{glossary_block}\n会议逐字稿：\n{transcript}"
+    return (
+        f"{instructions}{date_block}{language_block}{glossary_block}"
+        f"\n会议逐字稿：\n{transcript}"
+    )
 
 
 def meeting_date_from_created_at(

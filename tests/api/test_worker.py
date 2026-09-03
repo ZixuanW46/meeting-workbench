@@ -470,7 +470,7 @@ class BlobAsr(FakeAsrBackend):
         super().__init__()
         self.calls: list[Path] = []
 
-    def transcribe(self, audio_path: Path, hotwords=()) -> list[AsrSegment]:
+    def transcribe(self, audio_path: Path, hotwords=(), language="zh") -> list[AsrSegment]:
         if not self.loaded:
             raise RuntimeError("ASR 后端未加载（先 load()）")
         self.calls.append(Path(audio_path))
@@ -515,7 +515,7 @@ class CoarseBlobAsr(FakeAsrBackend):
         super().__init__()
         self.calls: list[Path] = []
 
-    def transcribe(self, audio_path: Path, hotwords=()) -> list[AsrSegment]:
+    def transcribe(self, audio_path: Path, hotwords=(), language="zh") -> list[AsrSegment]:
         if not self.loaded:
             raise RuntimeError("ASR 后端未加载（先 load()）")
         self.calls.append(Path(audio_path))
@@ -597,7 +597,7 @@ def test_blob_transcript_keeps_whole_text_when_audio_not_sliceable(client):
 
 
 class FailingAsr(FakeAsrBackend):
-    def transcribe(self, audio_path: Path, hotwords=()) -> list[AsrSegment]:
+    def transcribe(self, audio_path: Path, hotwords=(), language="zh") -> list[AsrSegment]:
         raise RuntimeError("fake ASR 故障")
 
 
@@ -649,7 +649,7 @@ def test_worker_drops_hotword_echo_segments_and_skips_sub_second_turns(client):
     assert uploaded.status_code == 200
 
     class EchoAsr(FakeAsrBackend):
-        def transcribe(self, audio_path, hotwords=()):
+        def transcribe(self, audio_path, hotwords=(), language="zh"):
             if not self._loaded:
                 raise RuntimeError("未加载")
             return [

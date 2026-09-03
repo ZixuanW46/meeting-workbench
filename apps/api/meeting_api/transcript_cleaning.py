@@ -25,6 +25,20 @@ CLEANING_INSTRUCTIONS = """你是会议转写清洗助手。输入是编号的 J
 - 术语表（如有）只用于纠正专名写法。
 """
 
+CLEANING_INSTRUCTIONS_EN = """You are a meeting transcript cleanup assistant. The input is a numbered JSON array shaped [{"i": block index, "speaker": speaker, "text": raw text}].
+
+Output exactly one JSON object shaped {"block index": "cleaned text"}, and nothing else — no commentary, no explanation, no Markdown, no code fences.
+
+Cleanup rules:
+- Remove fillers (um, uh, you know, I mean) and stutter repeats.
+- Fix punctuation, casing and sentence breaks.
+- Fix obvious mis-heard words from context.
+- Keep every fact, number, name and proper noun.
+- No summarizing, no moving or merging content across blocks, no translation — keep the original English.
+- When unsure, keep the original wording.
+- Use the glossary (if any) only for the spelling of proper nouns.
+"""
+
 MAX_CHUNK_CHARS = 3000
 
 
@@ -62,14 +76,17 @@ def chunk_indexed_blocks(
 def build_cleaning_prompt(
     chunk: Sequence[tuple[int, TranscriptBlock]],
     glossary: str | None,
+    language: str = "zh",
 ) -> str:
+    """英文会议换英文规则；两种口径都只输出 {"块号": "清洗后文本"} 的纯 JSON。"""
     rows = [
         {"i": index, "speaker": block.label, "text": block.text}
         for index, block in chunk
     ]
+    instructions = CLEANING_INSTRUCTIONS_EN if language == "en" else CLEANING_INSTRUCTIONS
     glossary_block = f"\n术语表：\n{glossary.rstrip()}\n" if glossary else ""
     return (
-        f"{CLEANING_INSTRUCTIONS.rstrip()}\n"
+        f"{instructions.rstrip()}\n"
         f"{glossary_block}\n"
         f"{json.dumps(rows, ensure_ascii=False)}"
     )

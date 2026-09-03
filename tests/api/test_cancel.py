@@ -66,10 +66,10 @@ def test_cancel_during_processing_is_honored_at_next_step_boundary(client):
     meeting_id = _create_and_upload(client)
 
     class CancelingAsr(FakeAsrBackend):
-        def transcribe(self, audio_path: Path, hotwords=()) -> list[AsrSegment]:
+        def transcribe(self, audio_path: Path, hotwords=(), language="zh") -> list[AsrSegment]:
             # 模拟用户在转写进行中点了取消。
             assert client.post(f"/api/meetings/{meeting_id}/cancel").status_code == 200
-            return super().transcribe(audio_path, hotwords)
+            return super().transcribe(audio_path, hotwords, language)
 
     _replace_worker(client, asr_backend=CancelingAsr())
 

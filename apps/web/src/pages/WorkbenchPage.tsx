@@ -8,6 +8,7 @@ import {
   updateMeeting,
   updateMeetingTitle,
   type Meeting,
+  type MeetingLanguage,
   type TranscriptVariant,
 } from '../api/client'
 import { ResultActionsMenu } from '../components/ResultActionsMenu'
@@ -44,6 +45,10 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
   const [editingDate, setEditingDate] = useState(false)
   const [dateDraft, setDateDraft] = useState('')
   const [savingDate, setSavingDate] = useState(false)
+  // 语言就地编辑：同一套交互，草稿用分段控件而非文本框；改动只影响下一次转写
+  const [editingLanguage, setEditingLanguage] = useState(false)
+  const [languageDraft, setLanguageDraft] = useState<MeetingLanguage>('zh')
+  const [savingLanguage, setSavingLanguage] = useState(false)
   const [canceling, setCanceling] = useState(false)
   const meetingStateRef = useRef<string | null>(null)
   meetingStateRef.current = meeting?.state ?? null
@@ -109,6 +114,26 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
       setError(formatApiError(e))
     } finally {
       setSavingDate(false)
+    }
+  }
+
+  const saveLanguage = async () => {
+    if (meeting === null) return
+    if (languageDraft === meeting.language) {
+      setEditingLanguage(false)
+      return
+    }
+    setSavingLanguage(true)
+    try {
+      const updated = await updateMeeting(meetingId, { language: languageDraft })
+      setMeeting(updated)
+      setEditingLanguage(false)
+      setError(null)
+      toast('语言已更新，下次转写生效')
+    } catch (e: unknown) {
+      setError(formatApiError(e))
+    } finally {
+      setSavingLanguage(false)
     }
   }
 
@@ -269,6 +294,62 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
                   onClick={() => {
                     setDateDraft(meeting.meeting_date)
                     setEditingDate(true)
+                  }}
+                >
+                  <Icon name="edit" size={11} />
+                </button>
+              </span>
+            )}
+            <span className="divider-dot" />
+            {editingLanguage ? (
+              <span className="meta-edit-row">
+                <div className="tabs" aria-label="会议语言">
+                  <button
+                    type="button"
+                    className={`tab${languageDraft === 'zh' ? ' active' : ''}`}
+                    disabled={savingLanguage}
+                    onClick={() => setLanguageDraft('zh')}
+                  >
+                    中文
+                  </button>
+                  <button
+                    type="button"
+                    className={`tab${languageDraft === 'en' ? ' active' : ''}`}
+                    disabled={savingLanguage}
+                    onClick={() => setLanguageDraft('en')}
+                  >
+                    English
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={savingLanguage}
+                  onClick={() => {
+                    void saveLanguage()
+                  }}
+                >
+                  保存
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={savingLanguage}
+                  onClick={() => setEditingLanguage(false)}
+                >
+                  取消
+                </button>
+              </span>
+            ) : (
+              <span className="meta-date">
+                <span>{`语言 ${meeting.language === 'en' ? 'English' : '中文'}`}</span>
+                <button
+                  type="button"
+                  className="btn btn-ghost meta-edit-btn"
+                  aria-label="修改会议语言"
+                  onClick={() => {
+                    setLanguageDraft(meeting.language)
+                    setEditingLanguage(true)
                   }}
                 >
                   <Icon name="edit" size={11} />

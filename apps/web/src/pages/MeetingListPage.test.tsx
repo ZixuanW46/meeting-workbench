@@ -14,6 +14,7 @@ const MEETINGS = [
     created_at: '2026-08-26T08:00:00Z',
     speakers: [],
     unknown_speaker_count: 0,
+    language: 'zh',
   },
   {
     id: 'm2',
@@ -24,6 +25,7 @@ const MEETINGS = [
     created_at: '2026-08-25T02:30:00Z',
     speakers: ['Will', 'Leo', 'Eddie'],
     unknown_speaker_count: 1,
+    language: 'en',
   },
 ]
 
@@ -45,6 +47,18 @@ describe('会议列表页', () => {
       'href',
       '#/meetings/m1',
     )
+  })
+
+  it('英文会议行显示 EN 标签，中文会议不显示', async () => {
+    server.use(http.get('/api/meetings', () => HttpResponse.json({ items: MEETINGS })))
+
+    render(<MeetingListPage />)
+
+    const zhRow = (await screen.findByText('产品周会')).closest('.list-row')
+    const enRow = screen.getByText('架构评审').closest('.list-row')
+    expect(zhRow?.querySelector('.badge-lang')).toBeNull()
+    expect(enRow?.querySelector('.badge-lang')).not.toBeNull()
+    expect(enRow?.querySelector('.badge-lang')).toHaveTextContent('EN')
   })
 
   it('列表行两行式：标题下带人数与时间；副标题显示统计', async () => {

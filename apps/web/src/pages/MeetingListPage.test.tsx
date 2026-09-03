@@ -207,13 +207,51 @@ describe('会议列表页', () => {
     expect(without?.querySelector('.badge-project')).toBeNull()
   })
 
-  it('没有项目时不出筛选条', async () => {
+  it('没有项目时不出筛选组，但「新建项目」入口还在', async () => {
     server.use(http.get('/api/meetings', () => HttpResponse.json({ items: MEETINGS })))
 
     render(<MeetingListPage />)
     await screen.findByText('产品周会')
 
     expect(screen.queryByLabelText('按项目筛选')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新建项目' })).toBeInTheDocument()
+  })
+
+  it('筛选栏末尾就地新建项目：建完出现在筛选组里并直接切过去', async () => {
+    let posted: { name: string } | null = null
+    useProjects()
+    server.use(
+      http.get('/api/meetings', () => HttpResponse.json({ items: MEETINGS })),
+      http.post('/api/projects', async ({ request }) => {
+        posted = (await request.json()) as { name: string }
+        return HttpResponse.json(
+          {
+            id: 'p9',
+            name: posted.name,
+            created_at: '2026-09-03T00:00:00Z',
+            meeting_count: 0,
+            hotword_count: 0,
+          },
+          { status: 201 },
+        )
+      }),
+    )
+
+    render(<MeetingListPage />)
+    await screen.findByLabelText('按项目筛选')
+
+    fireEvent.click(screen.getByRole('button', { name: '新建项目' }))
+    const nameInput = screen.getByLabelText('新项目名字')
+    fireEvent.change(nameInput, { target: { value: '内网基建' } })
+    fireEvent.keyDown(nameInput, { key: 'Enter' })
+
+    const pill = await screen.findByRole('button', { name: '内网基建' })
+    expect(posted).toEqual({ name: '内网基建' })
+    // 新项目直接成为选中的筛选，列表随之空掉
+    expect(pill).toHaveClass('active')
+    expect(localStorage.getItem('meeting-workbench.project-filter')).toBe('p9')
+    expect(screen.getByText('这个项目下还没有会议')).toBeInTheDocument()
+    expect(screen.queryByText('产品周会')).not.toBeInTheDocument()
   })
 
   it('项目筛选在本地过滤：选项目只留该项目，选无项目只留没挂项目的', async () => {

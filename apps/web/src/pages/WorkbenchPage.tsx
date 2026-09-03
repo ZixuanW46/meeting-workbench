@@ -16,6 +16,7 @@ import {
 import { ResultActionsMenu } from '../components/ResultActionsMenu'
 import { DoctorBanner } from '../components/DoctorBanner'
 import { Icon } from '../components/Icon'
+import { InlineProjectCreate } from '../components/InlineProjectCreate'
 import { Skeleton } from '../components/Skeleton'
 import { toast } from '../components/Toast'
 import { MinutesView } from '../components/MinutesView'
@@ -421,6 +422,13 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
                     </option>
                   ))}
                 </select>
+                {/* 新建后只落到草稿：仍要点「保存」才 PATCH，语义和选已有项目一致 */}
+                <InlineProjectCreate
+                  onCreated={(created) => {
+                    setProjects((current) => [...current, created])
+                    setProjectDraft(created.id)
+                  }}
+                />
                 <button
                   type="button"
                   className="btn btn-ghost"

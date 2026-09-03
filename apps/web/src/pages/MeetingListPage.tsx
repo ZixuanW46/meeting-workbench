@@ -8,6 +8,7 @@ import {
   type Project,
 } from '../api/client'
 import { DoctorBanner } from '../components/DoctorBanner'
+import { InlineProjectCreate } from '../components/InlineProjectCreate'
 import { SkeletonListRows } from '../components/Skeleton'
 import { toast } from '../components/Toast'
 import { Icon } from '../components/Icon'
@@ -149,8 +150,9 @@ export function MeetingListPage() {
 
       <DoctorBanner />
 
-      {projects.length > 0 && (
-        <div className="filter-bar">
+      {/* 一个项目都没有时不出筛选组（全部/无项目没意义），但「新建项目」入口始终在 */}
+      <div className="filter-bar">
+        {projects.length > 0 && (
           <div className="tabs" aria-label="按项目筛选">
             <button
               type="button"
@@ -177,8 +179,15 @@ export function MeetingListPage() {
               </button>
             ))}
           </div>
-        </div>
-      )}
+        )}
+        <InlineProjectCreate
+          compact
+          onCreated={(created) => {
+            setProjects((current) => [...current, created])
+            pickFilter(created.id)
+          }}
+        />
+      </div>
 
       {error !== null && <div className="notice notice-error">{error}</div>}
 

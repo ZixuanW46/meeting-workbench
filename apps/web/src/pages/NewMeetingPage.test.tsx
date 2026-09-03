@@ -135,7 +135,18 @@ describe('新建会议表单', () => {
     expect(body).toMatchObject({ project_id: 'p2' })
   })
 
-  it('选「新建项目…」就地创建，创建完自动选中并随表单提交', async () => {
+  it('下拉里没有「新建项目…」哨兵，只有无项目与真实项目', async () => {
+    useProjects()
+    render(<NewMeetingPage />)
+
+    await screen.findByRole('option', { name: '声纹研究' })
+    expect(screen.queryByRole('option', { name: '新建项目…' })).not.toBeInTheDocument()
+    expect(
+      screen.getByLabelText('项目').querySelectorAll('option').length,
+    ).toBe(3)
+  })
+
+  it('下拉旁的「新建项目」就地创建，创建完自动选中并随表单提交', async () => {
     let posted: { name: string } | null = null
     let body: Record<string, unknown> | null = null
     useProjects()
@@ -163,7 +174,7 @@ describe('新建会议表单', () => {
     const select = await screen.findByLabelText('项目')
     await screen.findByRole('option', { name: '声纹研究' })
 
-    fireEvent.change(select, { target: { value: '__new__' } })
+    fireEvent.click(screen.getByRole('button', { name: '新建项目' }))
     const nameInput = screen.getByLabelText('新项目名字')
     fireEvent.change(nameInput, { target: { value: '内网基建' } })
     fireEvent.keyDown(nameInput, { key: 'Enter' })

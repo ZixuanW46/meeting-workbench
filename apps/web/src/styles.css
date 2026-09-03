@@ -353,6 +353,23 @@ a {
   color: var(--ink-muted);
 }
 
+/* 表单里「主控件 + 就地新建」同一行；窄了就换行，不挤压下拉 */
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.field-row .select {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.field-row .inline-create {
+  flex: 1 1 220px;
+}
+
 .form-hint {
   font-size: 12px;
   color: var(--ink-tertiary);
@@ -654,12 +671,43 @@ a {
 .filter-bar {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   margin-bottom: 12px;
 }
 
-/* 表单里就地新建（如新建会议的「新建项目…」）：输入 + 确认/取消一排 */
+/* 「+ 新建项目」这类挂在 pill 行末尾的动作：发丝线描边胶囊，不抢筛选组的选中态 */
+.pill-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-subtle);
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: color 0.12s var(--ease), background 0.12s var(--ease);
+}
+
+.pill-add:hover:not(:disabled) {
+  background: var(--hover-wash);
+  color: var(--ink);
+}
+
+/* 就地新建（InlineProjectCreate）：输入 + 创建/取消一排，错误另起一行 */
 .inline-create {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.inline-create-row {
   display: flex;
   gap: 6px;
   align-items: center;
@@ -672,6 +720,28 @@ a {
 
 .inline-create .btn {
   flex-shrink: 0;
+}
+
+.inline-create-error {
+  font-size: 12px;
+  color: var(--danger);
+}
+
+/* pill 行里的紧凑形态：输入框矮一档，整体不撑满整行 */
+.inline-create-compact {
+  flex: 0 1 auto;
+}
+
+.inline-create-compact .input {
+  font-size: 13px;
+  padding: 4px 10px;
+  width: 160px;
+  flex: 0 0 auto;
+}
+
+.inline-create-compact .btn {
+  font-size: 13px;
+  padding: 4px 10px;
 }
 
 /* ---------- 词库：左范围栏 + 右词条栏 ---------- */
@@ -1983,6 +2053,18 @@ svg.clip-wave {
   padding: 4px 24px 4px 8px;
   font-size: 12px;
   max-width: 180px;
+}
+
+/* 元信息行里的就地新建：输入也压到 12px，别把整行撑高 */
+.meta-edit-row .inline-create {
+  flex: 0 0 auto;
+}
+
+.meta-edit-row .inline-create .input {
+  padding: 4px 8px;
+  font-size: 12px;
+  width: 140px;
+  flex: 0 0 auto;
 }
 
 .divider-dot::before {

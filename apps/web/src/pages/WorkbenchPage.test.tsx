@@ -586,4 +586,57 @@ describe('工作台页', () => {
     expect(await screen.findByText('项目 无项目')).toBeInTheDocument()
     expect(patched).toEqual({ project_id: null })
   })
+
+  it('改挂时可就地新建项目：新项目进下拉并成为草稿，点保存才 PATCH', async () => {
+    let posted: { name: string } | null = null
+    let patched: Record<string, unknown> | null = null
+    useProjects()
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json(patched === null ? MEETING : { ...MEETING, ...patched }),
+      ),
+      http.post('/api/projects', async ({ request }) => {
+        posted = (await request.json()) as { name: string }
+        return HttpResponse.json(
+          {
+            id: 'p9',
+            name: posted.name,
+            created_at: '2026-09-03T00:00:00Z',
+            meeting_count: 0,
+            hotword_count: 0,
+          },
+          { status: 201 },
+        )
+      }),
+      http.patch('/api/meetings/m1', async ({ request }) => {
+        patched = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({
+          ...MEETING,
+          project_id: 'p9',
+          project_name: '内网基建',
+        })
+      }),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    expect(await screen.findByText('项目 无项目')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '修改会议项目' }))
+    const select = await screen.findByLabelText('会议项目')
+
+    fireEvent.click(screen.getByRole('button', { name: '新建项目' }))
+    const nameInput = screen.getByLabelText('新项目名字')
+    fireEvent.change(nameInput, { target: { value: '内网基建' } })
+    fireEvent.keyDown(nameInput, { key: 'Enter' })
+
+    // 新项目落到草稿，但还没 PATCH：保持「编辑 → 草稿 → 保存」的语义
+    await waitFor(() => expect((select as HTMLSelectElement).value).toBe('p9'))
+    expect(posted).toEqual({ name: '内网基建' })
+    await screen.findByRole('option', { name: '内网基建' })
+    expect(patched).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(await screen.findByText('项目 内网基建')).toBeInTheDocument()
+    expect(patched).toEqual({ project_id: 'p9' })
+  })
 })

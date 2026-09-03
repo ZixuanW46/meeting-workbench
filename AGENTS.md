@@ -59,3 +59,9 @@ make dev-web    # vite :5173（/api 代理到 :8000）
 - macOS 专属依赖只能进 `[project.optional-dependencies].mac`，代码里 import 放函数内并按平台报清晰错误。
 - Python ≥3.12；ruff 规则见 `pyproject.toml`；TS strict 已开。
 - 代码注释和用户可见文案用中文；标识符用英文。
+
+## 编排规则（2026-09-03 锁定）
+
+- 主会话的 Fable 5 只做**需求澄清、方案拆解、任务分发、结果验收**；实现类工作——读大量代码、写代码、跑测试、批量修改——一律用 Agent 工具派给 subagent（Opus 或 Sonnet）执行。
+- 派发前先定好 API 契约，再把后端 / 前端拆成互不重叠目录的并行 agent；同一 milestone 内并行，跨 milestone 串行。
+- 验收由主会话跑 `make test` + `make lint`，再按 milestone 提交；subagent 不提交。

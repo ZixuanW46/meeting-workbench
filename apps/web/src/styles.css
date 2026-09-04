@@ -1363,9 +1363,41 @@ a {
   }
 }
 
+/* 和上方步骤条再拉开一截（stage gap 28px + 20px），避免误触 */
 .progress-cancel {
   font-size: 13px;
   padding: 6px 12px;
+  margin-top: 20px;
+}
+
+.progress-confirm {
+  margin-top: 20px;
+  max-width: 360px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.progress-confirm-text {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-subtle);
+  text-align: center;
+}
+
+.progress-confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.progress-confirm-actions .btn {
+  font-size: 13px;
+  padding: 5px 12px;
 }
 
 @keyframes spin {

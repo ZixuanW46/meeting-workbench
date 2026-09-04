@@ -58,6 +58,8 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
   const [projectDraft, setProjectDraft] = useState('')
   const [savingProject, setSavingProject] = useState(false)
   const [canceling, setCanceling] = useState(false)
+  // 停止/取消是不可逆动作：先出确认条再发请求，和列表页删除、词库改范围同一套两段式
+  const [confirmingCancel, setConfirmingCancel] = useState(false)
   const meetingStateRef = useRef<string | null>(null)
   meetingStateRef.current = meeting?.state ?? null
 
@@ -82,6 +84,11 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  // 状态一变（自己取消成功、或后台自己跑完了），残留的确认条就该收掉
+  useEffect(() => {
+    setConfirmingCancel(false)
+  }, [meeting?.state])
 
   // 项目只用于改挂的下拉选项：拉不到就当没有项目，不打断工作台
   useEffect(() => {
@@ -219,6 +226,9 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
       </div>
     )
   }
+
+  // 生成纪要中停止只丢纪要（落 PARTIAL_READY），其余处理中状态停下来是整场取消
+  const stoppingMinutes = meeting.state === 'GENERATING_MINUTES'
 
   return (
     <div className="page page-wide">
@@ -513,18 +523,45 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
             }}
           />
           {/* 决定应用在请求内瞬间完成，不给取消；其余处理中状态都可停 */}
-          {meeting.state !== 'APPLYING_DECISIONS' && (
-            <button
-              type="button"
-              className="btn btn-ghost progress-cancel"
-              disabled={canceling}
-              onClick={() => {
-                void cancel()
-              }}
-            >
-              {meeting.state === 'GENERATING_MINUTES' ? '停止生成纪要' : '取消处理'}
-            </button>
-          )}
+          {meeting.state !== 'APPLYING_DECISIONS' &&
+            (confirmingCancel ? (
+              <div className="progress-confirm">
+                <div className="progress-confirm-text">
+                  {stoppingMinutes
+                    ? '停止后转写与已确认的说话人都保留，只是这次不出纪要，可稍后在「纪要」页重新生成。'
+                    : '取消后这场会议会标记为已取消，音频仍在本机，可在页面重新处理。'}
+                </div>
+                <div className="progress-confirm-actions">
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    disabled={canceling}
+                    onClick={() => {
+                      void cancel()
+                    }}
+                  >
+                    {stoppingMinutes ? '确认停止' : '确认取消'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={canceling}
+                    onClick={() => setConfirmingCancel(false)}
+                  >
+                    {stoppingMinutes ? '继续生成' : '继续处理'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-ghost progress-cancel"
+                disabled={canceling}
+                onClick={() => setConfirmingCancel(true)}
+              >
+                {stoppingMinutes ? '停止生成纪要' : '取消处理'}
+              </button>
+            ))}
         </div>
       )}
 

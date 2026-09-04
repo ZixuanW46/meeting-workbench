@@ -365,7 +365,7 @@ describe('工作台页', () => {
     expect(retranscribed).toBe(true)
   })
 
-  it('处理中可取消：点「取消处理」后进入取消态', async () => {
+  it('处理中可取消：点「取消处理」再确认后进入取消态', async () => {
     let state = 'PROCESSING'
     let canceled = false
     server.use(
@@ -385,9 +385,72 @@ describe('工作台页', () => {
     render(<WorkbenchPage meetingId="m1" />)
 
     fireEvent.click(await screen.findByRole('button', { name: '取消处理' }))
+    fireEvent.click(await screen.findByRole('button', { name: '确认取消' }))
 
     expect(await screen.findByText('这场会议已取消。')).toBeInTheDocument()
     expect(canceled).toBe(true)
+  })
+
+  it('停止生成纪要要先确认：只点按钮不发请求，确认后才停', async () => {
+    let state = 'GENERATING_MINUTES'
+    let canceled = false
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json({ ...MEETING, state, processing_error: null }),
+      ),
+      http.get('/api/meetings/m1/progress', () =>
+        HttpResponse.json({ state, processing_step: 'CLEANING_TRANSCRIPT', seq: 1 }),
+      ),
+      http.post('/api/meetings/m1/cancel', () => {
+        canceled = true
+        state = 'PARTIAL_READY'
+        return HttpResponse.json({ ...MEETING, state, processing_error: null })
+      }),
+      // 停止后落到 PARTIAL_READY，结果区会去拉转写，给个空稿免得请求没人接
+      http.get('/api/meetings/m1/transcript', () =>
+        HttpResponse.json({ blocks: [], cleaned_available: false }),
+      ),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '停止生成纪要' }))
+
+    expect(await screen.findByText(/停止后转写与已确认的说话人都保留/)).toBeInTheDocument()
+    expect(canceled).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: '确认停止' }))
+
+    await waitFor(() => expect(canceled).toBe(true))
+  })
+
+  it('确认条上点「继续生成」只收起确认，不发请求', async () => {
+    let canceled = false
+    server.use(
+      http.get('/api/meetings/m1', () =>
+        HttpResponse.json({ ...MEETING, state: 'GENERATING_MINUTES', processing_error: null }),
+      ),
+      http.get('/api/meetings/m1/progress', () =>
+        HttpResponse.json({
+          state: 'GENERATING_MINUTES',
+          processing_step: 'CLEANING_TRANSCRIPT',
+          seq: 1,
+        }),
+      ),
+      http.post('/api/meetings/m1/cancel', () => {
+        canceled = true
+        return HttpResponse.json({ ...MEETING, state: 'PARTIAL_READY', processing_error: null })
+      }),
+    )
+
+    render(<WorkbenchPage meetingId="m1" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '停止生成纪要' }))
+    fireEvent.click(await screen.findByRole('button', { name: '继续生成' }))
+
+    expect(await screen.findByRole('button', { name: '停止生成纪要' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '确认停止' })).not.toBeInTheDocument()
+    expect(canceled).toBe(false)
   })
 
   it('生成纪要中给的是「停止生成纪要」', async () => {

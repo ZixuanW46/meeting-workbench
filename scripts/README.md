@@ -4,6 +4,7 @@
 
 - M12：`download_models.md`（Will 手动下载模型权重的指引）、`smoke_real_models.sh`
 - M13：`mac_install.sh`、`backup.sh`、`restore.sh`、`launchd/`
+- 诊断：`gil_probe.py`（真机量 sherpa-onnx 各阶段是否抱死 GIL，见 `docs/DIARIZATION-GIL.md`）、`diarization_lab.py`（切分聚类对比实验）
 
 M12 的模型权重由 Will 按 `download_models.md` 手动准备；代码和脚本都不会下载权重。
 

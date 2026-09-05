@@ -21,6 +21,8 @@ from meeting_api.pipeline.asr import (
 from meeting_api.pipeline.diarization import (
     FakeDiarizationBackend,
     SherpaOnnxDiarizationBackend,
+    SpeakerSegment,
+    _diarize_in_subprocess,
     get_diarization_backend,
 )
 from meeting_api.pipeline.embedding import (
@@ -206,7 +208,8 @@ def test_real_backends_load_and_unload_mocked_runtime(monkeypatch, tmp_path):
 
     backends = [
         Qwen3AsrMlxBackend(models_dir),
-        SherpaOnnxDiarizationBackend(models_dir),
+        # 这条测的是进程内运行时本身的装卸；隔离模式的父进程根本不碰 sherpa。
+        SherpaOnnxDiarizationBackend(models_dir, isolate=False),
         SherpaOnnxEmbeddingBackend(models_dir),
     ]
     for backend in backends:
@@ -324,7 +327,8 @@ def test_sherpa_diarize_merges_same_voice_clusters(monkeypatch, tmp_path):
     sherpa.SpeakerEmbeddingExtractor = lambda _config: extractor
     monkeypatch.setitem(sys.modules, "sherpa_onnx", sherpa)
 
-    backend = SherpaOnnxDiarizationBackend(models_dir)
+    # 二次合并是进程内那条路径的逻辑，直接在本进程验证。
+    backend = SherpaOnnxDiarizationBackend(models_dir, isolate=False)
     backend.load()
     segments = backend.diarize(audio_path)
 
@@ -339,6 +343,87 @@ def test_sherpa_diarize_merges_same_voice_clusters(monkeypatch, tmp_path):
 
     backend.unload()
     assert extractor.closed
+
+
+def _sherpa_models_dir(tmp_path: Path) -> Path:
+    models_dir = tmp_path / "models"
+    sherpa_dir = models_dir / "sherpa-onnx"
+    sherpa_dir.mkdir(parents=True)
+    (sherpa_dir / "segmentation.onnx").touch()
+    (sherpa_dir / "embedding.onnx").touch()
+    return models_dir
+
+
+def test_sherpa_diarization_default_isolates_into_subprocess(monkeypatch, tmp_path):
+    # sherpa-onnx 的 process() 没有 gil_scoped_release，同进程跑会饿死事件循环：
+    # 默认必须把整段切分丢进子进程，父进程连 sherpa_onnx 都不 import。
+    monkeypatch.setattr(sys, "platform", "darwin")
+    models_dir = _sherpa_models_dir(tmp_path)
+    backend = SherpaOnnxDiarizationBackend(models_dir)
+
+    with pytest.raises(RuntimeError, match="未加载"):
+        backend.diarize(Path("/tmp/a.wav"))
+
+    real_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        if name.startswith("sherpa_onnx"):
+            raise AssertionError(f"隔离模式的父进程不应导入真实运行时: {name}")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    backend.load()
+    monkeypatch.setattr(builtins, "__import__", real_import)
+    assert backend.loaded
+
+    calls: list[tuple] = []
+    isolated_segments = [SpeakerSegment(0.0, 1.0, "S1")]
+
+    def record(target, *args, timeout=None):
+        calls.append((target, *args))
+        return isolated_segments
+
+    monkeypatch.setattr("meeting_api.pipeline.diarization.run_isolated", record)
+
+    assert (
+        backend.diarize(Path("/tmp/a.wav"), expected_speakers=3) == isolated_segments
+    )
+    assert calls == [(_diarize_in_subprocess, models_dir, Path("/tmp/a.wav"), 3)]
+
+    backend.unload()
+    assert not backend.loaded
+
+
+def test_diarize_in_subprocess_uses_in_process_backend_and_unloads(monkeypatch, tmp_path):
+    # 子进程入口自己负责装卸：进程退出前就把模型还掉，异常路径也一样。
+    monkeypatch.setattr(sys, "platform", "darwin")
+    models_dir = _sherpa_models_dir(tmp_path)
+    events: list = []
+    _install_fake_sherpa(monkeypatch, events)
+
+    calls: list[tuple[Path, int | None]] = []
+    expected = [SpeakerSegment(0.0, 4.0, "S1"), SpeakerSegment(4.0, 9.0, "S2")]
+
+    def scripted_diarize(self, audio_path, expected_speakers=None):
+        assert self.isolate is False
+        assert self.loaded
+        calls.append((audio_path, expected_speakers))
+        return expected
+
+    monkeypatch.setattr(SherpaOnnxDiarizationBackend, "diarize", scripted_diarize)
+
+    assert _diarize_in_subprocess(models_dir, Path("/tmp/a.wav"), 2) == expected
+    assert calls == [(Path("/tmp/a.wav"), 2)]
+    assert events.count("diarization:close") == 1
+
+    def failing_diarize(self, audio_path, expected_speakers=None):
+        raise RuntimeError("切分炸了")
+
+    monkeypatch.setattr(SherpaOnnxDiarizationBackend, "diarize", failing_diarize)
+
+    with pytest.raises(RuntimeError, match="切分炸了"):
+        _diarize_in_subprocess(models_dir, Path("/tmp/a.wav"), 2)
+    assert events.count("diarization:close") == 2
 
 
 @pytest.mark.parametrize(

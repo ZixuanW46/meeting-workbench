@@ -99,5 +99,6 @@ data/            本机数据（音频、SQLite、声纹和模型），不入 gi
 - `ROADMAP.md`：milestone 范围与 TDD 验收清单。
 - `AGENTS.md`：工程分层、开发流程与红线。
 - `scripts/download_models.md`：模型来源及手动准备说明。
+- `docs/DIARIZATION-GIL.md`：切分阶段 API 假死的根因（sherpa-onnx 持有 GIL）、复现与子进程隔离修法。
 
 本项目采用 [MIT License](LICENSE)。

@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from meeting_api.pipeline.isolation import run_isolated
+
 
 @dataclass(frozen=True)
 class SpeakerSegment:
@@ -239,19 +241,39 @@ class FakeDiarizationBackend:
 
 
 class SherpaOnnxDiarizationBackend:
-    """从本地 ONNX 文件加载 sherpa-onnx 离线说话人切分。"""
+    """从本地 ONNX 文件加载 sherpa-onnx 离线说话人切分。
+
+    默认 `isolate=True`：整段切分放到 spawn 子进程里跑，父进程连 sherpa_onnx
+    都不 import。原因是 sherpa-onnx v1.13.6 的 pybind11 绑定里
+    `OfflineSpeakerDiarization.process` 没有 `py::gil_scoped_release`，87 分钟
+    录音算约 12 分钟且全程独占 GIL，同进程的 uvicorn 事件循环被饿死，
+    `/healthz` 和所有只读接口一起超时（见 pipeline/isolation.py）。
+
+    对 16GB 的串行约束没有任何放松：子进程的生命周期完整包在 worker 的
+    `SingleModelSlot.use()` 之内，同一时刻仍然只有一个模型驻留；子进程一退出
+    模型内存立刻还给系统。每次 `diarize()` 都重新加载模型，与 SingleModelSlot
+    每次 `use()` 都 load/unload 的现状一致，不多花一次加载。
+
+    `isolate=False` 是进程内的老路径，只给测试和子进程入口自己用。
+    """
 
     name = "sherpa-onnx-diarization"
     model_subdir = Path("sherpa-onnx")
 
-    def __init__(self, models_dir: Path = Path("data/models")) -> None:
+    def __init__(
+        self, models_dir: Path = Path("data/models"), *, isolate: bool = True
+    ) -> None:
+        self.models_dir = models_dir
         self.model_dir = models_dir / self.model_subdir
         self.segmentation_path = self.model_dir / "segmentation.onnx"
         self.embedding_path = self.model_dir / "embedding.onnx"
+        self.isolate = isolate
         self._model = None
         # 二次合并用的簇声纹提取器：与切分共用同一份 embedding.onnx，
         # 同属切分槽的生命周期，不违反 16GB 单模型串行约束。
         self._extractor = None
+        # 隔离模式下父进程不持有模型，只记「文件齐了、可以开工」。
+        self._ready = False
 
     def load(self) -> None:
         _require_darwin(self.name)
@@ -265,6 +287,11 @@ class SherpaOnnxDiarizationBackend:
                 f"sherpa-onnx 切分模型文件不完整；请按 scripts/download_models.md 把模型放到 "
                 f"{self.model_dir}/（需要 segmentation.onnx 和 embedding.onnx）"
             )
+        if self.isolate:
+            # 平台与模型文件仍然当场校验，错误照旧在 load 时报；真正的加载
+            # 推迟到子进程，父进程一个 onnxruntime 线程都不起。
+            self._ready = True
+            return
         import sherpa_onnx
 
         config = sherpa_onnx.OfflineSpeakerDiarizationConfig(
@@ -290,6 +317,7 @@ class SherpaOnnxDiarizationBackend:
         )
 
     def unload(self) -> None:
+        self._ready = False
         if self._model is not None and hasattr(self._model, "close"):
             self._model.close()
         self._model = None
@@ -299,13 +327,22 @@ class SherpaOnnxDiarizationBackend:
 
     @property
     def loaded(self) -> bool:
-        return self._model is not None
+        return self._ready if self.isolate else self._model is not None
 
     def diarize(
         self, audio_path: Path, expected_speakers: int | None = None
     ) -> list[SpeakerSegment]:
-        if self._model is None:
+        if not self.loaded:
             raise RuntimeError("diarization 后端未加载（先 load()）")
+        if self.isolate:
+            return run_isolated(
+                _diarize_in_subprocess, self.models_dir, audio_path, expected_speakers
+            )
+        return self._diarize_in_process(audio_path, expected_speakers)
+
+    def _diarize_in_process(
+        self, audio_path: Path, expected_speakers: int | None = None
+    ) -> list[SpeakerSegment]:
         import numpy as np
         import soundfile as sf
 
@@ -368,6 +405,23 @@ class SherpaOnnxDiarizationBackend:
             if weighted is not None and weight_total > 0:
                 vectors[cluster_id] = tuple(value / weight_total for value in weighted)
         return vectors
+
+
+def _diarize_in_subprocess(
+    models_dir: Path, audio_path: Path, expected_speakers: int | None
+) -> list[SpeakerSegment]:
+    """隔离子进程的入口：在独立进程里装模型、跑完整段切分、再卸掉。
+
+    必须是模块级函数才 pickle 得动（spawn 子进程靠 import 本模块取回它）。
+    返回的 SpeakerSegment 是模块级 frozen dataclass，同样可 pickle。
+    """
+    backend = SherpaOnnxDiarizationBackend(models_dir, isolate=False)
+    backend.load()
+    try:
+        return backend.diarize(audio_path, expected_speakers)
+    finally:
+        # 子进程随后就退出，这里卸载主要是让异常路径也走一遍模型 close()。
+        backend.unload()
 
 
 def _require_darwin(backend_name: str) -> None:

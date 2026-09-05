@@ -265,7 +265,7 @@ def test_cleaning_publishes_batch_progress_detail(client, monkeypatch):
     monkeypatch.setattr(
         worker_module,
         "chunk_indexed_blocks",
-        lambda blocks: [[(index, block)] for index, block in enumerate(blocks)],
+        lambda blocks, max_chars=None: [[(index, block)] for index, block in enumerate(blocks)],
     )
     cleaner = StaticCleaner('{"0": "清洗一", "1": "清洗二"}')
     details: list[str | None] = []
@@ -283,3 +283,21 @@ def test_cleaning_publishes_batch_progress_detail(client, monkeypatch):
     final = client.get(f"/api/meetings/{meeting_id}/progress").json()
     assert final["state"] == "READY"
     assert final["detail"] is None
+
+
+def test_cleaning_chunk_size_comes_from_settings(client):
+    # 块上限是配置项：把它压到 1 个字，每块都自成一批，批次数就等于块数。
+    meeting_id = _prepare_generating_minutes(client)
+    client.app.state.settings.cleaning_chunk_chars = 1
+    cleaner = StaticCleaner('{"0": "清洗一", "1": "清洗二"}')
+    calls: list[str] = []
+
+    class CountingCleaner:
+        def generate(self, transcript: str) -> str:
+            calls.append(transcript)
+            return cleaner.generate(transcript)
+
+    _replace_worker(client, cleaner_adapter=CountingCleaner(), minutes_adapter=RecordingMinutes())
+
+    assert client.app.state.worker.process_next() == meeting_id
+    assert len(calls) == 2

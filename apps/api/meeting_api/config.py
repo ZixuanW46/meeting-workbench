@@ -35,9 +35,21 @@ class Settings(BaseSettings):
     # 关闭后跳过转写清洗，纪要直接吃原文。
     transcript_cleaning_enabled: bool = True
     # CLI 单次调用超时（秒）。整份纪要要吞下几万字逐字稿再吐几千字，
-    # 与 3000 字一批的清洗不能共用一个值。
+    # 与分批的清洗不能共用一个值；清洗每批输出与输入等长，6000 字一批约需两三分钟。
     minutes_timeout_seconds: float = 600.0
-    cleaning_timeout_seconds: float = 180.0
+    cleaning_timeout_seconds: float = 480.0
+    # 清洗每批最多多少字：上下文窗口早已不是瓶颈，块越大批次越少，
+    # 但单批失败丢得越多、漏块串块的风险越高。
+    cleaning_chunk_chars: int = 6000
+    # 两个角色各自钉死的模型。清洗是照原样改写，不需要最强模型；
+    # 纪要要抓脉络与决议，用最强的。claude 用别名（fable/opus/sonnet）或全名，
+    # codex 用模型 slug；留空 = 用各 CLI 自己的默认模型。
+    cleaning_model_claude: str | None = "opus"
+    minutes_model_claude: str | None = "fable"
+    cleaning_model_codex: str | None = "gpt-5.6-luna"
+    minutes_model_codex: str | None = "gpt-5.6-sol"
+    cleaning_codex_reasoning_effort: str | None = "medium"
+    minutes_codex_reasoning_effort: str | None = "medium"
     # Plaud 云端录音导入：mcp = 调官方 @plaud-ai/mcp（stdio），fake = 内存假网关（测试）。
     plaud_backend: Literal["mcp", "fake"] = "mcp"
     # 用 shlex.split 拆分，允许 "npx -y @plaud-ai/mcp" 或 "node /abs/path/index.js"。

@@ -211,14 +211,20 @@ class Worker:
         self.minutes_adapter = minutes_adapter or resolve_minutes_adapter(
             settings.minutes_backend,
             timeout_seconds=settings.minutes_timeout_seconds,
+            claude_model=settings.minutes_model_claude,
+            codex_model=settings.minutes_model_codex,
+            codex_reasoning_effort=settings.minutes_codex_reasoning_effort,
         )
-        # 清洗默认与纪要同一条 CLI 通道、各自超时；测试可分别注入。
+        # 清洗默认与纪要同一条 CLI 通道，各自的超时与模型；测试可分别注入。
         self.cleaner_adapter = cleaner_adapter or (
             self.minutes_adapter
             if minutes_adapter is not None
             else resolve_minutes_adapter(
                 settings.minutes_backend,
                 timeout_seconds=settings.cleaning_timeout_seconds,
+                claude_model=settings.cleaning_model_claude,
+                codex_model=settings.cleaning_model_codex,
+                codex_reasoning_effort=settings.cleaning_codex_reasoning_effort,
             )
         )
         self._process_lock = threading.Lock()
@@ -490,7 +496,7 @@ class Worker:
                 cleaned_by_index[index] = cached
 
             # 只把未命中的块送清洗；块号仍用它在整份逐字稿里的真实索引。
-            chunks = chunk_indexed_blocks(pending)
+            chunks = chunk_indexed_blocks(pending, max_chars=self.settings.cleaning_chunk_chars)
             for ordinal, chunk in enumerate(chunks, start=1):
                 # 每批一次 CLI 冷启动，几分钟里进度要能看出到第几批。
                 self._set_step(

@@ -63,7 +63,8 @@ npm install -g @plaud-ai/mcp   # 需要 Node.js ≥ 20；装完 PATH 里会有 p
 - General 是横跨多个项目的大会用的：它的会议叠加**所有项目**的热词，同一个词多个项目都写了注解时以项目列表里靠前者为准。General 自己不维护热词（词库页不给编辑入口）。
 - 词库页可以把热词在全局词库与项目之间、项目与项目之间批量移动；目标已有同词就合并，目标已写注解时保留目标的说法。
 - 会议可标记语言（`zh` 中文 / `en` 英文，默认中文，新建时选、之后也可改）：英文会议的转写与清洗保留英文原文，纪要仍用中文撰写；改语言不影响已有产物，只在下一次转写或重转写时生效。
-- 单次 CLI 调用超时可调：`MW_MINUTES_TIMEOUT_SECONDS`（默认 600）、`MW_CLEANING_TIMEOUT_SECONDS`（默认 180）。
+- 单次 CLI 调用超时可调：`MW_MINUTES_TIMEOUT_SECONDS`（默认 600）、`MW_CLEANING_TIMEOUT_SECONDS`（默认 480）。清洗按块分批送 CLI，每块上限 `MW_CLEANING_CHUNK_CHARS` 个字（默认 6000）；块越大批次越少，但单批失败丢得越多。
+- 清洗与纪要各自钉死模型：Claude 用别名或全名（`MW_CLEANING_MODEL_CLAUDE` 默认 `opus`，`MW_MINUTES_MODEL_CLAUDE` 默认 `fable`），Codex 用模型 slug 加推理强度（`MW_CLEANING_MODEL_CODEX` 默认 `gpt-5.6-luna`，`MW_MINUTES_MODEL_CODEX` 默认 `gpt-5.6-sol`，`MW_CLEANING_CODEX_REASONING_EFFORT` / `MW_MINUTES_CODEX_REASONING_EFFORT` 默认 `medium`）。留空即用各 CLI 自己的默认模型；可用的 Codex slug 见 `~/.codex/models_cache.json`。
 - 处理失败或被取消的会议可在界面上「重新处理」，音频不必重传；服务重启时中断的转写会自动回到队列。
 - 模型在本机串行使用，以适应 16GB 统一内存；实际耗时取决于录音与机器负载，不作为对外性能承诺。
 

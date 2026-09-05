@@ -51,16 +51,22 @@ class FakeMinutesAdapter:
 
 class ClaudeCliAdapter:
     def __init__(
-        self, *, executable: str = "claude", timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
+        self,
+        *,
+        executable: str = "claude",
+        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        model: str | None = None,
     ) -> None:
         self.executable = executable
         self.timeout_seconds = timeout_seconds
+        # 别名（fable / opus / sonnet）或全名；None = 用 CLI 自己的默认模型。
+        self.model = model
 
     def build_command(self) -> list[str]:
         # -p 无位置参数时从 stdin 读提示词；禁止 --bare。
         # --tools "" 关掉全部内置工具，--disallowedTools 再兜一层；
         # --strict-mcp-config 且不给 --mcp-config = 不加载任何 MCP 服务器。
-        return [
+        command = [
             self.executable,
             "-p",
             "--output-format",
@@ -72,6 +78,9 @@ class ClaudeCliAdapter:
             "--strict-mcp-config",
             "--no-session-persistence",
         ]
+        if self.model:
+            command += ["--model", self.model]
+        return command
 
     def generate(self, transcript: str) -> str:
         output = _run_cli(self.build_command(), self.timeout_seconds, input_text=transcript)
@@ -89,24 +98,37 @@ class ClaudeCliAdapter:
 
 class CodexCliAdapter:
     def __init__(
-        self, *, executable: str = "codex", timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
+        self,
+        *,
+        executable: str = "codex",
+        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.executable = executable
         self.timeout_seconds = timeout_seconds
+        # 模型 slug（如 gpt-5.6-luna）与推理强度（low/medium/high…）；None = 用 CLI 默认。
+        self.model = model
+        self.reasoning_effort = reasoning_effort
 
     def build_command(self) -> list[str]:
         # exec 的提示词参数为 "-" 时从 stdin 读；只读沙箱，禁止 --bare。
         # 子进程跑在空临时目录（见 _run_cli），不是 git 仓库，需跳过仓库检查；
         # --ephemeral 不落会话文件。
-        return [
+        command = [
             self.executable,
             "exec",
             "--sandbox",
             "read-only",
             "--ephemeral",
             "--skip-git-repo-check",
-            "-",
         ]
+        if self.model:
+            command += ["-m", self.model]
+        if self.reasoning_effort:
+            command += ["-c", f"model_reasoning_effort={self.reasoning_effort}"]
+        # "-" 必须最后：提示词从 stdin 读。
+        return [*command, "-"]
 
     def generate(self, transcript: str) -> str:
         output = _run_cli(self.build_command(), self.timeout_seconds, input_text=transcript)
@@ -129,16 +151,32 @@ class AutoMinutesAdapter:
         *,
         path: str | None = None,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        claude_model: str | None = None,
+        codex_model: str | None = None,
+        codex_reasoning_effort: str | None = None,
     ) -> None:
         # path 仅供测试注入假 PATH；None 时用进程环境变量。
         self.path = path
         self.timeout_seconds = timeout_seconds
+        # 两条通道各自的模型：同一个角色（清洗 / 纪要）换通道时模型名不通用。
+        self.claude_model = claude_model
+        self.codex_model = codex_model
+        self.codex_reasoning_effort = codex_reasoning_effort
 
     def _claude(self, executable: str) -> ClaudeCliAdapter:
-        return ClaudeCliAdapter(executable=executable, timeout_seconds=self.timeout_seconds)
+        return ClaudeCliAdapter(
+            executable=executable,
+            timeout_seconds=self.timeout_seconds,
+            model=self.claude_model,
+        )
 
     def _codex(self, executable: str) -> CodexCliAdapter:
-        return CodexCliAdapter(executable=executable, timeout_seconds=self.timeout_seconds)
+        return CodexCliAdapter(
+            executable=executable,
+            timeout_seconds=self.timeout_seconds,
+            model=self.codex_model,
+            reasoning_effort=self.codex_reasoning_effort,
+        )
 
     def resolve(self) -> ClaudeCliAdapter | CodexCliAdapter:
         claude = shutil.which("claude", path=self.path)
@@ -171,15 +209,29 @@ class AutoMinutesAdapter:
 
 
 def resolve_minutes_adapter(
-    backend: str, *, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
+    backend: str,
+    *,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    claude_model: str | None = None,
+    codex_model: str | None = None,
+    codex_reasoning_effort: str | None = None,
 ) -> MinutesAdapter:
-    """按配置选择纪要适配器（MW_MINUTES_BACKEND）。"""
+    """按配置选择 CLI 适配器（MW_MINUTES_BACKEND）；清洗与纪要各调一次，模型按角色给。"""
     if backend == "auto":
-        return AutoMinutesAdapter(timeout_seconds=timeout_seconds)
+        return AutoMinutesAdapter(
+            timeout_seconds=timeout_seconds,
+            claude_model=claude_model,
+            codex_model=codex_model,
+            codex_reasoning_effort=codex_reasoning_effort,
+        )
     if backend == "claude":
-        return ClaudeCliAdapter(timeout_seconds=timeout_seconds)
+        return ClaudeCliAdapter(timeout_seconds=timeout_seconds, model=claude_model)
     if backend == "codex":
-        return CodexCliAdapter(timeout_seconds=timeout_seconds)
+        return CodexCliAdapter(
+            timeout_seconds=timeout_seconds,
+            model=codex_model,
+            reasoning_effort=codex_reasoning_effort,
+        )
     if backend == "fake":
         return FakeMinutesAdapter()
     raise ValueError(f"未知的纪要后端: {backend}")

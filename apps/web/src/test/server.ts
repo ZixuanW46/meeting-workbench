@@ -10,8 +10,8 @@ export const server = setupServer(
   http.get('/api/meetings/:id/peaks', () =>
     HttpResponse.json({ duration: 0, peaks: [] }),
   ),
-  // 项目默认为空：不关心项目的页面测试不必自己注册 handler
-  http.get('/api/projects', () => HttpResponse.json({ items: [] })),
+  // 后端保证默认项目 General 永远在：不关心项目的页面测试也拿得到它
+  http.get('/api/projects', () => HttpResponse.json({ items: [GENERAL] })),
   // Plaud 默认已装已登录：关心 Plaud 三态的用例自己 server.use 覆盖
   http.get('/api/plaud/status', () =>
     HttpResponse.json({
@@ -32,7 +32,21 @@ export const server = setupServer(
   }),
 )
 
-/** 项目 fixture：词库页 / 会议列表 / 新建会议 / 工作台测试共用同一批项目（position 即返回顺序） */
+/** 默认项目 General：后端保证有且只有一个，自动叠加全局与各项目热词，自己不维护词 */
+export const GENERAL = {
+  id: 'pg',
+  name: 'General',
+  created_at: '2026-08-01T08:00:00Z',
+  meeting_count: 0,
+  hotword_count: 0,
+  position: 2,
+  is_default: true,
+}
+
+/**
+ * 项目 fixture：词库页 / 会议列表 / 新建会议 / 工作台测试共用同一批项目（position 即返回顺序）。
+ * General 放最后，前两项仍是 p1 / p2，用例可以继续按下标取。
+ */
 export const PROJECTS = [
   {
     id: 'p1',
@@ -41,6 +55,7 @@ export const PROJECTS = [
     meeting_count: 3,
     hotword_count: 2,
     position: 0,
+    is_default: false,
   },
   {
     id: 'p2',
@@ -49,7 +64,9 @@ export const PROJECTS = [
     meeting_count: 1,
     hotword_count: 0,
     position: 1,
+    is_default: false,
   },
+  GENERAL,
 ]
 
 /** 注册一批项目：等价于 server.use(GET /api/projects → items) */

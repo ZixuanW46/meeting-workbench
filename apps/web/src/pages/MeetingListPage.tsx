@@ -27,12 +27,13 @@ function formatCreatedAt(value: string): string {
   })
 }
 
-// 筛选值：all=全部 / none=无项目 / 其余是项目 id
+// 筛选值：all=全部 / 其余是项目 id（历史值 none=无项目已作废，读到当「全部」）
 const FILTER_KEY = 'meeting-workbench.project-filter'
 
 function readStoredFilter(): string {
   try {
-    return window.localStorage.getItem(FILTER_KEY) ?? 'all'
+    const stored = window.localStorage.getItem(FILTER_KEY)
+    return stored === null || stored === 'none' ? 'all' : stored
   } catch {
     return 'all'
   }
@@ -49,6 +50,8 @@ function storeFilter(value: string): void {
 export function MeetingListPage() {
   const [meetings, setMeetings] = useState<Meeting[] | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
+  // 项目回来之前先不挂项目标签：免得默认项目的标签闪一下再消失
+  const [projectsLoaded, setProjectsLoaded] = useState(false)
   const [projectFilter, setProjectFilter] = useState<string>(readStoredFilter)
   const [error, setError] = useState<string | null>(null)
   // 删除走两段式确认：整场会议（音频、转写、纪要）一起消失，值得多点一下
@@ -61,31 +64,19 @@ export function MeetingListPage() {
   const visibleMeetings =
     meetings === null
       ? null
-      : meetings.filter((meeting) => {
-          if (projectFilter === 'all') return true
-          if (projectFilter === 'none') return meeting.project_id === null
-          return meeting.project_id === projectFilter
-        })
+      : meetings.filter(
+          (meeting) => projectFilter === 'all' || meeting.project_id === projectFilter,
+        )
 
-  // 选中的是具体项目时，给一条去词库管理它的出口（「全部」「无项目」没有对应项目）
+  // 选中的是具体项目时，给一条去词库管理它的出口（「全部」没有对应项目）
   const activeProject = projects.find((project) => project.id === projectFilter) ?? null
-  // 「无项目」只有真有无项目会议时才值得占一颗 pill
-  const hasUnassigned =
-    meetings !== null && meetings.some((meeting) => meeting.project_id === null)
+  // 默认项目是隐含项：挂在它下面的行不挂标签，没标签就是 General
+  const defaultProjectId = projects.find((project) => project.is_default)?.id ?? null
 
   const pickFilter = (value: string) => {
     setProjectFilter(value)
     storeFilter(value)
   }
-
-  // 记住的筛选是「无项目」但这批会议全都挂了项目：回到「全部」，
-  // 否则会停在一个选中却看不见的筛选上，列表还空着
-  useEffect(() => {
-    if (meetings !== null && projectFilter === 'none' && !hasUnassigned) {
-      setProjectFilter('all')
-      storeFilter('all')
-    }
-  }, [meetings, projectFilter, hasUnassigned])
 
   const onDelete = (meetingId: string, title: string) => {
     setDeletingId(meetingId)
@@ -125,18 +116,20 @@ export function MeetingListPage() {
     }
   }, [])
 
-  // 项目只用来出筛选条：拉不到就当没有项目，不打断会议列表
+  // 项目用来出筛选条、判断哪一行是默认项目：拉不到就当没有项目，不打断会议列表
   useEffect(() => {
     let stale = false
     listProjects()
       .then((items) => {
         if (!stale) {
           setProjects(items)
+          setProjectsLoaded(true)
         }
       })
       .catch(() => {
         if (!stale) {
           setProjects([])
+          setProjectsLoaded(true)
         }
       })
     return () => {
@@ -165,7 +158,7 @@ export function MeetingListPage() {
 
       <DoctorBanner />
 
-      {/* 一个项目都没有时不出筛选组（全部/无项目没意义），但「新建项目」入口始终在 */}
+      {/* 一个项目都没有时不出筛选组（只剩「全部」没意义），但「新建项目」入口始终在 */}
       <div className="filter-bar">
         {projects.length > 0 && (
           <div className="tabs" aria-label="按项目筛选">
@@ -187,15 +180,6 @@ export function MeetingListPage() {
                 {project.name}
               </button>
             ))}
-            {hasUnassigned && (
-              <button
-                type="button"
-                className={`tab${projectFilter === 'none' ? ' active' : ''}`}
-                onClick={() => pickFilter('none')}
-              >
-                无项目
-              </button>
-            )}
           </div>
         )}
         <InlineProjectCreate
@@ -244,9 +228,11 @@ export function MeetingListPage() {
                   <span className="list-row-main">
                     <span className="list-row-headline">
                       <span className="list-row-title">{meeting.title}</span>
-                      {meeting.project_name !== null && (
-                        <span className="badge-project">{meeting.project_name}</span>
-                      )}
+                      {projectsLoaded &&
+                        meeting.project_name !== null &&
+                        meeting.project_id !== defaultProjectId && (
+                          <span className="badge-project">{meeting.project_name}</span>
+                        )}
                     </span>
                     <span className="list-row-meta">
                       {meeting.speakers.length + meeting.unknown_speaker_count > 0

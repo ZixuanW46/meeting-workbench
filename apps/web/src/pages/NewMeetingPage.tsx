@@ -41,7 +41,7 @@ export function NewMeetingPage() {
   const [meetingDateTouched, setMeetingDateTouched] = useState(false)
   // 转写目标语言：默认中文，决定后续转写识别的语言
   const [language, setLanguage] = useState<MeetingLanguage>('zh')
-  // 归属项目：空串 = 无项目；决定这场会议叠加哪份项目热词
+  // 归属项目：决定这场会议叠加哪份项目热词；项目列表回来后默认落在 General 上
   const [projects, setProjects] = useState<Project[]>([])
   const [projectId, setProjectId] = useState('')
   const [hotwords, setHotwords] = useState<string[]>([])
@@ -55,6 +55,10 @@ export function NewMeetingPage() {
       .then((items) => {
         if (!stale) {
           setProjects(items)
+          // 不选项目就是默认项目：下拉直接停在 General，不再有「无项目」这一态
+          setProjectId((current) =>
+            current === '' ? (items.find((item) => item.is_default)?.id ?? '') : current,
+          )
         }
       })
       .catch(() => {
@@ -240,7 +244,6 @@ export function NewMeetingPage() {
               value={projectId}
               onChange={(event) => setProjectId(event.target.value)}
             >
-              <option value="">无项目</option>
               {projects.map((project) => (
                 <option key={project.id} value={project.id}>
                   {project.name}
@@ -255,7 +258,7 @@ export function NewMeetingPage() {
             />
           </div>
           <span className="form-hint">
-            项目决定这场会议叠加哪份项目热词；不选就是无项目，只用通用词库
+            项目决定这场会议叠加哪份项目热词；不选就落到默认项目 General
           </span>
         </div>
 

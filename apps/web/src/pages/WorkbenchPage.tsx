@@ -62,6 +62,9 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
   const [confirmingCancel, setConfirmingCancel] = useState(false)
   const meetingStateRef = useRef<string | null>(null)
   meetingStateRef.current = meeting?.state ?? null
+  // 不选项目的会议落在默认项目下：元信息行直接写项目名，不再有「无项目」这一态
+  const defaultProject = projects.find((project) => project.is_default) ?? null
+  const projectLabel = meeting?.project_name ?? defaultProject?.name ?? 'General'
 
   const refresh = useCallback(() => {
     getMeeting(meetingId)
@@ -173,6 +176,7 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
 
   const saveProject = async () => {
     if (meeting === null) return
+    // 草稿总停在某个项目上（不选项目的会议挂在默认项目下），空串只在项目还没回来时出现
     const next = projectDraft === '' ? null : projectDraft
     if (next === meeting.project_id) {
       setEditingProject(false)
@@ -425,7 +429,6 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
                   autoFocus
                   onChange={(event) => setProjectDraft(event.target.value)}
                 >
-                  <option value="">无项目</option>
                   {projects.map((project) => (
                     <option key={project.id} value={project.id}>
                       {project.name}
@@ -460,13 +463,13 @@ export function WorkbenchPage({ meetingId }: { meetingId: string }) {
               </span>
             ) : (
               <span className="meta-date">
-                <span>{`项目 ${meeting.project_name ?? '无项目'}`}</span>
+                <span>{`项目 ${projectLabel}`}</span>
                 <button
                   type="button"
                   className="btn btn-ghost meta-edit-btn"
                   aria-label="修改会议项目"
                   onClick={() => {
-                    setProjectDraft(meeting.project_id ?? '')
+                    setProjectDraft(meeting.project_id ?? defaultProject?.id ?? '')
                     setEditingProject(true)
                   }}
                 >

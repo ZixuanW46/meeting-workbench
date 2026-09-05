@@ -20,6 +20,9 @@ const MEETING = {
   unknown_speaker_count: 0,
 }
 
+/** 没挂具体项目的会议：后端一律落到默认项目 General */
+const GENERAL_MEETING = { ...MEETING, project_id: 'pg', project_name: 'General' }
+
 beforeEach(() => {
   sessionStorage.clear()
 })
@@ -573,7 +576,7 @@ describe('工作台页', () => {
     useProjects()
     server.use(
       http.get('/api/meetings/m1', () =>
-        HttpResponse.json(patched === null ? MEETING : { ...MEETING, ...patched }),
+        HttpResponse.json(patched === null ? GENERAL_MEETING : { ...MEETING, ...patched }),
       ),
       http.patch('/api/meetings/m1', async ({ request }) => {
         patched = (await request.json()) as Record<string, unknown>
@@ -587,11 +590,13 @@ describe('工作台页', () => {
 
     render(<WorkbenchPage meetingId="m1" />)
 
-    expect(await screen.findByText('项目 无项目')).toBeInTheDocument()
+    expect(await screen.findByText('项目 General')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '修改会议项目' }))
     const select = await screen.findByLabelText('会议项目')
     await screen.findByRole('option', { name: '会议工作台' })
+    // 草稿默认停在会议当前的项目上，而不是空
+    expect((select as HTMLSelectElement).value).toBe('pg')
     fireEvent.change(select, { target: { value: 'p1' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
@@ -603,37 +608,37 @@ describe('工作台页', () => {
     let patchCalled = false
     useProjects()
     server.use(
-      http.get('/api/meetings/m1', () => HttpResponse.json(MEETING)),
+      http.get('/api/meetings/m1', () => HttpResponse.json(GENERAL_MEETING)),
       http.patch('/api/meetings/m1', () => {
         patchCalled = true
-        return HttpResponse.json(MEETING)
+        return HttpResponse.json(GENERAL_MEETING)
       }),
     )
 
     render(<WorkbenchPage meetingId="m1" />)
 
-    expect(await screen.findByText('项目 无项目')).toBeInTheDocument()
+    expect(await screen.findByText('项目 General')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '修改会议项目' }))
     const select = await screen.findByLabelText('会议项目')
     await screen.findByRole('option', { name: '声纹研究' })
     fireEvent.change(select, { target: { value: 'p2' } })
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
 
-    expect(screen.getByText('项目 无项目')).toBeInTheDocument()
+    expect(screen.getByText('项目 General')).toBeInTheDocument()
     expect(patchCalled).toBe(false)
   })
 
-  it('已挂项目的会议可以改回无项目：PATCH 带 project_id null', async () => {
+  it('改挂下拉没有「无项目」空选项，改回默认项目就是选 General', async () => {
     let patched: Record<string, unknown> | null = null
     const attached = { ...MEETING, project_id: 'p1', project_name: '会议工作台' }
     useProjects()
     server.use(
       http.get('/api/meetings/m1', () =>
-        HttpResponse.json(patched === null ? attached : { ...MEETING }),
+        HttpResponse.json(patched === null ? attached : GENERAL_MEETING),
       ),
       http.patch('/api/meetings/m1', async ({ request }) => {
         patched = (await request.json()) as Record<string, unknown>
-        return HttpResponse.json(MEETING)
+        return HttpResponse.json(GENERAL_MEETING)
       }),
     )
 
@@ -643,11 +648,16 @@ describe('工作台页', () => {
     fireEvent.click(screen.getByRole('button', { name: '修改会议项目' }))
     const select = await screen.findByLabelText('会议项目')
     expect((select as HTMLSelectElement).value).toBe('p1')
-    fireEvent.change(select, { target: { value: '' } })
+    await screen.findByRole('option', { name: 'General' })
+    const options = select.querySelectorAll('option')
+    expect(options.length).toBe(3)
+    expect(Array.from(options).every((option) => option.value !== '')).toBe(true)
+
+    fireEvent.change(select, { target: { value: 'pg' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
-    expect(await screen.findByText('项目 无项目')).toBeInTheDocument()
-    expect(patched).toEqual({ project_id: null })
+    expect(await screen.findByText('项目 General')).toBeInTheDocument()
+    expect(patched).toEqual({ project_id: 'pg' })
   })
 
   it('改挂时可就地新建项目：新项目进下拉并成为草稿，点保存才 PATCH', async () => {
@@ -656,7 +666,9 @@ describe('工作台页', () => {
     useProjects()
     server.use(
       http.get('/api/meetings/m1', () =>
-        HttpResponse.json(patched === null ? MEETING : { ...MEETING, ...patched }),
+        HttpResponse.json(
+          patched === null ? GENERAL_MEETING : { ...GENERAL_MEETING, ...patched },
+        ),
       ),
       http.post('/api/projects', async ({ request }) => {
         posted = (await request.json()) as { name: string }
@@ -684,7 +696,7 @@ describe('工作台页', () => {
 
     render(<WorkbenchPage meetingId="m1" />)
 
-    expect(await screen.findByText('项目 无项目')).toBeInTheDocument()
+    expect(await screen.findByText('项目 General')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '修改会议项目' }))
     const select = await screen.findByLabelText('会议项目')
 

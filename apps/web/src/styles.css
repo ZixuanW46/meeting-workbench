@@ -991,6 +991,76 @@ a {
   margin-bottom: 8px;
 }
 
+/* ---------- 词条多选与跨层移动 ---------- */
+
+/* 站内唯一的可交互复选框：发丝线方框，选中填主色并画勾 */
+.hotword-check {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin: 0;
+  position: relative;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 4px;
+  background: var(--surface-2);
+  cursor: pointer;
+  transition:
+    background 0.1s var(--ease),
+    border-color 0.1s var(--ease);
+}
+
+.hotword-check:hover {
+  border-color: var(--primary);
+}
+
+.hotword-check:checked {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.hotword-check:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 3px;
+  height: 6px;
+  border: solid var(--inverse-canvas);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+/* 列表表头：只放全选与总数，不画分隔线（第一行自己带上边线） */
+.hotword-list-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--ink-tertiary);
+}
+
+/* 吸底操作栏：与确认页提交栏同一性格，暗面 + 顶边发丝线，不投影 */
+.hotword-bulk-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 0 12px;
+  background: var(--canvas);
+  border-top: 1px solid var(--hairline);
+}
+
+.hotword-bulk-count {
+  font-size: 13px;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* 窄窗口：范围栏落回顶部，整页回单栏 */
 @media (max-width: 860px) {
   .hotword-layout {

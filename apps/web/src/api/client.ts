@@ -17,9 +17,9 @@ export interface Meeting {
   meeting_date_source: 'user' | 'filename' | 'created'
   /** 改动不影响当前状态，只有下一次转写/重转写才生效 */
   language: MeetingLanguage
-  /** 归属项目；null=无项目 */
+  /** 归属项目；后端保证总有值（不选就是默认项目 General） */
   project_id: string | null
-  /** 归属项目名，随 project_id 一起为 null */
+  /** 归属项目名；同样总有值，不选项目的会议显示默认项目名 */
   project_name: string | null
   /** 已确认身份的参会人显示名，按累计发言时长降序；未完成确认时为空 */
   speakers: string[]
@@ -39,7 +39,7 @@ export interface MeetingCreateInput {
   meeting_date?: string
   /** 不传则后端默认 zh */
   language?: MeetingLanguage
-  /** 归属项目；不传或 null 都是无项目 */
+  /** 归属项目；不传或 null 都落到默认项目 General */
   project_id?: string | null
 }
 
@@ -47,7 +47,7 @@ export interface MeetingUpdateInput {
   title?: string
   meeting_date?: string
   language?: MeetingLanguage
-  /** 传 null=改为无项目；不传=不动。改挂项目不改状态，热词快照不回溯 */
+  /** 传 null=落回默认项目 General；不传=不动。改挂项目不改状态，热词快照不回溯 */
   project_id?: string | null
 }
 
@@ -419,6 +419,11 @@ export interface Project {
   hotword_count: number
   /** 用户拖出来的展示顺序，后端已按它排好序返回；前端一律直接用返回顺序 */
   position: number
+  /**
+   * 默认项目（General）：有且只有一个，不选项目的会议都落在它下面。
+   * 它自动叠加全局词库与所有项目的热词，自己不维护词条，也不能删。
+   */
+  is_default: boolean
 }
 
 /** 项目热词：形状与全局词库完全一致，只是作用域限定在这个项目 */
@@ -454,7 +459,7 @@ export async function reorderProjects(ids: string[]): Promise<Project[]> {
   return data.items
 }
 
-/** 删项目：该项目的会议变「无项目」，项目热词一并删除（已存的快照不回溯） */
+/** 删项目：该项目的会议改挂到默认项目，项目热词一并删除（已存的快照不回溯） */
 export function deleteProject(projectId: string): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}`, { method: 'DELETE' })
 }
@@ -493,6 +498,30 @@ export function deleteProjectHotword(projectId: string, hotwordId: string): Prom
   return apiFetch<void>(`/api/projects/${projectId}/hotwords/${hotwordId}`, {
     method: 'DELETE',
   })
+}
+
+/** 热词所在的层：project_id=null 是全局词库，否则是该项目的项目热词 */
+export interface HotwordLayer {
+  project_id: string | null
+}
+
+/** moved=在目标层新建的条数；merged=目标层已有同词、合并掉的条数 */
+export interface HotwordMoveResult {
+  moved: number
+  merged: number
+}
+
+/**
+ * 跨层移动热词：全局 ↔ 项目、项目 ↔ 项目，一次可移多条。
+ * ids 是来源层的词条 id；目标层已有同词就合并，来源那条一律消失。
+ * 默认项目（General）不参与：它的词是叠加出来的，后端会回 409。
+ */
+export function moveHotwords(input: {
+  from: HotwordLayer
+  to: HotwordLayer
+  ids: string[]
+}): Promise<HotwordMoveResult> {
+  return postJson<HotwordMoveResult>('/api/hotwords/move', input)
 }
 
 /* ---------- Plaud 云端录音导入 ---------- */

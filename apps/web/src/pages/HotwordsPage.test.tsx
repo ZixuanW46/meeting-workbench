@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
-import { PROJECTS, server, useProjects } from '../test/server'
+import { GENERAL, PROJECTS, server, useProjects } from '../test/server'
+import { Toaster } from '../components/Toast'
 import { HotwordsPage } from './HotwordsPage'
 
 const ITEMS = [
@@ -15,10 +16,11 @@ function railNames(container: HTMLElement): string[] {
   )
 }
 
-/** p2 在前、p1 在后的重排结果，供 PUT /api/projects/order 回吐 */
+/** p2 在前、p1 在后的重排结果（General 照旧垫底），供 PUT /api/projects/order 回吐 */
 const SWAPPED = [
   { ...PROJECTS[1], position: 0 },
   { ...PROJECTS[0], position: 1 },
+  { ...GENERAL, position: 2 },
 ]
 
 describe('词库页', () => {
@@ -310,7 +312,7 @@ describe('词库页', () => {
     expect(patchCalls).toBe(0)
   })
 
-  it('头部「删除」就地二次确认，文案说明会议变无项目、项目热词一并删', async () => {
+  it('头部「删除」就地二次确认，文案说明会议改挂 General、项目热词一并删', async () => {
     let deleted: string | null = null
     useProjects()
     server.use(
@@ -327,14 +329,14 @@ describe('词库页', () => {
     fireEvent.click(await screen.findByRole('button', { name: '删除' }))
 
     expect(
-      screen.getByText(/该项目的会议会变成无项目，项目热词一并删除/),
+      screen.getByText(/该项目的会议会改挂到 General，项目热词一并删除/),
     ).toBeInTheDocument()
     expect(deleted).toBeNull()
 
     // 先验证「取消」收起确认，再重新走一遍到「确认删除」
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(
-      screen.queryByText(/该项目的会议会变成无项目/),
+      screen.queryByText(/该项目的会议会改挂到 General/),
     ).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
@@ -417,7 +419,7 @@ describe('词库页', () => {
     const { container } = render(<HotwordsPage />)
     await screen.findByRole('button', { name: /^声纹研究/ })
 
-    expect(railNames(container)).toEqual(['通用', '声纹研究', '会议工作台'])
+    expect(railNames(container)).toEqual(['通用', '声纹研究', '会议工作台', 'General'])
   })
 
   it('把手上按 ⌥↓ 下移一位：乐观换序并把新顺序 PUT 给后端', async () => {
@@ -438,13 +440,13 @@ describe('词库页', () => {
     // 已经在第一位，⌥↑ 是空操作，不该打后端
     fireEvent.keyDown(grip, { key: 'ArrowUp', altKey: true })
     expect(ordered).toBeNull()
-    expect(railNames(container)).toEqual(['通用', '会议工作台', '声纹研究'])
+    expect(railNames(container)).toEqual(['通用', '会议工作台', '声纹研究', 'General'])
 
     fireEvent.keyDown(grip, { key: 'ArrowDown', altKey: true })
-    expect(railNames(container)).toEqual(['通用', '声纹研究', '会议工作台'])
+    expect(railNames(container)).toEqual(['通用', '声纹研究', '会议工作台', 'General'])
 
-    await waitFor(() => expect(ordered).toEqual(['p2', 'p1']))
-    expect(railNames(container)).toEqual(['通用', '声纹研究', '会议工作台'])
+    await waitFor(() => expect(ordered).toEqual(['p2', 'p1', 'pg']))
+    expect(railNames(container)).toEqual(['通用', '声纹研究', '会议工作台', 'General'])
   })
 
   it('拖拽排序：拖动中出插入线，松手后落到目标位置', async () => {
@@ -472,8 +474,8 @@ describe('词库页', () => {
 
     fireEvent.drop(rows[2])
 
-    await waitFor(() => expect(ordered).toEqual(['p2', 'p1']))
-    expect(railNames(container)).toEqual(['通用', '声纹研究', '会议工作台'])
+    await waitFor(() => expect(ordered).toEqual(['p2', 'p1', 'pg']))
+    expect(railNames(container)).toEqual(['通用', '声纹研究', '会议工作台', 'General'])
     expect(container.querySelector('.scope-row.dragging')).toBeNull()
   })
 
@@ -490,9 +492,177 @@ describe('词库页', () => {
     const grip = await screen.findByRole('button', { name: '拖动排序 会议工作台' })
 
     fireEvent.keyDown(grip, { key: 'ArrowDown', altKey: true })
-    expect(railNames(container)).toEqual(['通用', '声纹研究', '会议工作台'])
+    expect(railNames(container)).toEqual(['通用', '声纹研究', '会议工作台', 'General'])
 
     expect(await screen.findByText('项目顺序不完整')).toBeInTheDocument()
-    expect(railNames(container)).toEqual(['通用', '会议工作台', '声纹研究'])
+    expect(railNames(container)).toEqual(['通用', '会议工作台', '声纹研究', 'General'])
+  })
+
+  it('选中 General：只给一段说明，不渲染词条编辑，也不给「删除」', async () => {
+    useProjects()
+    server.use(http.get('/api/hotwords', () => HttpResponse.json({ items: ITEMS })))
+
+    render(<HotwordsPage />)
+    await screen.findByText('Qwen3')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'General' }))
+
+    expect(
+      await screen.findByText(
+        'General 是默认项目，会自动叠加全局词库和所有项目的热词，不用单独维护',
+      ),
+    ).toBeInTheDocument()
+    // 不拉它的热词（没注册 handler，真发请求会被 onUnhandledRequest 判错）
+    expect(screen.queryByLabelText('添加词语')).not.toBeInTheDocument()
+    expect(screen.queryByText('Qwen3')).not.toBeInTheDocument()
+    // 改名保留、删除隐藏
+    expect(screen.getByRole('button', { name: '重命名' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '删除' })).not.toBeInTheDocument()
+  })
+
+  it('General 在左栏不挂词数：它的词是叠加出来的，数字没有意义', async () => {
+    useProjects()
+    server.use(http.get('/api/hotwords', () => HttpResponse.json({ items: [] })))
+
+    render(<HotwordsPage />)
+    const general = await screen.findByRole('button', { name: 'General' })
+
+    expect(general.querySelector('.scope-count')).toBeNull()
+    expect(
+      screen.getByRole('button', { name: /^会议工作台/ }).querySelector('.scope-count'),
+    ).not.toBeNull()
+  })
+
+  it('通用词库多选后移动到项目：请求体、行移除、左栏计数与 toast', async () => {
+    let moveBody: unknown = null
+    useProjects()
+    server.use(
+      http.get('/api/hotwords', () => HttpResponse.json({ items: ITEMS })),
+      http.post('/api/hotwords/move', async ({ request }) => {
+        moveBody = await request.json()
+        return HttpResponse.json({ moved: 2, merged: 0 })
+      }),
+    )
+
+    render(
+      <>
+        <HotwordsPage />
+        <Toaster />
+      </>,
+    )
+    await screen.findByText('Qwen3')
+
+    fireEvent.click(await screen.findByLabelText('选择 Qwen3'))
+    fireEvent.click(screen.getByLabelText('选择 声纹库'))
+    expect(screen.getByText('已选 2 个')).toBeInTheDocument()
+
+    fireEvent.keyDown(screen.getByRole('button', { name: '移动到' }), { key: 'Enter' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: '会议工作台' }))
+
+    await waitFor(() => expect(screen.queryByText('Qwen3')).not.toBeInTheDocument())
+    expect(moveBody).toEqual({
+      from: { project_id: null },
+      to: { project_id: 'p1' },
+      ids: ['h1', 'h2'],
+    })
+    expect(screen.queryByText('声纹库')).not.toBeInTheDocument()
+    expect(await screen.findByText('已移动 2 个词到「会议工作台」')).toBeInTheDocument()
+    // p1 原本 2 条，收下两条变 4；选中态一并清空
+    expect(screen.getByRole('button', { name: /^会议工作台/ })).toHaveTextContent('4')
+    expect(screen.queryByText(/已选/)).not.toBeInTheDocument()
+  })
+
+  it('移动目标不含当前范围与 General', async () => {
+    useProjects()
+    server.use(http.get('/api/hotwords', () => HttpResponse.json({ items: ITEMS })))
+
+    render(<HotwordsPage />)
+    await screen.findByText('Qwen3')
+
+    fireEvent.click(await screen.findByLabelText('选择 Qwen3'))
+    fireEvent.keyDown(screen.getByRole('button', { name: '移动到' }), { key: 'Enter' })
+
+    const items = await screen.findAllByRole('menuitem')
+    expect(items.map((item) => item.textContent)).toEqual(['会议工作台', '声纹研究'])
+  })
+
+  it('行尾单条「移动到」：项目 → 通用词库，合并数写进 toast', async () => {
+    let moveBody: unknown = null
+    useProjects()
+    server.use(
+      http.get('/api/hotwords', () => HttpResponse.json({ items: [] })),
+      http.get('/api/projects/p1/hotwords', () =>
+        HttpResponse.json({ items: [{ id: 'ph1', word: '亚秒轮次', note: '轮次时长' }] }),
+      ),
+      http.post('/api/hotwords/move', async ({ request }) => {
+        moveBody = await request.json()
+        return HttpResponse.json({ moved: 0, merged: 1 })
+      }),
+    )
+
+    render(
+      <>
+        <HotwordsPage />
+        <Toaster />
+      </>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /^会议工作台/ }))
+    await screen.findByText('亚秒轮次')
+
+    fireEvent.keyDown(screen.getByRole('button', { name: '移动词语 亚秒轮次' }), {
+      key: 'Enter',
+    })
+    fireEvent.click(await screen.findByRole('menuitem', { name: '通用词库' }))
+
+    await waitFor(() => expect(screen.queryByText('亚秒轮次')).not.toBeInTheDocument())
+    expect(moveBody).toEqual({
+      from: { project_id: 'p1' },
+      to: { project_id: null },
+      ids: ['ph1'],
+    })
+    expect(
+      await screen.findByText('已移动 1 个词到「通用词库」，合并 1 个'),
+    ).toBeInTheDocument()
+  })
+
+  it('列表头「全选」勾上全部词条，「取消选择」清空', async () => {
+    useProjects()
+    server.use(http.get('/api/hotwords', () => HttpResponse.json({ items: ITEMS })))
+
+    render(<HotwordsPage />)
+    await screen.findByText('Qwen3')
+
+    fireEvent.click(await screen.findByLabelText('全选'))
+    expect(screen.getByText('已选 2 个')).toBeInTheDocument()
+    expect(screen.getByLabelText('选择 Qwen3')).toBeChecked()
+
+    fireEvent.click(screen.getByRole('button', { name: '取消选择' }))
+    expect(screen.queryByText(/已选/)).not.toBeInTheDocument()
+    expect(screen.getByLabelText('选择 Qwen3')).not.toBeChecked()
+  })
+
+  it('移动失败：词条留在原处，错误进 toast', async () => {
+    useProjects()
+    server.use(
+      http.get('/api/hotwords', () => HttpResponse.json({ items: ITEMS })),
+      http.post('/api/hotwords/move', () =>
+        HttpResponse.json({ detail: '词语不存在' }, { status: 404 }),
+      ),
+    )
+
+    render(
+      <>
+        <HotwordsPage />
+        <Toaster />
+      </>,
+    )
+    await screen.findByText('Qwen3')
+
+    fireEvent.click(await screen.findByLabelText('选择 Qwen3'))
+    fireEvent.keyDown(screen.getByRole('button', { name: '移动到' }), { key: 'Enter' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: '声纹研究' }))
+
+    expect(await screen.findByText('词语不存在')).toBeInTheDocument()
+    expect(screen.getByText('Qwen3')).toBeInTheDocument()
   })
 })

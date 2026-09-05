@@ -18,10 +18,17 @@ describe('新建会议表单', () => {
     )
 
     render(<NewMeetingPage />)
+    // 等项目下拉落到默认项目，提交体才是稳定的
+    await screen.findByRole('option', { name: 'General' })
     fireEvent.click(screen.getByRole('button', { name: '创建会议' }))
 
     await waitFor(() => expect(body).not.toBeNull())
-    expect(body).toEqual({ hotwords: [], meeting_date: localToday(), language: 'zh' })
+    expect(body).toEqual({
+      hotwords: [],
+      meeting_date: localToday(),
+      language: 'zh',
+      project_id: 'pg',
+    })
     expect(screen.queryByText('请输入标题')).not.toBeInTheDocument()
   })
 
@@ -45,6 +52,7 @@ describe('新建会议表单', () => {
     )
 
     render(<NewMeetingPage />)
+    await screen.findByRole('option', { name: 'General' })
 
     fireEvent.change(screen.getByLabelText('标题'), { target: { value: '周会' } })
 
@@ -65,6 +73,7 @@ describe('新建会议表单', () => {
       hotwords: ['声纹', 'MLX'],
       meeting_date: localToday(),
       language: 'zh',
+      project_id: 'pg',
     })
     await waitFor(() => expect(window.location.hash).toBe('#/meetings/m-new'))
   })
@@ -113,7 +122,7 @@ describe('新建会议表单', () => {
     await waitFor(() => expect(body).not.toBeNull())
     expect(body).toMatchObject({ meeting_date: '2026-08-30' })
   })
-  it('选中项目后随表单提交 project_id；不选则整个字段不出现', async () => {
+  it('项目下拉默认选中 General，选中别的项目后随表单提交 project_id', async () => {
     let body: Record<string, unknown> | null = null
     useProjects()
     server.use(
@@ -125,8 +134,9 @@ describe('新建会议表单', () => {
 
     render(<NewMeetingPage />)
     const select = await screen.findByLabelText('项目')
-    expect((select as HTMLSelectElement).value).toBe('')
     await screen.findByRole('option', { name: '声纹研究' })
+    // 不选就落到默认项目，不再有「无项目」这一态
+    await waitFor(() => expect((select as HTMLSelectElement).value).toBe('pg'))
 
     fireEvent.change(select, { target: { value: 'p2' } })
     fireEvent.click(screen.getByRole('button', { name: '创建会议' }))
@@ -135,15 +145,35 @@ describe('新建会议表单', () => {
     expect(body).toMatchObject({ project_id: 'p2' })
   })
 
-  it('下拉里没有「新建项目…」哨兵，只有无项目与真实项目', async () => {
+  it('不动项目下拉直接创建：project_id 就是 General', async () => {
+    let body: Record<string, unknown> | null = null
+    useProjects()
+    server.use(
+      http.post('/api/meetings', async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ id: 'm-new' }, { status: 201 })
+      }),
+    )
+
+    render(<NewMeetingPage />)
+    await screen.findByRole('option', { name: 'General' })
+
+    fireEvent.click(screen.getByRole('button', { name: '创建会议' }))
+
+    await waitFor(() => expect(body).not.toBeNull())
+    expect(body).toMatchObject({ project_id: 'pg' })
+  })
+
+  it('下拉里没有「新建项目…」哨兵，也没有「无项目」空选项', async () => {
     useProjects()
     render(<NewMeetingPage />)
 
     await screen.findByRole('option', { name: '声纹研究' })
     expect(screen.queryByRole('option', { name: '新建项目…' })).not.toBeInTheDocument()
-    expect(
-      screen.getByLabelText('项目').querySelectorAll('option').length,
-    ).toBe(3)
+    expect(screen.queryByRole('option', { name: '无项目' })).not.toBeInTheDocument()
+    const options = screen.getByLabelText('项目').querySelectorAll('option')
+    expect(options.length).toBe(3)
+    expect(Array.from(options).every((option) => option.value !== '')).toBe(true)
   })
 
   it('下拉旁的「新建项目」就地创建，创建完自动选中并随表单提交', async () => {

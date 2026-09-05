@@ -10,6 +10,13 @@ from meeting_api.models import Meeting, ProjectHotword
 from meeting_api.pipeline.asr import AsrSegment, FakeAsrBackend
 
 
+def _default_project_id(client) -> str:
+    """默认项目只认 is_default 标记，不认名字（它可以被改名）。"""
+    items = client.get("/api/projects").json()["items"]
+    (default_item,) = [item for item in items if item["is_default"]]
+    return default_item["id"]
+
+
 def _create_project(client, name: str) -> str:
     response = client.post("/api/projects", json={"name": name})
     assert response.status_code == 201, response.text
@@ -68,6 +75,7 @@ def test_project_crud_lists_sorted_with_counts(client):
     assert alpha["name"] == "Alpha 项目"
     assert alpha["meeting_count"] == 0
     assert alpha["hotword_count"] == 0
+    assert alpha["is_default"] is False
 
     assert client.post(
         f"/api/projects/{beta}/hotwords", json={"word": "项目词"}
@@ -77,10 +85,10 @@ def test_project_crud_lists_sorted_with_counts(client):
     listed = client.get("/api/projects")
     assert listed.status_code == 200
     items = listed.json()["items"]
-    # 顺序按 position（创建先后），不是名字：先建的 Beta 仍排在前面。
-    assert [item["name"] for item in items] == ["Beta 项目", "Alpha 项目"]
-    assert items[0]["meeting_count"] == 1
-    assert items[0]["hotword_count"] == 1
+    # 默认项目占着 position 0；其余按 position（创建先后）排，不是名字。
+    assert [item["name"] for item in items] == ["General", "Beta 项目", "Alpha 项目"]
+    assert items[1]["meeting_count"] == 1
+    assert items[1]["hotword_count"] == 1
     assert set(items[0]) == {
         "id",
         "name",
@@ -88,6 +96,7 @@ def test_project_crud_lists_sorted_with_counts(client):
         "meeting_count",
         "hotword_count",
         "position",
+        "is_default",
     }
 
 
@@ -116,7 +125,7 @@ def test_project_rename_and_404_and_duplicate(client):
     assert missing.json()["detail"] == "项目不存在"
 
 
-def test_delete_project_clears_meeting_project_id_and_keeps_meeting(client):
+def test_delete_project_keeps_meeting_and_drops_its_hotwords(client):
     project_id = _create_project(client, "待删项目")
     assert client.post(
         f"/api/projects/{project_id}/hotwords", json={"word": "项目词"}
@@ -128,8 +137,9 @@ def test_delete_project_clears_meeting_project_id_and_keeps_meeting(client):
 
     detail = client.get(f"/api/meetings/{meeting_id}")
     assert detail.status_code == 200
-    assert detail.json()["project_id"] is None
-    assert detail.json()["project_name"] is None
+    # 会议不会变成「无项目」，而是改挂默认项目。
+    assert detail.json()["project_id"] == _default_project_id(client)
+    assert detail.json()["project_name"] == "General"
 
     with client.app.state.session_factory() as session:
         assert session.query(ProjectHotword).count() == 0
@@ -139,93 +149,108 @@ def test_delete_project_clears_meeting_project_id_and_keeps_meeting(client):
 
 
 def test_new_project_is_appended_to_the_end_of_the_order(client):
+    general = _default_project_id(client)
     first = client.post("/api/projects", json={"name": "先建"}).json()
     second = client.post("/api/projects", json={"name": "Ahead 后建"}).json()
 
-    assert first["position"] == 0
-    assert second["position"] == 1
+    assert first["position"] == 1
+    assert second["position"] == 2
 
     items = client.get("/api/projects").json()["items"]
     # 名字排在前面的「Ahead 后建」也要排到后面：顺序看 position，不看名字。
-    assert [item["id"] for item in items] == [first["id"], second["id"]]
+    assert [item["id"] for item in items] == [general, first["id"], second["id"]]
 
 
 def test_reorder_projects_persists_and_returns_new_order(client):
+    general = _default_project_id(client)
     alpha = _create_project(client, "Alpha")
     beta = _create_project(client, "Beta")
     gamma = _create_project(client, "Gamma")
 
+    # 默认项目照样参与排序，可以被排到别的项目后面。
     reordered = client.put(
-        "/api/projects/order", json={"ids": [gamma, alpha, beta]}
+        "/api/projects/order", json={"ids": [gamma, alpha, beta, general]}
     )
     assert reordered.status_code == 200, reordered.text
     items = reordered.json()["items"]
-    assert [item["id"] for item in items] == [gamma, alpha, beta]
-    assert [item["position"] for item in items] == [0, 1, 2]
+    assert [item["id"] for item in items] == [gamma, alpha, beta, general]
+    assert [item["position"] for item in items] == [0, 1, 2, 3]
 
     listed = client.get("/api/projects").json()["items"]
-    assert [item["id"] for item in listed] == [gamma, alpha, beta]
+    assert [item["id"] for item in listed] == [gamma, alpha, beta, general]
 
 
 def test_reorder_rejects_incomplete_unknown_or_duplicated_ids(client):
+    general = _default_project_id(client)
     alpha = _create_project(client, "Alpha")
     beta = _create_project(client, "Beta")
 
-    missing = client.put("/api/projects/order", json={"ids": [alpha]})
+    # 漏掉默认项目也算不完整。
+    missing = client.put("/api/projects/order", json={"ids": [alpha, beta]})
     assert missing.status_code == 422
     assert missing.json()["detail"] == "ids 必须包含全部项目且不重复"
 
     unknown = client.put(
-        "/api/projects/order", json={"ids": [alpha, beta, "not-a-project"]}
+        "/api/projects/order", json={"ids": [general, alpha, beta, "not-a-project"]}
     )
     assert unknown.status_code == 422
     assert unknown.json()["detail"] == "ids 必须包含全部项目且不重复"
 
-    duplicated = client.put("/api/projects/order", json={"ids": [alpha, alpha]})
+    duplicated = client.put(
+        "/api/projects/order", json={"ids": [general, alpha, alpha]}
+    )
     assert duplicated.status_code == 422
     assert duplicated.json()["detail"] == "ids 必须包含全部项目且不重复"
 
     # 校验失败不能改动既有顺序。
     listed = client.get("/api/projects").json()["items"]
-    assert [item["id"] for item in listed] == [alpha, beta]
+    assert [item["id"] for item in listed] == [general, alpha, beta]
 
 
-def test_reorder_with_empty_ids_and_no_projects_is_ok(client):
-    response = client.put("/api/projects/order", json={"ids": []})
+def test_reorder_with_only_the_default_project_is_ok(client):
+    """库里永远至少有默认项目，所以空 ids 不再是合法输入。"""
+    general = _default_project_id(client)
+
+    assert client.put("/api/projects/order", json={"ids": []}).status_code == 422
+
+    response = client.put("/api/projects/order", json={"ids": [general]})
     assert response.status_code == 200
-    assert response.json() == {"items": []}
+    assert [item["id"] for item in response.json()["items"]] == [general]
 
 
 def test_reorder_route_is_not_shadowed_by_project_id_route(client):
     """/order 必须先于 /{project_id} 命中，否则会被当成项目 id 走 404。"""
+    general = _default_project_id(client)
     project_id = _create_project(client, "唯一项目")
 
-    response = client.put("/api/projects/order", json={"ids": [project_id]})
+    response = client.put("/api/projects/order", json={"ids": [project_id, general]})
 
     assert response.status_code == 200
-    assert [item["id"] for item in response.json()["items"]] == [project_id]
+    assert [item["id"] for item in response.json()["items"]] == [project_id, general]
 
 
 def test_delete_project_keeps_remaining_order(client):
+    general = _default_project_id(client)
     alpha = _create_project(client, "Alpha")
     beta = _create_project(client, "Beta")
     gamma = _create_project(client, "Gamma")
     assert client.put(
-        "/api/projects/order", json={"ids": [gamma, beta, alpha]}
+        "/api/projects/order", json={"ids": [gamma, beta, alpha, general]}
     ).status_code == 200
 
     assert client.delete(f"/api/projects/{beta}").status_code == 204
 
     # position 留空洞没关系，剩下的相对顺序不变。
     listed = client.get("/api/projects").json()["items"]
-    assert [item["id"] for item in listed] == [gamma, alpha]
+    assert [item["id"] for item in listed] == [gamma, alpha, general]
 
     # 删除后新建的项目仍然追加到末尾（取最大 position + 1）。
     delta = client.post("/api/projects", json={"name": "Delta"}).json()
-    assert delta["position"] == 3
+    assert delta["position"] == 4
     assert [item["id"] for item in client.get("/api/projects").json()["items"]] == [
         gamma,
         alpha,
+        general,
         delta["id"],
     ]
 
@@ -319,11 +344,11 @@ def test_create_meeting_with_project_returns_project_name(client):
     assert listed[0]["project_name"] == "归属项目"
 
 
-def test_create_meeting_without_project_is_null(client):
-    created = client.post("/api/meetings", json={"title": "无项目的会"})
+def test_create_meeting_without_project_falls_back_to_default(client):
+    created = client.post("/api/meetings", json={"title": "没给项目的会"})
     assert created.status_code == 201
-    assert created.json()["project_id"] is None
-    assert created.json()["project_name"] is None
+    assert created.json()["project_id"] == _default_project_id(client)
+    assert created.json()["project_name"] == "General"
 
 
 def test_create_meeting_with_unknown_project_is_404(client):
@@ -334,7 +359,7 @@ def test_create_meeting_with_unknown_project_is_404(client):
     assert response.json()["detail"] == "项目不存在"
 
 
-def test_patch_meeting_project_id_can_attach_move_and_detach(client):
+def test_patch_meeting_project_id_can_attach_move_and_reset_to_default(client):
     first = _create_project(client, "项目一")
     second = _create_project(client, "项目二")
     meeting_id = _create_meeting(client)
@@ -349,10 +374,11 @@ def test_patch_meeting_project_id_can_attach_move_and_detach(client):
     moved = client.patch(f"/api/meetings/{meeting_id}", json={"project_id": second})
     assert moved.json()["project_name"] == "项目二"
 
+    # 给 null 不是「取消归属」，而是回到默认项目。
     detached = client.patch(f"/api/meetings/{meeting_id}", json={"project_id": None})
     assert detached.status_code == 200
-    assert detached.json()["project_id"] is None
-    assert detached.json()["project_name"] is None
+    assert detached.json()["project_id"] == _default_project_id(client)
+    assert detached.json()["project_name"] == "General"
 
 
 def test_patch_meeting_without_project_id_keeps_current_project(client):
@@ -422,7 +448,8 @@ def test_worker_snapshot_merges_global_project_and_meeting_hotwords(client):
     assert probe.received_hotwords == expected
 
 
-def test_meeting_without_project_snapshot_has_no_project_words(client):
+def test_meeting_without_project_snapshot_aggregates_every_project(client):
+    """不选项目的会议落默认项目，而默认项目自动叠加所有项目的热词。"""
     assert client.post("/api/hotwords", json={"word": "全局词"}).status_code == 201
     project_id = _create_project(client, "别人的项目")
     assert client.post(
@@ -434,7 +461,7 @@ def test_meeting_without_project_snapshot_has_no_project_words(client):
 
     with client.app.state.session_factory() as session:
         persisted = json.loads(session.get(Meeting, meeting_id).hotword_snapshot_json)
-    assert persisted == sorted(["全局词", "本场词"])
+    assert persisted == sorted(["全局词", "别人的项目词", "本场词"])
 
 
 def test_reattaching_project_does_not_rewrite_frozen_snapshot(client):

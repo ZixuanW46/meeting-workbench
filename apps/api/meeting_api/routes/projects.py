@@ -10,6 +10,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from meeting_api.hotword_layers import project_layer_ids
+from meeting_api.meeting_service import default_project_id
 from meeting_api.models import Meeting, Project, ProjectHotword
 
 router = APIRouter(prefix="/api/projects")
@@ -19,6 +21,8 @@ PROJECT_DUPLICATE = "项目已存在"
 HOTWORD_NOT_FOUND = "词语不存在"
 HOTWORD_DUPLICATE = "词语已存在"
 PROJECT_ORDER_INVALID = "ids 必须包含全部项目且不重复"
+DEFAULT_PROJECT_UNDELETABLE = "General 是默认项目，不能删除"
+DEFAULT_PROJECT_HOTWORDS_MANAGED = "General 自动叠加所有项目的热词，不单独维护"
 
 
 def _strip_or_reject(value: str, message: str) -> str:
@@ -57,6 +61,8 @@ class ProjectResponse(BaseModel):
     meeting_count: int
     hotword_count: int
     position: int
+    # 默认项目：不选项目的会议落这里，不能删、不单独维护热词。
+    is_default: bool
 
 
 class ProjectListResponse(BaseModel):
@@ -145,6 +151,7 @@ def _to_response(project: Project, counts: tuple[int, int] = (0, 0)) -> ProjectR
         meeting_count=meeting_count,
         hotword_count=hotword_count,
         position=project.position,
+        is_default=project.is_default,
     )
 
 
@@ -155,6 +162,15 @@ def _require_project(session: Session, project_id: str) -> Project:
             status_code=status.HTTP_404_NOT_FOUND, detail=PROJECT_NOT_FOUND
         )
     return project
+
+
+def _require_editable_hotwords(project: Project) -> None:
+    """默认项目的热词是算出来的，不接受任何写入。"""
+    if project.is_default:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=DEFAULT_PROJECT_HOTWORDS_MANAGED,
+        )
 
 
 def _list_projects(session: Session) -> ProjectListResponse:
@@ -239,14 +255,19 @@ def rename_project(
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_project(project_id: str, request: Request) -> Response:
-    """删项目不删会议：先把该项目下的会议置为「无项目」，再删项目（热词级联删）。"""
+    """删项目不删会议：先把该项目下的会议改挂默认项目，再删项目（热词级联删）。"""
     with request.app.state.session_factory() as session:
         project = _require_project(session, project_id)
-        # 不依赖 SQLite 的外键开关：显式置空，语义一眼可见。
+        if project.is_default:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=DEFAULT_PROJECT_UNDELETABLE,
+            )
+        # 不依赖 SQLite 的外键开关：显式改挂，语义一眼可见。
         session.execute(
             update(Meeting)
             .where(Meeting.project_id == project_id)
-            .values(project_id=None)
+            .values(project_id=default_project_id(session))
         )
         session.delete(project)
         session.commit()
@@ -257,8 +278,13 @@ def delete_project(project_id: str, request: Request) -> Response:
 def list_project_hotwords(
     project_id: str, request: Request
 ) -> ProjectHotwordListResponse:
+    """普通项目列自己的词；默认项目列所有项目热词的并集（前端不展示）。"""
     with request.app.state.session_factory() as session:
-        _require_project(session, project_id)
+        project = _require_project(session, project_id)
+        if project.is_default:
+            return ProjectHotwordListResponse(
+                items=_default_project_hotwords(session, project.id)
+            )
         entries = session.scalars(
             select(ProjectHotword)
             .where(ProjectHotword.project_id == project_id)
@@ -272,6 +298,26 @@ def list_project_hotwords(
         )
 
 
+def _default_project_hotwords(
+    session: Session, project_id: str
+) -> list[ProjectHotwordResponse]:
+    """所有项目热词按 word 去重：同词取「先写了注解的项目」那一条，id 用来源词条。"""
+    chosen: dict[str, ProjectHotword] = {}
+    for layer_id in project_layer_ids(session, project_id):
+        for entry in session.scalars(
+            select(ProjectHotword)
+            .where(ProjectHotword.project_id == layer_id)
+            .order_by(ProjectHotword.word, ProjectHotword.id)
+        ):
+            kept = chosen.get(entry.word)
+            if kept is None or (kept.note is None and entry.note is not None):
+                chosen[entry.word] = entry
+    return [
+        ProjectHotwordResponse(id=chosen[word].id, word=word, note=chosen[word].note)
+        for word in sorted(chosen)
+    ]
+
+
 @router.post(
     "/{project_id}/hotwords",
     response_model=ProjectHotwordResponse,
@@ -281,7 +327,7 @@ def create_project_hotword(
     project_id: str, payload: ProjectHotwordCreate, request: Request
 ) -> ProjectHotwordResponse:
     with request.app.state.session_factory() as session:
-        _require_project(session, project_id)
+        _require_editable_hotwords(_require_project(session, project_id))
         entry = ProjectHotword(
             project_id=project_id, word=payload.word, note=payload.note
         )
@@ -319,7 +365,7 @@ def update_project_hotword_note(
     request: Request,
 ) -> ProjectHotwordResponse:
     with request.app.state.session_factory() as session:
-        _require_project(session, project_id)
+        _require_editable_hotwords(_require_project(session, project_id))
         entry = _require_project_hotword(session, project_id, entry_id)
         entry.note = payload.note
         session.commit()
@@ -331,7 +377,7 @@ def update_project_hotword_note(
 )
 def delete_project_hotword(project_id: str, entry_id: str, request: Request) -> Response:
     with request.app.state.session_factory() as session:
-        _require_project(session, project_id)
+        _require_editable_hotwords(_require_project(session, project_id))
         entry = _require_project_hotword(session, project_id, entry_id)
         session.delete(entry)
         session.commit()

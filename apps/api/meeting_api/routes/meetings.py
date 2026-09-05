@@ -9,6 +9,7 @@ from sqlalchemy import delete, select, update
 from meeting_api.hotword_layers import global_hotword_words, project_hotword_words
 from meeting_api.meeting_service import (
     build_meeting,
+    default_project_id,
     require_project,
     speaker_summaries,
     to_meeting_response,
@@ -50,6 +51,7 @@ def create_meeting(payload: MeetingCreate, request: Request) -> MeetingResponse:
         if payload.project_id is not None:
             require_project(session, payload.project_id)
         meeting = build_meeting(
+            session,
             payload,
             title=payload.title or DEFAULT_MEETING_TITLE,
             title_user_edited=payload.title is not None,
@@ -109,9 +111,12 @@ def update_meeting(
             meeting.language = payload.language
         # 改挂项目任何状态都允许，不触发状态迁移，也不回溯已冻结的热词快照。
         if "project_id" in payload.model_fields_set:
-            if payload.project_id is not None:
+            # 给了 null = 改挂默认项目，不再有「取消归属」这回事。
+            if payload.project_id is None:
+                meeting.project_id = default_project_id(session)
+            else:
                 require_project(session, payload.project_id)
-            meeting.project_id = payload.project_id
+                meeting.project_id = payload.project_id
         session.commit()
         session.refresh(meeting)
         summary = speaker_summaries(session, [meeting.id]).get(meeting.id, ([], 0))

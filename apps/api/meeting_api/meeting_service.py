@@ -6,7 +6,7 @@ import json
 from datetime import date
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from meeting_api.meeting_date import resolve_meeting_date
@@ -17,6 +17,9 @@ type SpeakerSummary = tuple[list[str], int]
 
 EMPTY_SPEAKER_SUMMARY: SpeakerSummary = ([], 0)
 
+# 默认项目的出厂名；用户可以改名，所以代码里只认 Project.is_default 标记。
+DEFAULT_PROJECT_NAME = "General"
+
 
 def require_project(session: Session, project_id: str) -> Project:
     project = session.get(Project, project_id)
@@ -25,7 +28,31 @@ def require_project(session: Session, project_id: str) -> Project:
     return project
 
 
+def ensure_default_project(session: Session) -> Project:
+    """保证库里有且只有一个默认项目；没有就建一个 General 追加到末尾。"""
+    project = session.scalars(
+        select(Project).where(Project.is_default.is_(True))
+    ).first()
+    if project is not None:
+        return project
+    max_position = session.scalar(select(func.max(Project.position)))
+    project = Project(
+        name=DEFAULT_PROJECT_NAME,
+        position=0 if max_position is None else max_position + 1,
+        is_default=True,
+    )
+    session.add(project)
+    session.commit()
+    session.refresh(project)
+    return project
+
+
+def default_project_id(session: Session) -> str:
+    return ensure_default_project(session).id
+
+
 def build_meeting(
+    session: Session,
     payload: MeetingCreate,
     *,
     title: str,
@@ -33,14 +60,17 @@ def build_meeting(
     meeting_date: date | None,
     plaud_file_id: str | None = None,
 ) -> Meeting:
-    """按创建请求造一条会议；标题与日期由调用方定（来源不同规则不同）。"""
+    """按创建请求造一条会议；标题与日期由调用方定（来源不同规则不同）。
+
+    不给项目就落默认项目——会议永远有归属，没有「无项目」这个状态。
+    """
     return Meeting(
         title=title,
         title_user_edited=title_user_edited,
         meeting_date=meeting_date,
         expected_speakers=payload.expected_speakers,
         language=payload.language,
-        project_id=payload.project_id,
+        project_id=payload.project_id or default_project_id(session),
         hotwords_json=json.dumps(payload.hotwords, ensure_ascii=False),
         plaud_file_id=plaud_file_id,
     )

@@ -13,6 +13,7 @@ from meeting_api.db import init_db, make_engine, make_session_factory
 from meeting_api.doctor import router as doctor_router
 from meeting_api.events import EventStore
 from meeting_api.events import router as events_router
+from meeting_api.meeting_service import ensure_default_project
 from meeting_api.plaud.gateway import resolve_plaud_gateway
 from meeting_api.routes import (
     audio,
@@ -53,6 +54,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         init_db(engine)
         app.state.engine = engine
         app.state.session_factory = make_session_factory(engine)
+        # 默认项目是「会议永远有归属」的兜底，缺了整套归属逻辑就没有落点。
+        with app.state.session_factory() as session:
+            ensure_default_project(session)
         recovered_count = recover_interrupted_meetings(app.state.session_factory)
         if recovered_count:
             logger.warning("已将 %d 场上次中断的会议重新放回队列", recovered_count)

@@ -9,11 +9,13 @@ from sqlalchemy import (
     Date,
     Float,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -30,9 +32,18 @@ def _now() -> datetime:
 
 
 class Project(Base):
-    """会议归属的项目；项目有自己的一层热词，会议可不挂项目。"""
+    """会议归属的项目；项目有自己的一层热词，会议永远挂在某个项目下。"""
 
     __tablename__ = "projects"
+    # 默认项目最多一个：部分唯一索引只约束 is_default = 1 的行。
+    __table_args__ = (
+        Index(
+            "ux_projects_default",
+            "is_default",
+            unique=True,
+            sqlite_where=text("is_default = 1"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
     name: Mapped[str] = mapped_column(String(200), unique=True)
@@ -41,6 +52,11 @@ class Project(Base):
     # 因为排序只看相对大小。
     position: Mapped[int] = mapped_column(
         Integer, default=0, server_default="0", nullable=False
+    )
+    # 默认项目（出厂名 General）：不选项目的会议都落这里；它自动叠加全局词库和
+    # 所有项目的热词，不单独维护热词，也不能被删除。可以改名，所以只认标记位。
+    is_default: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
     )
 
 
@@ -73,7 +89,8 @@ class Meeting(Base):
     # 会议语言：zh=中文 / en=英文。英文会议转写与清洗保留英文原文，纪要仍写中文。
     # 改语言不触发状态迁移，只在下一次转写/重转写时生效。
     language: Mapped[str] = mapped_column(String(8), default="zh", server_default="zh")
-    # 会议所属项目；None = 无项目。删项目时置空（路由显式置空 + 数据库 SET NULL）。
+    # 会议所属项目；不选就落默认项目，删项目时改挂默认项目（路由显式改挂）。
+    # 列仍可空，是给数据库层的兜底（SET NULL），业务上不再出现「无项目」。
     project_id: Mapped[str | None] = mapped_column(
         ForeignKey("projects.id", ondelete="SET NULL"), default=None, index=True
     )

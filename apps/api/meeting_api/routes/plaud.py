@@ -244,6 +244,7 @@ def import_plaud_recording(payload: PlaudImportRequest, request: Request) -> Mee
 
         title, title_user_edited = resolve_import_title(payload, recording)
         meeting = build_meeting(
+            session,
             payload,
             title=title,
             title_user_edited=title_user_edited,

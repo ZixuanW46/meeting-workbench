@@ -396,6 +396,21 @@ def test_import_maps_gateway_auth_error(client):
     assert "未登录" in response.json()["detail"]
 
 
+def test_import_without_project_lands_in_the_default_project(client):
+    """不选项目的导入落默认项目，和新建会议同一套规则。"""
+    with _audio_server() as base:
+        _gateway(client).recordings = [
+            _recording("rec-1", presigned_url=f"{base}/audiofiles/rec-1.wav")
+        ]
+        response = client.post("/api/plaud/import", json={"plaud_file_id": "rec-1"})
+
+    assert response.status_code == 201, response.text
+    projects = client.get("/api/projects").json()["items"]
+    (default_project,) = [item for item in projects if item["is_default"]]
+    assert response.json()["project_id"] == default_project["id"]
+    assert response.json()["project_name"] == default_project["name"]
+
+
 def test_import_rejects_unknown_project(client):
     response = client.post(
         "/api/plaud/import", json={"plaud_file_id": "rec-1", "project_id": "nope"}

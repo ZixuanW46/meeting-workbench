@@ -38,6 +38,16 @@ class Settings(BaseSettings):
     # 与 3000 字一批的清洗不能共用一个值。
     minutes_timeout_seconds: float = 600.0
     cleaning_timeout_seconds: float = 180.0
+    # Plaud 云端录音导入：mcp = 调官方 @plaud-ai/mcp（stdio），fake = 内存假网关（测试）。
+    plaud_backend: Literal["mcp", "fake"] = "mcp"
+    # 用 shlex.split 拆分，允许 "npx -y @plaud-ai/mcp" 或 "node /abs/path/index.js"。
+    plaud_mcp_command: str = "plaud-mcp"
+    # 单次工具调用（含进程启动 + 握手）超时；实测 get_file 约 2.5 s。
+    plaud_mcp_timeout_seconds: float = 60.0
+    # login 会在服务器机器上开浏览器做 OAuth，MCP 自己最长等 2 分钟。
+    plaud_login_timeout_seconds: float = 150.0
+    # 下载整段音频的总时长上限（单次 socket 读另有 60 s 超时）。
+    plaud_download_timeout_seconds: float = 900.0
 
     def resolved_database_url(self) -> str:
         if self.database_url:

@@ -5,15 +5,17 @@ import shutil
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlalchemy import delete, select, update
-from sqlalchemy.orm import Session
 
 from meeting_api.hotword_layers import global_hotword_words, project_hotword_words
-from meeting_api.meeting_date import resolve_meeting_date
+from meeting_api.meeting_service import (
+    build_meeting,
+    require_project,
+    speaker_summaries,
+    to_meeting_response,
+)
 from meeting_api.models import (
     CleanedTranscriptBlock,
     Meeting,
-    Person,
-    Project,
     SpeakerCluster,
     TranscriptSegment,
     Voiceprint,
@@ -31,8 +33,6 @@ from meeting_domain import RETRANSCRIBABLE_STATES, MeetingState, snapshot, trans
 router = APIRouter(prefix="/api/meetings")
 
 
-type SpeakerSummary = tuple[list[str], int]
-
 BUSY_MEETING_STATES: frozenset[MeetingState] = frozenset(
     {
         MeetingState.QUEUED,
@@ -43,108 +43,22 @@ BUSY_MEETING_STATES: frozenset[MeetingState] = frozenset(
 )
 
 
-def _require_project(session: Session, project_id: str) -> Project:
-    project = session.get(Project, project_id)
-    if project is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在")
-    return project
-
-
-def _speaker_summaries(
-    session: Session, meeting_ids: list[str]
-) -> dict[str, SpeakerSummary]:
-    if not meeting_ids:
-        return {}
-
-    rows = session.execute(
-        select(
-            SpeakerCluster.meeting_id,
-            SpeakerCluster.person_id,
-            SpeakerCluster.total_seconds,
-            Person.display_name,
-        )
-        .outerjoin(Person, Person.id == SpeakerCluster.person_id)
-        .where(SpeakerCluster.meeting_id.in_(meeting_ids))
-    ).all()
-    by_meeting: dict[str, list[tuple[str | None, float, str | None]]] = {}
-    for meeting_id, person_id, total_seconds, display_name in rows:
-        by_meeting.setdefault(meeting_id, []).append(
-            (person_id, total_seconds, display_name)
-        )
-
-    summaries: dict[str, SpeakerSummary] = {}
-    for meeting_id, clusters in by_meeting.items():
-        confirmed = [
-            (person_id, total_seconds, display_name)
-            for person_id, total_seconds, display_name in clusters
-            if person_id is not None and display_name is not None
-        ]
-        if not confirmed:
-            summaries[meeting_id] = ([], 0)
-            continue
-
-        seconds_by_person: dict[str, float] = {}
-        names_by_person: dict[str, str] = {}
-        for person_id, total_seconds, display_name in confirmed:
-            seconds_by_person[person_id] = (
-                seconds_by_person.get(person_id, 0.0) + total_seconds
-            )
-            names_by_person[person_id] = display_name
-        speakers = [
-            names_by_person[person_id]
-            for person_id in sorted(
-                seconds_by_person,
-                key=lambda value: seconds_by_person[value],
-                reverse=True,
-            )
-        ]
-        unknown_count = sum(1 for person_id, _, _ in clusters if person_id is None)
-        summaries[meeting_id] = (speakers, unknown_count)
-    return summaries
-
-
-def _to_response(
-    meeting: Meeting, speaker_summary: SpeakerSummary = ([], 0)
-) -> MeetingResponse:
-    speakers, unknown_speaker_count = speaker_summary
-    meeting_date, meeting_date_source = resolve_meeting_date(meeting)
-    return MeetingResponse(
-        id=meeting.id,
-        title=meeting.title,
-        state=meeting.state,
-        expected_speakers=meeting.expected_speakers,
-        language=meeting.language,
-        project_id=meeting.project_id,
-        project_name=meeting.project.name if meeting.project is not None else None,
-        hotwords=json.loads(meeting.hotwords_json),
-        created_at=meeting.created_at,
-        meeting_date=meeting_date,
-        meeting_date_source=meeting_date_source,
-        speakers=speakers,
-        unknown_speaker_count=unknown_speaker_count,
-        processing_error=meeting.processing_error,
-    )
-
-
 @router.post("", response_model=MeetingResponse, status_code=status.HTTP_201_CREATED)
 def create_meeting(payload: MeetingCreate, request: Request) -> MeetingResponse:
     session_factory = request.app.state.session_factory
     with session_factory() as session:
         if payload.project_id is not None:
-            _require_project(session, payload.project_id)
-        meeting = Meeting(
+            require_project(session, payload.project_id)
+        meeting = build_meeting(
+            payload,
             title=payload.title or DEFAULT_MEETING_TITLE,
             title_user_edited=payload.title is not None,
             meeting_date=payload.meeting_date,
-            expected_speakers=payload.expected_speakers,
-            language=payload.language,
-            project_id=payload.project_id,
-            hotwords_json=json.dumps(payload.hotwords, ensure_ascii=False),
         )
         session.add(meeting)
         session.commit()
         session.refresh(meeting)
-        return _to_response(meeting)
+        return to_meeting_response(meeting)
 
 
 @router.get("", response_model=MeetingListResponse)
@@ -154,9 +68,12 @@ def list_meetings(request: Request) -> MeetingListResponse:
         rows = session.scalars(
             select(Meeting).order_by(Meeting.created_at.desc(), Meeting.id.desc())
         ).all()
-        summaries = _speaker_summaries(session, [meeting.id for meeting in rows])
+        summaries = speaker_summaries(session, [meeting.id for meeting in rows])
         return MeetingListResponse(
-            items=[_to_response(meeting, summaries.get(meeting.id, ([], 0))) for meeting in rows]
+            items=[
+                to_meeting_response(meeting, summaries.get(meeting.id, ([], 0)))
+                for meeting in rows
+            ]
         )
 
 
@@ -167,8 +84,8 @@ def get_meeting(meeting_id: str, request: Request) -> MeetingResponse:
         meeting = session.get(Meeting, meeting_id)
         if meeting is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会议不存在")
-        return _to_response(
-            meeting, _speaker_summaries(session, [meeting.id]).get(meeting.id, ([], 0))
+        return to_meeting_response(
+            meeting, speaker_summaries(session, [meeting.id]).get(meeting.id, ([], 0))
         )
 
 
@@ -193,12 +110,12 @@ def update_meeting(
         # 改挂项目任何状态都允许，不触发状态迁移，也不回溯已冻结的热词快照。
         if "project_id" in payload.model_fields_set:
             if payload.project_id is not None:
-                _require_project(session, payload.project_id)
+                require_project(session, payload.project_id)
             meeting.project_id = payload.project_id
         session.commit()
         session.refresh(meeting)
-        summary = _speaker_summaries(session, [meeting.id]).get(meeting.id, ([], 0))
-        return _to_response(meeting, summary)
+        summary = speaker_summaries(session, [meeting.id]).get(meeting.id, ([], 0))
+        return to_meeting_response(meeting, summary)
 
 
 @router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -271,8 +188,8 @@ def cancel_meeting(meeting_id: str, request: Request) -> MeetingResponse:
         session.commit()
         session.refresh(meeting)
         request.app.state.events.publish(meeting.id, meeting.state, meeting.processing_step)
-        return _to_response(
-            meeting, _speaker_summaries(session, [meeting.id]).get(meeting.id, ([], 0))
+        return to_meeting_response(
+            meeting, speaker_summaries(session, [meeting.id]).get(meeting.id, ([], 0))
         )
 
 
@@ -336,4 +253,4 @@ def retranscribe_meeting(meeting_id: str, request: Request) -> MeetingResponse:
         session.commit()
         session.refresh(meeting)
         request.app.state.events.publish(meeting.id, meeting.state, meeting.processing_step)
-        return _to_response(meeting)
+        return to_meeting_response(meeting)

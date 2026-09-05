@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import binascii
 import re
-import shutil
 import uuid
 from collections.abc import Mapping
 from typing import Annotated
@@ -13,6 +12,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import Response
 
+from meeting_api.disk import ensure_disk_space
 from meeting_api.models import Meeting
 from meeting_api.schemas import UploadResponse
 from meeting_api.storage import (
@@ -41,16 +41,7 @@ def _ensure_disk_space(
     *,
     headers: Mapping[str, str] | None = None,
 ) -> None:
-    settings = request.app.state.settings
-    free_bytes = shutil.disk_usage(settings.data_dir).free
-    required_bytes = upload_size + settings.upload_disk_reserve_bytes
-    if free_bytes < required_bytes:
-        free_gib = free_bytes / 1024**3
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"磁盘空间不足，还剩 {free_gib:.2f} GB",
-            headers=headers,
-        )
+    ensure_disk_space(request.app.state.settings, upload_size, headers=headers)
 
 
 def _require_tus_version(request: Request) -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal, Self
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
 
 
 class MeetingCreate(BaseModel):
@@ -86,6 +86,8 @@ class MeetingResponse(BaseModel):
     meeting_date_source: Literal["user", "filename", "created"]
     speakers: list[str]
     unknown_speaker_count: int
+    # 来源 Plaud 云端录音时的 file_id；本地上传的会议为 null。
+    plaud_file_id: str | None = None
     # FAILED / PARTIAL_READY 的失败原因，给人看的一句话；不含服务器路径。
     processing_error: str | None = None
 
@@ -105,3 +107,58 @@ class ProgressResponse(BaseModel):
     # 步骤内进度，如清洗「3/12」；没有就是 None。
     detail: str | None = None
     seq: int
+
+
+class PlaudImportRequest(MeetingCreate):
+    """从 Plaud 导入：会议字段与新建会议一致，另带要导入的录音 id。"""
+
+    plaud_file_id: str = Field(min_length=1, max_length=64)
+
+    @field_validator("plaud_file_id")
+    @classmethod
+    def file_id_not_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("plaud_file_id 不能为空")
+        return stripped
+
+
+class PlaudUserResponse(BaseModel):
+    nickname: str | None
+    email: str | None
+
+
+class PlaudStatusResponse(BaseModel):
+    # Plaud 的任何问题都在这里以文案呈现，不抛 4xx/5xx。
+    available: bool
+    logged_in: bool
+    user: PlaudUserResponse | None = None
+    message: str | None = None
+
+
+class PlaudLoginResponse(BaseModel):
+    logged_in: bool
+    message: str
+
+
+class PlaudRecordingResponse(BaseModel):
+    file_id: str
+    name: str
+    started_at: datetime
+    duration_ms: int
+    # 已导入过的录音回填对应会议 id，前端据此禁选并给「打开」入口。
+    imported_meeting_id: str | None = None
+
+    @field_serializer("started_at")
+    def serialize_started_at(self, value: datetime) -> str:
+        # 固定输出 "+00:00" 偏移（而不是 pydantic 默认的 "Z"），与前后端契约一致。
+        return value.isoformat()
+
+
+class PlaudRecordingListResponse(BaseModel):
+    items: list[PlaudRecordingResponse]
+    page: int
+    page_size: int
+    has_more: bool
+    # 是否带了搜索/日期过滤（带过滤时上游忽略分页）。
+    filtered: bool

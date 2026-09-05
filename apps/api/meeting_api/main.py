@@ -13,6 +13,7 @@ from meeting_api.db import init_db, make_engine, make_session_factory
 from meeting_api.doctor import router as doctor_router
 from meeting_api.events import EventStore
 from meeting_api.events import router as events_router
+from meeting_api.plaud.gateway import resolve_plaud_gateway
 from meeting_api.routes import (
     audio,
     export,
@@ -20,6 +21,7 @@ from meeting_api.routes import (
     hotwords,
     meetings,
     minutes,
+    plaud,
     projects,
     review,
     upload,
@@ -55,6 +57,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if recovered_count:
             logger.warning("已将 %d 场上次中断的会议重新放回队列", recovered_count)
         app.state.events = EventStore()
+        # Plaud 网关每次调用起一个短命子进程，这里只解析配置，不做任何探测。
+        app.state.plaud_gateway = resolve_plaud_gateway(settings)
         app.state.worker = Worker(
             app.state.session_factory,
             settings,
@@ -105,6 +109,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(voiceprints.router)
     app.include_router(meetings.router)
     app.include_router(upload.router)
+    app.include_router(plaud.router)
     app.include_router(audio.router)
     app.include_router(review.router)
     app.include_router(minutes.router)

@@ -84,6 +84,11 @@ class Meeting(Base):
     hotword_snapshot_json: Mapped[str] = mapped_column(
         Text, default="[]", server_default="[]"
     )
+    # 来源 Plaud 云端录音时记下 file_id；唯一，避免同一条录音被导入两次
+    # （SQLite 的唯一索引允许多个 NULL，本地上传的会议不受影响）。
+    plaud_file_id: Mapped[str | None] = mapped_column(
+        String(64), default=None, unique=True, index=True
+    )
     audio_filename: Mapped[str | None] = mapped_column(String(255), default=None)
     audio_sha256: Mapped[str | None] = mapped_column(String(64), default=None)
     audio_size: Mapped[int | None] = mapped_column(BigInteger, default=None)

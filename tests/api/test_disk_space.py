@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import shutil
 
+from meeting_api import disk
 from meeting_api.config import Settings
-from meeting_api.routes import upload
 
 
 def _create_meeting(client) -> str:
@@ -14,7 +14,7 @@ def _create_meeting(client) -> str:
 
 def _low_disk(monkeypatch, *, free_bytes: int) -> None:
     monkeypatch.setattr(
-        upload.shutil,
+        disk.shutil,
         "disk_usage",
         lambda _path: shutil._ntuple_diskusage(10 * 1024**3, 9 * 1024**3, free_bytes),
     )

@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -72,3 +74,53 @@ def test_project_position_migration_backfills_and_round_trips(tmp_path):
 
     _run(data_dir, "upgrade", "head")
     assert "position" in _columns(data_dir, "projects")
+
+
+def _indexes(data_dir: Path, table: str) -> set[str]:
+    with sqlite3.connect(_db_path(data_dir)) as connection:
+        return {row[1] for row in connection.execute(f"PRAGMA index_list({table})")}
+
+
+def test_meeting_plaud_file_id_migration_round_trips(tmp_path):
+    data_dir = tmp_path / "data"
+
+    _run(data_dir, "upgrade", "0018")
+    assert "plaud_file_id" not in _columns(data_dir, "meetings")
+    with sqlite3.connect(_db_path(data_dir)) as connection:
+        connection.execute(
+            "INSERT INTO meetings (id, title, state, created_at) VALUES (?, ?, ?, ?)",
+            ("m1", "存量会议", "READY", "2026-01-01 00:00:00"),
+        )
+
+    _run(data_dir, "upgrade", "head")
+    assert "plaud_file_id" in _columns(data_dir, "meetings")
+    with sqlite3.connect(_db_path(data_dir)) as connection:
+        # 存量会议保留，新列为空。
+        assert connection.execute(
+            "SELECT plaud_file_id FROM meetings WHERE id = 'm1'"
+        ).fetchone() == (None,)
+        # 唯一：同一条 Plaud 录音只能导入一次；未导入的会议可以有任意多个 NULL。
+        connection.executemany(
+            "INSERT INTO meetings (id, title, state, created_at, plaud_file_id)"
+            " VALUES (?, ?, ?, ?, ?)",
+            [
+                ("m2", "本地会议", "READY", "2026-01-01 00:00:00", None),
+                ("m3", "Plaud 会议", "QUEUED", "2026-01-01 00:00:00", "rec-1"),
+            ],
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO meetings (id, title, state, created_at, plaud_file_id)"
+                " VALUES (?, ?, ?, ?, ?)",
+                ("m4", "重复导入", "QUEUED", "2026-01-01 00:00:00", "rec-1"),
+            )
+
+    _run(data_dir, "downgrade", "0018")
+    assert "plaud_file_id" not in _columns(data_dir, "meetings")
+    with sqlite3.connect(_db_path(data_dir)) as connection:
+        remaining = connection.execute("SELECT id FROM meetings ORDER BY id").fetchall()
+    assert remaining == [("m1",), ("m2",), ("m3",)]
+
+    _run(data_dir, "upgrade", "head")
+    assert "plaud_file_id" in _columns(data_dir, "meetings")
+    assert "ix_meetings_plaud_file_id" in _indexes(data_dir, "meetings")

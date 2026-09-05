@@ -35,9 +35,24 @@ MW_BIND_HOST=0.0.0.0 ./scripts/launchd/install_launchd.sh
 
 之后局域网设备可通过 `http://<主机名>.local:8000`（mDNS 固定网址）或本机 IP 访问。
 
+## 从 Plaud 导入录音（可选）
+
+用 Plaud 录音笔的话，可以在「新建会议」页把录音来源切到「从 Plaud 导入」，直接从已登录的 Plaud 账号里挑一条录音导入，不必先手动下载再上传。前置条件是本机装好 Plaud 官方 MCP 并登录一次：
+
+```bash
+npm install -g @plaud-ai/mcp   # 需要 Node.js ≥ 20；装完 PATH 里会有 plaud-mcp
+```
+
+登录既可以在界面里点「登录 Plaud」（会在运行 API 的这台机器上打开浏览器做 OAuth），也可以在终端跑 `plaud-mcp install`（它会顺带把本机检测到的 AI 客户端也配上 Plaud MCP）。登录态由 Plaud MCP 自己保存在 `~/.plaud/`，工作台**不读取**这个目录，所有查询都通过起 `plaud-mcp` 子进程调用 MCP 工具完成。
+
+导入时后端用 MCP 拿到录音的临时下载直链，把音频下载到 `data/` 后走与上传完全相同的转码与转写流程；会议记住来源录音 id，同一条录音不会被重复导入，列表里也会标出「已导入」。会议日期默认取录音开始时间（按本机时区），标题优先用你填的，其次用 Plaud 里改过的名字，设备默认的时间名则留给自动命名接管。
+
+相关配置：`MW_PLAUD_MCP_COMMAND`（默认 `plaud-mcp`，可写成 `npx -y @plaud-ai/mcp`）、`MW_PLAUD_MCP_TIMEOUT_SECONDS`（单次 MCP 调用，默认 60）、`MW_PLAUD_LOGIN_TIMEOUT_SECONDS`（默认 150）、`MW_PLAUD_DOWNLOAD_TIMEOUT_SECONDS`（默认 900）。
+
 ## 数据与隐私
 
 - 音频、转写、说话人信息、声纹和数据库均留在 `data/`，音频不出本机。
+- 从 Plaud 导入只是把你自己账号里的录音**拉下来**：请求经 Plaud 官方 MCP 发出，工作台不读取其 token 文件，也不向 Plaud 上传任何内容。
 - 纪要只走用户已登录的本机 CLI：Claude 使用 `claude -p --output-format json`，Codex 使用 `codex exec`。禁止 `--bare`，也不读取 CLI token。
 - 使用云端 CLI 时，纪要生成所需的文本会由该 CLI 发送给相应服务；音频和模型权重不会随请求发送。
 - 纪要与清洗的 CLI 子进程在空临时目录里运行，关闭全部内置工具与 MCP、不持久化会话；逐字稿只留在 `data/`。

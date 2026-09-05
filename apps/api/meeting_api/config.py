@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     asr_backend: Literal["auto", "fake", "qwen3-asr-mlx"] = "auto"
     diarization_backend: Literal["auto", "fake", "sherpa-onnx"] = "auto"
     embedding_backend: Literal["auto", "fake", "sherpa-onnx"] = "auto"
+    # Qwen3-ASR 单次送进模型的音频块时长（秒）。MLX 峰值内存随块长走，
+    # 真机实测：2 分钟 3.9 GB、10 分钟 7.6 GB、20 分钟 12.4 GB——mlx-audio
+    # 默认的 1200s 会让任何超过 20 分钟的录音把 16GB 机器压进 swap。
+    # 逐轮切片本来就短，只有整段兜底才吃得满这个块长。
+    asr_chunk_seconds: float = 300.0
     # 出卡前按簇声纹自动并入的碎簇时长上限（秒），0 = 关闭，建议 15~30。
     fragment_merge_max_seconds: float = 20.0
     # 碎簇吸收安全边际：最近主簇需比次近主簇至少近这么多，0 = 关闭。

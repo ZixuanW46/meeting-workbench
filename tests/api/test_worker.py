@@ -9,6 +9,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
+from meeting_api.events import EventStore
 from meeting_api.models import Meeting, Person, SpeakerCluster, TranscriptSegment, Voiceprint
 from meeting_api.pipeline.asr import AsrSegment, FakeAsrBackend
 from meeting_api.pipeline.diarization import FakeDiarizationBackend, SpeakerSegment
@@ -252,8 +253,8 @@ def test_models_use_single_slot_and_are_never_loaded_together(client):
         model_slot=slot,
     ).process_next()
 
-    assert slot.used_backends == ["fake-asr", "fake-diarization", "fake-embedding"]
-    assert events == ["asr:load", "asr:unload", "diarization:load", "diarization:unload"]
+    assert slot.used_backends == ["fake-diarization", "fake-asr", "fake-embedding"]
+    assert events == ["diarization:load", "diarization:unload", "asr:load", "asr:unload"]
     assert not asr.loaded
     assert not diarization.loaded
 
@@ -463,7 +464,7 @@ def test_late_failure_after_segments_commit_still_lands_in_failed(client):
     assert detail.json()["state"] == "AWAITING_SPEAKER_REVIEW"
 
 
-class BlobAsr(FakeAsrBackend):
+class RecordingAsr(FakeAsrBackend):
     """整段无时间戳转写并记录每次收到的音频：模拟 Qwen3-ASR 的真实行为。"""
 
     def __init__(self) -> None:
@@ -474,42 +475,51 @@ class BlobAsr(FakeAsrBackend):
         if not self.loaded:
             raise RuntimeError("ASR 后端未加载（先 load()）")
         self.calls.append(Path(audio_path))
-        return [AsrSegment(0.0, 1.0, f"整段转写{len(self.calls)}")]
+        return [AsrSegment(0.0, 1.0, f"转写{len(self.calls)}")]
 
 
-def test_blob_transcript_is_retranscribed_per_turn(client):
-    # 整段无时间戳转写 + 多个发言轮次：逐轮切音频重转写，让每句话有归属。
+def _raw_dir(client, meeting_id: str) -> Path:
+    return client.app.state.settings.data_dir / "meetings" / meeting_id / "raw"
+
+
+def _segments(client, meeting_id: str):
+    with client.app.state.session_factory() as session:
+        return session.scalars(
+            select(TranscriptSegment)
+            .where(TranscriptSegment.meeting_id == meeting_id)
+            .order_by(TranscriptSegment.start_seconds)
+        ).all()
+
+
+def test_transcription_runs_per_turn_and_never_reads_the_whole_file(client):
+    # 先切分再逐轮转写：ASR 只吃短切片，整段那一遍彻底不跑（16GB 机器的内存上限）。
     meeting_id = _queue_meeting_with_real_wav(client, seconds=20.0)
-    asr = BlobAsr()
+    asr = RecordingAsr()
 
     _worker(client, asr_backend=asr).process_next()
 
     detail = client.get(f"/api/meetings/{meeting_id}")
     assert detail.json()["state"] == "AWAITING_SPEAKER_REVIEW"
-    with client.app.state.session_factory() as session:
-        segments = session.scalars(
-            select(TranscriptSegment)
-            .where(TranscriptSegment.meeting_id == meeting_id)
-            .order_by(TranscriptSegment.start_seconds)
-        ).all()
-    # fake 切分给出 S1/S2 交替 4 轮（每轮 5s）；首次整段转写被逐轮结果替换。
+    segments = _segments(client, meeting_id)
+    # fake 切分给出 S1/S2 交替 4 轮（每轮 5s），逐轮转写各归各簇。
     assert [segment.cluster_id for segment in segments] == ["S1", "S2", "S1", "S2"]
     assert [segment.text for segment in segments] == [
-        "整段转写2",
-        "整段转写3",
-        "整段转写4",
-        "整段转写5",
+        "转写1",
+        "转写2",
+        "转写3",
+        "转写4",
     ]
     assert [
         (segment.start_seconds, segment.end_seconds) for segment in segments
     ] == [(0.0, 5.0), (5.0, 10.0), (10.0, 15.0), (15.0, 20.0)]
-    # 第 1 次是整段，后 4 次是切片；切片文件在临时目录、事后清理。
-    assert len(asr.calls) == 5
-    assert all(not path.exists() for path in asr.calls[1:])
+    # 4 轮 4 次调用，没有整段那一次；切片文件在临时目录、事后清理。
+    assert len(asr.calls) == 4
+    assert all(path.parent != _raw_dir(client, meeting_id) for path in asr.calls)
+    assert all(not path.exists() for path in asr.calls)
 
 
-class CoarseBlobAsr(FakeAsrBackend):
-    """长音频场景：整段转写被 ASR 内部分块成少数粗段（仍远粗于轮次粒度）。"""
+class MultiSegmentAsr(FakeAsrBackend):
+    """单轮切片被模型内部又分成几段：同一轮的多段要拼成一句。"""
 
     def __init__(self) -> None:
         super().__init__()
@@ -519,35 +529,29 @@ class CoarseBlobAsr(FakeAsrBackend):
         if not self.loaded:
             raise RuntimeError("ASR 后端未加载（先 load()）")
         self.calls.append(Path(audio_path))
-        if len(self.calls) == 1:
-            return [
-                AsrSegment(0.0, 20.0, "粗段一"),
-                AsrSegment(20.0, 40.0, "粗段二"),
-            ]
-        return [AsrSegment(0.0, 1.0, f"轮次{len(self.calls) - 1}")]
+        ordinal = len(self.calls)
+        return [
+            AsrSegment(0.0, 1.0, f"轮次{ordinal}上"),
+            AsrSegment(1.0, 2.0, f"轮次{ordinal}下"),
+        ]
 
 
-def test_coarse_multi_segment_transcript_is_retranscribed_per_turn(client):
-    # 真机踩过的坑：27 分钟录音 ASR 返回 2 个巨型段（不是 1 个），
-    # 逐轮重转写不能只认「恰好 1 段」，粒度远粗于轮次时也要触发。
+def test_multi_segment_result_is_joined_into_the_turn(client):
+    # 真机踩过的坑：长音频 ASR 会回多个巨型段。逐轮转写下每轮自己的多段拼成一句，
+    # 不再需要「粒度太粗就重转」的判断。
     meeting_id = _queue_meeting_with_real_wav(client, seconds=40.0, expected_speakers=4)
-    asr = CoarseBlobAsr()
+    asr = MultiSegmentAsr()
 
     _worker(client, asr_backend=asr).process_next()
 
     detail = client.get(f"/api/meetings/{meeting_id}")
     assert detail.json()["state"] == "AWAITING_SPEAKER_REVIEW"
-    with client.app.state.session_factory() as session:
-        segments = session.scalars(
-            select(TranscriptSegment)
-            .where(TranscriptSegment.meeting_id == meeting_id)
-            .order_by(TranscriptSegment.start_seconds)
-        ).all()
-    # fake 切分 4 人 8 段（5s 交替）→ 8 个轮次，各自重转写
+    segments = _segments(client, meeting_id)
+    # fake 切分 4 人 8 段（5s 交替）→ 8 个轮次，8 次切片调用，没有整段那一次。
     assert [segment.text for segment in segments] == [
-        f"轮次{index}" for index in range(1, 9)
+        f"轮次{ordinal}上轮次{ordinal}下" for ordinal in range(1, 9)
     ]
-    assert len(asr.calls) == 9  # 1 次整段 + 8 次切片
+    assert len(asr.calls) == 8
 
 
 class SingleClusterDiarization(FakeDiarizationBackend):
@@ -561,9 +565,10 @@ class SingleClusterDiarization(FakeDiarizationBackend):
         ]
 
 
-def test_blob_transcript_with_single_turn_is_kept_as_is(client):
+def test_single_turn_is_transcribed_from_its_own_slice(client):
+    # 只有一个轮次也走切片：整段路径只留给切不动的音频。
     meeting_id = _queue_meeting_with_real_wav(client, seconds=10.0)
-    asr = BlobAsr()
+    asr = RecordingAsr()
 
     _worker(
         client, asr_backend=asr, diarization_backend=SingleClusterDiarization()
@@ -572,28 +577,118 @@ def test_blob_transcript_with_single_turn_is_kept_as_is(client):
     detail = client.get(f"/api/meetings/{meeting_id}")
     assert detail.json()["state"] == "AWAITING_SPEAKER_REVIEW"
     assert len(asr.calls) == 1
-    with client.app.state.session_factory() as session:
-        segments = session.scalars(
-            select(TranscriptSegment).where(TranscriptSegment.meeting_id == meeting_id)
-        ).all()
-    assert [segment.text for segment in segments] == ["整段转写1"]
+    assert asr.calls[0].parent != _raw_dir(client, meeting_id)
+    segments = _segments(client, meeting_id)
+    assert [
+        (segment.start_seconds, segment.end_seconds, segment.text) for segment in segments
+    ] == [(0.0, 10.0, "转写1")]
 
 
-def test_blob_transcript_keeps_whole_text_when_audio_not_sliceable(client):
-    # 音频不是可解析的 PCM wav（如损坏文件）：保留整段转写，不许整场失败。
+def test_whole_file_fallback_when_audio_cannot_be_sliced(client):
+    # 音频不是可解析的 PCM wav（如转码前的损坏文件）：整段兜底，不许整场失败。
     meeting_id = _queue_meeting(client)
-    asr = BlobAsr()
+    asr = RecordingAsr()
 
     _worker(client, asr_backend=asr).process_next()
 
     detail = client.get(f"/api/meetings/{meeting_id}")
     assert detail.json()["state"] == "AWAITING_SPEAKER_REVIEW"
-    assert len(asr.calls) == 1
+    assert [path.parent for path in asr.calls] == [_raw_dir(client, meeting_id)]
+    assert [segment.text for segment in _segments(client, meeting_id)] == ["转写1"]
+
+
+class NoTurnDiarization(FakeDiarizationBackend):
+    """切分一段都没给：没有轮次可切，只能整段兜底。"""
+
+    def diarize(self, audio_path: Path, expected_speakers=None):
+        del expected_speakers
+        if not self.loaded:
+            raise RuntimeError("diarization 后端未加载（先 load()）")
+        return []
+
+
+def test_whole_file_fallback_when_diarization_gives_no_turns(client):
+    meeting_id = _queue_meeting_with_real_wav(client, seconds=10.0)
+    asr = RecordingAsr()
+
+    _worker(
+        client, asr_backend=asr, diarization_backend=NoTurnDiarization()
+    ).process_next()
+
+    # 整段兜底跑过一次（读的是原音频本身）。
+    assert [path.parent for path in asr.calls] == [_raw_dir(client, meeting_id)]
+    # 一个说话人片段都没有仍然是错误，但错在落库，不是没转写。
     with client.app.state.session_factory() as session:
-        segments = session.scalars(
-            select(TranscriptSegment).where(TranscriptSegment.meeting_id == meeting_id)
-        ).all()
-    assert [segment.text for segment in segments] == ["整段转写1"]
+        meeting = session.get(Meeting, meeting_id)
+        assert meeting.state == "FAILED"
+        assert "切分未产出说话人片段" in meeting.processing_error
+
+
+class SubSecondTurnDiarization(FakeDiarizationBackend):
+    """全是彼此隔开的亚秒碎段：并不成轮次，切出来也装不下一个字。"""
+
+    def diarize(self, audio_path: Path, expected_speakers=None):
+        del expected_speakers
+        if not self.loaded:
+            raise RuntimeError("diarization 后端未加载（先 load()）")
+        # 间隔 >1s，merge_adjacent_turns 不会把它们并成一个够长的轮次。
+        return [
+            SpeakerSegment(0.0, 0.1, "S1"),
+            SpeakerSegment(2.0, 2.1, "S1"),
+            SpeakerSegment(4.0, 4.1, "S1"),
+        ]
+
+
+def test_whole_file_fallback_when_every_turn_is_sub_second(client):
+    meeting_id = _queue_meeting_with_real_wav(client, seconds=10.0)
+    asr = RecordingAsr()
+
+    _worker(
+        client, asr_backend=asr, diarization_backend=SubSecondTurnDiarization()
+    ).process_next()
+
+    detail = client.get(f"/api/meetings/{meeting_id}")
+    assert detail.json()["state"] == "AWAITING_SPEAKER_REVIEW"
+    assert [path.parent for path in asr.calls] == [_raw_dir(client, meeting_id)]
+    assert [segment.text for segment in _segments(client, meeting_id)] == ["转写1"]
+
+
+class RecordingEvents(EventStore):
+    """记录每次发布的进度，用来断言步骤顺序与逐轮进度。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.published: list[tuple[str, str | None, str | None]] = []
+
+    def publish(self, meeting_id, state, processing_step, detail=None):
+        self.published.append((state, processing_step, detail))
+        return super().publish(meeting_id, state, processing_step, detail)
+
+
+def test_progress_steps_go_diarization_then_asr_with_per_turn_detail(client):
+    meeting_id = _queue_meeting_with_real_wav(client, seconds=20.0)
+    events = RecordingEvents()
+
+    _worker(client, asr_backend=RecordingAsr(), event_store=events).process_next()
+
+    steps = [
+        step for state, step, _ in events.published if state == "PROCESSING"
+    ]
+    assert [
+        step for index, step in enumerate(steps) if index == 0 or steps[index - 1] != step
+    ] == ["VALIDATING", "DIARIZATION", "ASR", "VOICEPRINT_MATCHING", "PREPARING_REVIEW"]
+    # 逐轮转写要能看出到第几轮；步骤结束时进度清空。
+    assert [detail for _, step, detail in events.published if step == "ASR"] == [
+        None,
+        "1/4",
+        "2/4",
+        "3/4",
+        "4/4",
+    ]
+    assert events.published[-1] == ("AWAITING_SPEAKER_REVIEW", "PREPARING_REVIEW", None)
+    assert client.get(f"/api/meetings/{meeting_id}").json()["state"] == (
+        "AWAITING_SPEAKER_REVIEW"
+    )
 
 
 class FailingAsr(FakeAsrBackend):
@@ -633,8 +728,8 @@ def test_cluster_embeddings_persisted_for_later_assignment(client):
     )
 
 
-def test_worker_drops_hotword_echo_segments_and_skips_sub_second_turns(client):
-    """ASR 对极短片段会回吐热词表；这种片段不进逐字稿，亚秒轮次也不再单独重转。"""
+def test_worker_drops_hotword_echo_segments_from_the_whole_file_fallback(client):
+    """ASR 对极短片段会回吐热词表；整段兜底出来的这种片段不进逐字稿。"""
     from meeting_api.pipeline.asr import AsrSegment, FakeAsrBackend
     from meeting_api.pipeline.diarization import FakeDiarizationBackend, SpeakerSegment
 

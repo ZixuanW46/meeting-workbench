@@ -35,7 +35,12 @@ from meeting_api.worker import Worker
 
 
 def test_backend_settings_default_to_auto(monkeypatch):
-    for name in ("MW_ASR_BACKEND", "MW_DIARIZATION_BACKEND", "MW_EMBEDDING_BACKEND"):
+    for name in (
+        "MW_ASR_BACKEND",
+        "MW_DIARIZATION_BACKEND",
+        "MW_EMBEDDING_BACKEND",
+        "MW_ASR_CHUNK_SECONDS",
+    ):
         monkeypatch.delenv(name, raising=False)
 
     settings = Settings()
@@ -43,18 +48,22 @@ def test_backend_settings_default_to_auto(monkeypatch):
     assert settings.asr_backend == "auto"
     assert settings.diarization_backend == "auto"
     assert settings.embedding_backend == "auto"
+    # 16GB 机器上 MLX 峰值内存随单块时长涨：20 分钟一块要 12.4 GB，必须切小。
+    assert settings.asr_chunk_seconds == 300.0
 
 
 def test_backend_settings_read_environment(monkeypatch):
     monkeypatch.setenv("MW_ASR_BACKEND", "qwen3-asr-mlx")
     monkeypatch.setenv("MW_DIARIZATION_BACKEND", "sherpa-onnx")
     monkeypatch.setenv("MW_EMBEDDING_BACKEND", "sherpa-onnx")
+    monkeypatch.setenv("MW_ASR_CHUNK_SECONDS", "120")
 
     settings = Settings()
 
     assert settings.asr_backend == "qwen3-asr-mlx"
     assert settings.diarization_backend == "sherpa-onnx"
     assert settings.embedding_backend == "sherpa-onnx"
+    assert settings.asr_chunk_seconds == 120.0
 
 
 def test_create_app_defaults_to_fake_backends_without_importing_real_runtimes(
@@ -84,10 +93,13 @@ def test_create_app_defaults_to_fake_backends_without_importing_real_runtimes(
 
 def test_worker_selects_backends_from_settings(monkeypatch, tmp_path):
     selected: list[tuple[str, str, Path]] = []
+    chunk_seconds: list[float | None] = []
 
     def select(kind, backend):
-        def factory(name, models_dir):
+        def factory(name, models_dir, **kwargs):
             selected.append((kind, name, models_dir))
+            if kind == "asr":
+                chunk_seconds.append(kwargs.get("chunk_seconds"))
             return backend
 
         return factory
@@ -110,6 +122,7 @@ def test_worker_selects_backends_from_settings(monkeypatch, tmp_path):
         diarization_backend="sherpa-onnx",
         embedding_backend="sherpa-onnx",
         minutes_backend="fake",
+        asr_chunk_seconds=180.0,
     )
 
     Worker(SimpleNamespace(), settings)
@@ -119,6 +132,8 @@ def test_worker_selects_backends_from_settings(monkeypatch, tmp_path):
         ("diarization", "sherpa-onnx", tmp_path / "models"),
         ("embedding", "sherpa-onnx", tmp_path / "models"),
     ]
+    # 分块时长是内存上限，必须从配置一路带到后端。
+    assert chunk_seconds == [180.0]
 
 
 @pytest.mark.parametrize(
@@ -248,6 +263,52 @@ def test_qwen3_transcribe_forwards_hotword_snapshot(monkeypatch, tmp_path):
     # 空快照传 None，让 mlx-audio 不注入 hotword 提示。
     backend.transcribe(Path("/tmp/audio.wav"))
     assert [item for item in events if item[0] == "mlx:generate"][-1][2]["hotwords"] is None
+
+
+def _recording_qwen_backend(models_dir: Path, calls: list[dict], **kwargs):
+    """不碰 mlx：直接把假 model 塞进后端，只看 generate 收到什么参数。"""
+
+    def generate(*args, **call_kwargs):
+        calls.append(call_kwargs)
+        return SimpleNamespace(segments=[], text="你好")
+
+    backend = Qwen3AsrMlxBackend(models_dir, **kwargs)
+    backend._model = SimpleNamespace(generate=generate)
+    return backend
+
+
+def test_qwen3_transcribe_chunks_audio_at_the_configured_length(tmp_path):
+    # 整段转写的峰值内存由单块时长决定：mlx-audio 默认 1200s 会把 16GB 机器压进 swap。
+    calls: list[dict] = []
+
+    _recording_qwen_backend(tmp_path / "models", calls).transcribe(Path("/tmp/audio.wav"))
+
+    assert calls[-1]["chunk_duration"] == 300.0
+
+
+def test_qwen3_transcribe_follows_the_backend_chunk_seconds(tmp_path):
+    calls: list[dict] = []
+
+    _recording_qwen_backend(
+        tmp_path / "models", calls, chunk_seconds=120.0
+    ).transcribe(Path("/tmp/audio.wav"))
+
+    assert calls[-1]["chunk_duration"] == 120.0
+
+
+def test_get_asr_backend_forwards_chunk_seconds(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    models_dir = tmp_path / "models"
+    qwen_dir = models_dir / "qwen3-asr-mlx"
+    qwen_dir.mkdir(parents=True)
+    (qwen_dir / "config.json").write_text("{}", encoding="utf-8")
+
+    for name in ("auto", "qwen3-asr-mlx"):
+        backend = get_asr_backend(name, models_dir, chunk_seconds=90.0)
+        assert isinstance(backend, Qwen3AsrMlxBackend)
+        assert backend.chunk_seconds == 90.0
+    # fake 不分块，多给的参数只是被忽略，不能报错。
+    assert isinstance(get_asr_backend("fake", models_dir, chunk_seconds=90.0), FakeAsrBackend)
 
 
 class _ScriptedStream:

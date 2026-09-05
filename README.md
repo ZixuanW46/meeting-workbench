@@ -66,6 +66,7 @@ npm install -g @plaud-ai/mcp   # 需要 Node.js ≥ 20；装完 PATH 里会有 p
 - 单次 CLI 调用超时可调：`MW_MINUTES_TIMEOUT_SECONDS`（默认 600）、`MW_CLEANING_TIMEOUT_SECONDS`（默认 480）。清洗按块分批送 CLI，每块上限 `MW_CLEANING_CHUNK_CHARS` 个字（默认 6000）；块越大批次越少，但单批失败丢得越多。
 - 清洗与纪要各自钉死模型：Claude 用别名或全名（`MW_CLEANING_MODEL_CLAUDE` 默认 `opus`，`MW_MINUTES_MODEL_CLAUDE` 默认 `fable`），Codex 用模型 slug 加推理强度（`MW_CLEANING_MODEL_CODEX` 默认 `gpt-5.6-luna`，`MW_MINUTES_MODEL_CODEX` 默认 `gpt-5.6-sol`，`MW_CLEANING_CODEX_REASONING_EFFORT` / `MW_MINUTES_CODEX_REASONING_EFFORT` 默认 `medium`）。留空即用各 CLI 自己的默认模型；可用的 Codex slug 见 `~/.codex/models_cache.json`。
 - 处理失败或被取消的会议可在界面上「重新处理」，音频不必重传；服务重启时中断的转写会自动回到队列。
+- 流水线先做说话人切分，再按发言轮次把音频切片逐段转写，整段转写只在切不动时兜底：ASR 的峰值内存与录音总长无关（短切片约 4 GB）。兜底整段转写按 `MW_ASR_CHUNK_SECONDS`（默认 300）分块喂模型，实测块长 2 / 10 / 20 分钟对应 MLX 峰值约 3.9 / 7.6 / 12.4 GB。
 - 模型在本机串行使用，以适应 16GB 统一内存；实际耗时取决于录音与机器负载，不作为对外性能承诺。
 
 ## 开发

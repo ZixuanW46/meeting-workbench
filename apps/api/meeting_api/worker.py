@@ -101,7 +101,7 @@ class ProcessingCanceled(Exception):
     """会议状态在处理期间被别处改掉（用户取消）：放弃本轮，不覆盖新状态。"""
 
 
-# 逐轮重转写时，短于此的轮次装不下一个字，只会让 ASR 回吐热词表。
+# 逐轮转写时，短于此的轮次装不下一个字，只会让 ASR 回吐热词表。
 MIN_RETRANSCRIBE_TURN_SECONDS = 0.25
 
 # 声纹模板的代表性试听切片上限（秒）：够人听出是谁，又不臃肿。
@@ -198,7 +198,9 @@ class Worker:
         self.settings = settings
         models_dir = settings.data_dir / "models"
         self.asr_backend = asr_backend or get_asr_backend(
-            settings.asr_backend, models_dir
+            settings.asr_backend,
+            models_dir,
+            chunk_seconds=settings.asr_chunk_seconds,
         )
         self.diarization_backend = diarization_backend or get_diarization_backend(
             settings.diarization_backend, models_dir
@@ -285,16 +287,10 @@ class Worker:
             try:
                 audio_path = self._validate_audio(meeting)
 
-                self._set_step(session, meeting, STEP_ASR)
-                hotwords = tuple(json.loads(meeting.hotword_snapshot_json))
-                with self.model_slot.use(self.asr_backend) as asr:
-                    asr_segments = asr.transcribe(
-                        audio_path, hotwords=hotwords, language=meeting.language
-                    )
-                asr_segments = _drop_hotword_echoes(asr_segments, hotwords)
-
+                # 先切分再转写：ASR 只吃单个发言轮次的短切片，峰值内存与录音
+                # 总长无关；整段那一遍（16GB 机器上 87 分钟录音要多花约 16 分钟
+                # 且峰值 12.5 GB）只在切不动时兜底。
                 self._set_step(session, meeting, STEP_DIARIZATION)
-                # 离开上一个槽上下文后 ASR 已卸载，才能加载切分模型。
                 with self.model_slot.use(self.diarization_backend) as diarization:
                     speaker_segments = diarization.diarize(
                         audio_path,
@@ -303,11 +299,23 @@ class Worker:
                 # 真实音频的自动聚类几乎必产亚秒碎簇；并入最近主簇后再落库，
                 # 否则确认包准备会因「凑不齐试听片段」整场失败。
                 speaker_segments = consolidate_fragment_clusters(speaker_segments)
-                # 发言轮次是逐轮重转写与试听/声纹时间窗的共同粒度。
+                # 发言轮次是逐轮转写与试听/声纹时间窗的共同粒度。
                 turns = merge_adjacent_turns(speaker_segments)
-                asr_segments = self._retranscribe_blob_per_turn(
-                    audio_path, asr_segments, turns, hotwords, meeting.language
+
+                self._set_step(session, meeting, STEP_ASR)
+                # 离开上一个槽上下文后切分模型已卸载，才能加载 ASR。
+                hotwords = tuple(json.loads(meeting.hotword_snapshot_json))
+                asr_segments = self._transcribe_per_turn(
+                    session, meeting, audio_path, turns, hotwords, meeting.language
                 )
+                if not asr_segments:
+                    # 没有轮次可切，或音频不是可解析的 PCM wav：退回整段转写。
+                    # 块长仍受 settings.asr_chunk_seconds 约束，内存不会失控。
+                    with self.model_slot.use(self.asr_backend) as asr:
+                        whole_file = asr.transcribe(
+                            audio_path, hotwords=hotwords, language=meeting.language
+                        )
+                    asr_segments = _drop_hotword_echoes(whole_file, hotwords)
                 self._persist_segments(session, meeting_id, asr_segments, speaker_segments)
 
                 self._set_step(session, meeting, STEP_VOICEPRINT_MATCHING)
@@ -571,24 +579,27 @@ class Worker:
             build_transcript_blocks(Worker._labeled_segments(session, meeting_id))
         )
 
-    def _retranscribe_blob_per_turn(
+    def _transcribe_per_turn(
         self,
+        session: Session,
+        meeting: Meeting,
         audio_path: Path,
-        asr_segments: Sequence[AsrSegment],
         turns: Sequence[SpeakerSegment],
         hotwords: Sequence[str],
         language: str = "zh",
-    ) -> Sequence[AsrSegment]:
-        """粗粒度转写按发言轮次切音频重转写。
+    ) -> list[AsrSegment]:
+        """按发言轮次切音频逐段转写：这是本管线正式的转写通道。
 
-        Qwen3-ASR 只回整段文本（长音频会内部分块成少数巨型段），全部
-        转写会被判给单一说话人；当转写粒度远粗于轮次粒度（段数 ×3 仍
-        不及轮次数）时逐轮切片重转写，让每句话落在正确的簇上。音频
-        不是可解析的 PCM wav（转码前的损坏文件等）时保留整段结果，
-        不让会议失败。
+        Qwen3-ASR 整段转写只回一坨无时间戳文本，之后仍要逐轮再转一遍，
+        等于白跑一趟；而 MLX 的峰值内存随单块时长涨（20 分钟一块 12.4 GB），
+        长录音必然把 16GB 机器压进 swap。切片后每次只吃一个轮次，峰值稳定在
+        4 GB 上下，每句话还天然落在正确的簇上。
+
+        音频不是可解析的 PCM wav（转码前的损坏文件等）或没有够长的轮次时
+        返回空，由调用方回退整段转写，不让会议失败。
         """
-        if len(turns) <= 1 or len(asr_segments) * 3 > len(turns):
-            return asr_segments
+        if not turns:
+            return []
         with tempfile.TemporaryDirectory(prefix="mw-turns-") as scratch:
             pieces: list[tuple[SpeakerSegment, Path]] = []
             try:
@@ -599,13 +610,21 @@ class Worker:
                     _write_wav_slice(audio_path, turn.start, turn.end, piece_path)
                     pieces.append((turn, piece_path))
             except (wave.Error, EOFError, OSError):
-                return asr_segments
+                return []
+            if not pieces:
+                return []
 
-            retranscribed: list[AsrSegment] = []
+            segments: list[AsrSegment] = []
             with self.model_slot.use(self.asr_backend) as asr:
-                for turn, piece_path in pieces:
-                    if turn.end - turn.start < MIN_RETRANSCRIBE_TURN_SECONDS:
-                        continue
+                for ordinal, (turn, piece_path) in enumerate(pieces, start=1):
+                    # 长录音要看得出转到第几轮；这同时是取消的检查点，
+                    # 用户点停止后不会再切下一轮。
+                    self._set_step(
+                        session,
+                        meeting,
+                        STEP_ASR,
+                        detail=f"{ordinal}/{len(pieces)}",
+                    )
                     text = "".join(
                         piece.text
                         for piece in asr.transcribe(
@@ -614,8 +633,8 @@ class Worker:
                     ).strip()
                     text = strip_hotword_echo(text, hotwords)
                     if text:
-                        retranscribed.append(AsrSegment(turn.start, turn.end, text))
-        return retranscribed or asr_segments
+                        segments.append(AsrSegment(turn.start, turn.end, text))
+        return segments
 
     def _validate_audio(self, meeting: Meeting) -> Path:
         if not meeting.audio_filename or not meeting.audio_size or not meeting.audio_sha256:

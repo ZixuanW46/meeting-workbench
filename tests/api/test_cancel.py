@@ -6,6 +6,8 @@ worker 是协作式取消：在步骤边界重读数据库状态，发现被取�
 
 from __future__ import annotations
 
+import io
+import wave
 from pathlib import Path
 
 from meeting_api.models import Meeting
@@ -19,6 +21,23 @@ def _create_and_upload(client) -> str:
     response = client.post(
         f"/api/meetings/{meeting_id}/upload",
         files={"file": ("meeting.wav", b"fake audio bytes", "audio/wav")},
+    )
+    assert response.status_code == 200
+    return meeting_id
+
+
+def _create_and_upload_wav(client, seconds: float = 20.0) -> str:
+    """真 PCM wav：能按发言轮次切片，逐轮转写才真的跑起来。"""
+    meeting_id = client.post("/api/meetings", json={"title": "逐轮取消测试"}).json()["id"]
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(16000)
+        writer.writeframes(b"\x00\x00" * int(16000 * seconds))
+    response = client.post(
+        f"/api/meetings/{meeting_id}/upload",
+        files={"file": ("meeting.wav", buffer.getvalue(), "audio/wav")},
     )
     assert response.status_code == 200
     return meeting_id
@@ -78,6 +97,38 @@ def test_cancel_during_processing_is_honored_at_next_step_boundary(client):
     detail = client.get(f"/api/meetings/{meeting_id}").json()
     assert detail["state"] == "CANCELED"
     assert detail["processing_error"] is None
+    # 半途产物不留：取消后再重新处理必须从零开始。
+    assert client.get(f"/api/meetings/{meeting_id}/review").status_code == 409
+
+
+def test_cancel_during_per_turn_asr_stops_before_the_next_turn(client):
+    # 逐轮转写要跑几十分钟：取消必须在轮次之间生效，而不是等整场跑完。
+    meeting_id = _create_and_upload_wav(client)
+
+    class CancelingPerTurnAsr(FakeAsrBackend):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls: list[Path] = []
+
+        def transcribe(self, audio_path: Path, hotwords=(), language="zh") -> list[AsrSegment]:
+            self.calls.append(Path(audio_path))
+            # 模拟用户在第二轮转写时点了取消。
+            if len(self.calls) == 2:
+                assert client.post(f"/api/meetings/{meeting_id}/cancel").status_code == 200
+            return [AsrSegment(0.0, 1.0, f"第 {len(self.calls)} 轮")]
+
+    asr = CancelingPerTurnAsr()
+    _replace_worker(client, asr_backend=asr)
+
+    assert client.app.state.worker.process_next() == meeting_id
+
+    detail = client.get(f"/api/meetings/{meeting_id}").json()
+    assert detail["state"] == "CANCELED"
+    assert detail["processing_error"] is None
+    # fake 切分共 4 轮：取消后不再切下一轮，且每次转写吃的都是切片而不是整段。
+    assert len(asr.calls) == 2
+    raw_dir = client.app.state.settings.data_dir / "meetings" / meeting_id / "raw"
+    assert all(path.parent != raw_dir for path in asr.calls)
     # 半途产物不留：取消后再重新处理必须从零开始。
     assert client.get(f"/api/meetings/{meeting_id}/review").status_code == 409
 

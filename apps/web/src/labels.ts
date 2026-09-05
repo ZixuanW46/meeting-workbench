@@ -26,8 +26,9 @@ export const STEP_LABELS: Record<string, string> = {
 
 export const PIPELINE_STEPS: Array<{ key: string; label: string }> = [
   { key: 'VALIDATING', label: STEP_LABELS.VALIDATING },
-  { key: 'ASR', label: STEP_LABELS.ASR },
+  // 先切分再按发言轮次转写：整段转写只在没有轮次时兜底（见 worker.process_next）
   { key: 'DIARIZATION', label: STEP_LABELS.DIARIZATION },
+  { key: 'ASR', label: STEP_LABELS.ASR },
   { key: 'VOICEPRINT_MATCHING', label: STEP_LABELS.VOICEPRINT_MATCHING },
   { key: 'PREPARING_REVIEW', label: STEP_LABELS.PREPARING_REVIEW },
   { key: 'CLEANING_TRANSCRIPT', label: STEP_LABELS.CLEANING_TRANSCRIPT },

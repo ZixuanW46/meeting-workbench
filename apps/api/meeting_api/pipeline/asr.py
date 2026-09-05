@@ -35,6 +35,11 @@ class AsrBackend(Protocol):
 # 会议语言到 Qwen3-ASR 语言名的映射；未知语言按中文处理。
 LANGUAGE_NAMES = {"zh": "Chinese", "en": "English"}
 
+# 单块音频时长上限（秒）。mlx-audio 默认 1200s，而 MLX 峰值内存随块长涨
+# （真机实测 2 分钟 3.9 GB / 10 分钟 7.6 GB / 20 分钟 12.4 GB），
+# 16GB 机器必须切小；实际值由 Settings.asr_chunk_seconds 决定。
+DEFAULT_CHUNK_SECONDS = 300.0
+
 
 class FakeAsrBackend:
     """假转写：返回固定片段；hotwords 与非中文语言标记原样拼进文本，便于断言。"""
@@ -77,8 +82,14 @@ class Qwen3AsrMlxBackend:
     name = "qwen3-asr-mlx"
     model_subdir = Path("qwen3-asr-mlx")
 
-    def __init__(self, models_dir: Path = Path("data/models")) -> None:
+    def __init__(
+        self,
+        models_dir: Path = Path("data/models"),
+        *,
+        chunk_seconds: float = DEFAULT_CHUNK_SECONDS,
+    ) -> None:
         self.model_dir = models_dir / self.model_subdir
+        self.chunk_seconds = chunk_seconds
         self._model = None
         self._mlx = None
 
@@ -116,10 +127,12 @@ class Qwen3AsrMlxBackend:
             raise RuntimeError("ASR 后端未加载（先 load()）")
         # mlx-audio 的 Qwen3-ASR 提供官方 hotwords 参数（折进 system_prompt 做偏置）；
         # 快照由 worker 固定并传入，全程只在本机推理，不把数据发往云端。
+        # chunk_duration 决定单块音频有多长，也就决定了 MLX 的峰值内存上限。
         result = self._model.generate(
             str(audio_path),
             language=LANGUAGE_NAMES.get(language, "Chinese"),
             hotwords=list(hotwords) or None,
+            chunk_duration=self.chunk_seconds,
         )
         segments = getattr(result, "segments", None) or []
         if segments:
@@ -141,17 +154,21 @@ def _require_darwin(backend_name: str) -> None:
 
 
 def get_asr_backend(
-    name: str = "fake", models_dir: Path = Path("data/models")
+    name: str = "fake",
+    models_dir: Path = Path("data/models"),
+    *,
+    chunk_seconds: float = DEFAULT_CHUNK_SECONDS,
 ) -> AsrBackend:
+    """按名字取 ASR 后端；chunk_seconds 只对真实后端有意义，fake 不分块。"""
     if name == "auto":
         if sys.platform == "darwin" and (
             models_dir / Qwen3AsrMlxBackend.model_subdir / "config.json"
         ).is_file():
-            return Qwen3AsrMlxBackend(models_dir)
+            return Qwen3AsrMlxBackend(models_dir, chunk_seconds=chunk_seconds)
         return FakeAsrBackend()
     if name == "fake":
         return FakeAsrBackend()
     if name == "qwen3-asr-mlx":
         _require_darwin(name)
-        return Qwen3AsrMlxBackend(models_dir)
+        return Qwen3AsrMlxBackend(models_dir, chunk_seconds=chunk_seconds)
     raise ValueError(f"未知 ASR 后端: {name}")

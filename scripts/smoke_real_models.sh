@@ -12,7 +12,11 @@ if [[ $# -ne 1 || ! -f "$1" ]]; then
   exit 2
 fi
 
-.venv/bin/python - "$1" <<'PY'
+# 切分跑在 multiprocessing spawn 子进程里（见 pipeline/isolation.py），子进程要重新
+# import 主模块：主模块必须是磁盘上的真文件并带 __main__ 守卫，不能从 stdin 喂。
+SMOKE_PY="$(mktemp -t mw-smoke).py"
+trap 'rm -f "$SMOKE_PY"' EXIT
+cat >"$SMOKE_PY" <<'PY'
 import sys
 from pathlib import Path
 
@@ -22,37 +26,44 @@ from meeting_api.pipeline.diarization import get_diarization_backend
 from meeting_api.pipeline.embedding import get_embedding_backend
 from meeting_api.pipeline.serial import SingleModelSlot
 
-audio_path = Path(sys.argv[1])
-settings = Settings()
-if (
-    settings.asr_backend != "qwen3-asr-mlx"
-    or settings.diarization_backend != "sherpa-onnx"
-    or settings.embedding_backend != "sherpa-onnx"
-):
-    raise SystemExit("请先按 download_models.md 设置三个真实后端环境变量")
-models_dir = settings.data_dir / "models"
-slot = SingleModelSlot()
 
-asr = get_asr_backend(settings.asr_backend, models_dir)
-diarization = get_diarization_backend(settings.diarization_backend, models_dir)
-embedding = get_embedding_backend(settings.embedding_backend, models_dir)
+def main() -> None:
+    audio_path = Path(sys.argv[1])
+    settings = Settings()
+    if (
+        settings.asr_backend != "qwen3-asr-mlx"
+        or settings.diarization_backend != "sherpa-onnx"
+        or settings.embedding_backend != "sherpa-onnx"
+    ):
+        raise SystemExit("请先按 download_models.md 设置三个真实后端环境变量")
+    models_dir = settings.data_dir / "models"
+    slot = SingleModelSlot()
 
-with slot.use(asr) as loaded_asr:
-    transcript = loaded_asr.transcribe(audio_path)
-print(f"ASR：{len(transcript)} 个片段（ASR 已卸载）")
+    asr = get_asr_backend(settings.asr_backend, models_dir, chunk_seconds=settings.asr_chunk_seconds)
+    diarization = get_diarization_backend(settings.diarization_backend, models_dir)
+    embedding = get_embedding_backend(settings.embedding_backend, models_dir)
 
-with slot.use(diarization) as loaded_diarization:
-    speakers = loaded_diarization.diarize(audio_path)
-print(f"切分：{len(speakers)} 个片段（切分模型已卸载）")
+    with slot.use(asr) as loaded_asr:
+        transcript = loaded_asr.transcribe(audio_path)
+    print(f"ASR：{len(transcript)} 个片段（ASR 已卸载）")
 
-with slot.use(embedding) as loaded_embedding:
-    # 与 worker 匹配口径一致：取首个簇的前 3 段时间窗提均值声纹。
-    first_cluster = speakers[0].cluster_id
-    windows = [
-        (segment.start, segment.end)
-        for segment in speakers
-        if segment.cluster_id == first_cluster
-    ][:3]
-    vector = loaded_embedding.embed(audio_path, windows)
-print(f"声纹：簇 {first_cluster} 取 {len(windows)} 窗，{len(vector)} 维（声纹模型已卸载）")
+    with slot.use(diarization) as loaded_diarization:
+        speakers = loaded_diarization.diarize(audio_path)
+    print(f"切分：{len(speakers)} 个片段（切分模型已卸载）")
+
+    with slot.use(embedding) as loaded_embedding:
+        # 与 worker 匹配口径一致：取首个簇的前 3 段时间窗提均值声纹。
+        first_cluster = speakers[0].cluster_id
+        windows = [
+            (segment.start, segment.end)
+            for segment in speakers
+            if segment.cluster_id == first_cluster
+        ][:3]
+        vector = loaded_embedding.embed(audio_path, windows)
+    print(f"声纹：簇 {first_cluster} 取 {len(windows)} 窗，{len(vector)} 维（声纹模型已卸载）")
+
+
+if __name__ == "__main__":
+    main()
 PY
+.venv/bin/python "$SMOKE_PY" "$1"

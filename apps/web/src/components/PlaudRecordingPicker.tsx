@@ -51,6 +51,22 @@ export function formatDuration(durationMs: number): string {
   return `${seconds}s`
 }
 
+/** 录音笔没改过名时的设备默认名，形如 2026-09-05 21:08:13：名字本身就是时间，行里不必再印一遍 */
+const DEVICE_DEFAULT_NAME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/
+
+export function isDeviceDefaultName(name: string): boolean {
+  return DEVICE_DEFAULT_NAME.test(name.trim())
+}
+
+/** Plaud 按同步时间给列表，同一天里会乱；这里统一按开始时间从新到旧 */
+export function sortByStartDesc(items: PlaudRecording[]): PlaudRecording[] {
+  const key = (item: PlaudRecording) => {
+    const ms = Date.parse(item.started_at)
+    return Number.isNaN(ms) ? 0 : ms
+  }
+  return [...items].sort((a, b) => key(b) - key(a))
+}
+
 interface PlaudRecordingPickerProps {
   value: PlaudRecording | null
   onChange: (recording: PlaudRecording) => void
@@ -112,7 +128,7 @@ export function PlaudRecordingPicker({ value, onChange }: PlaudRecordingPickerPr
         if (stale) {
           return
         }
-        setItems(result.items)
+        setItems(sortByStartDesc(result.items))
         setPage(result.page)
         setHasMore(result.has_more)
         setFiltered(result.filtered)
@@ -155,7 +171,7 @@ export function PlaudRecordingPicker({ value, onChange }: PlaudRecordingPickerPr
       ...(activeQuery.trim() !== '' ? { query: activeQuery } : {}),
     })
       .then((result) => {
-        setItems((current) => [...(current ?? []), ...result.items])
+        setItems((current) => sortByStartDesc([...(current ?? []), ...result.items]))
         setPage(result.page)
         setHasMore(result.has_more)
       })
@@ -274,14 +290,18 @@ export function PlaudRecordingPicker({ value, onChange }: PlaudRecordingPickerPr
       {items !== null && items.length > 0 && (
         <div className="list-card plaud-list" role="radiogroup" aria-label="Plaud 录音">
           {items.map((recording) => {
-            const meta = `${formatRecordingTime(recording.started_at)} · ${formatDuration(recording.duration_ms)}`
+            const showTime = !isDeviceDefaultName(recording.name)
+            const time = formatRecordingTime(recording.started_at)
+            const duration = formatDuration(recording.duration_ms)
             if (recording.imported_meeting_id !== null) {
               return (
                 <div key={recording.file_id} className="list-row plaud-row-imported">
-                  <span className="list-row-main">
-                    <span className="list-row-title">{recording.name}</span>
-                    <span className="list-row-meta">{meta}</span>
+                  <span className="plaud-radio plaud-radio-done" aria-hidden="true">
+                    <Icon name="check" size={10} />
                   </span>
+                  <span className="plaud-row-name">{recording.name}</span>
+                  {showTime && <span className="plaud-row-time">{time}</span>}
+                  <span className="plaud-row-duration">{duration}</span>
                   <span className="badge-lang">已导入</span>
                   <a
                     className="btn btn-ghost"
@@ -302,11 +322,10 @@ export function PlaudRecordingPicker({ value, onChange }: PlaudRecordingPickerPr
                 className={`list-row plaud-row${selected ? ' selected' : ''}`}
                 onClick={() => onChange(recording)}
               >
-                <span className="list-row-main">
-                  <span className="list-row-title">{recording.name}</span>
-                  <span className="list-row-meta">{meta}</span>
-                </span>
-                {selected && <Icon name="check" size={13} className="plaud-row-check" />}
+                <span className="plaud-radio" aria-hidden="true" />
+                <span className="plaud-row-name">{recording.name}</span>
+                {showTime && <span className="plaud-row-time">{time}</span>}
+                <span className="plaud-row-duration">{duration}</span>
               </button>
             )
           })}

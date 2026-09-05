@@ -137,15 +137,47 @@ describe('Plaud 录音选择器', () => {
 
     expect(await screen.findByText('客户访谈')).toBeInTheDocument()
     expect(screen.getByText('Will')).toBeInTheDocument()
-    expect(
-      screen.getByText(`${localMinute('2026-09-05T13:08:13+00:00')} · 1h27m`),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText(`${localMinute('2026-09-04T02:00:00+00:00')} · 5m12s`),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText(`${localMinute('2026-09-03T02:00:00+00:00')} · 14s`),
-    ).toBeInTheDocument()
+    // 自定义名的行附开始时间；设备默认名本身就是时间，不再印一遍
+    expect(screen.getByText(localMinute('2026-09-04T02:00:00+00:00'))).toBeInTheDocument()
+    expect(screen.getByText(localMinute('2026-09-03T02:00:00+00:00'))).toBeInTheDocument()
+    expect(screen.queryByText(localMinute('2026-09-05T13:08:13+00:00'))).not.toBeInTheDocument()
+    expect(screen.getByText('1h27m')).toBeInTheDocument()
+    expect(screen.getByText('5m12s')).toBeInTheDocument()
+    expect(screen.getByText('14s')).toBeInTheDocument()
+  })
+
+  it('不管服务端怎么给，列表都按开始时间从新到旧排；加载更多后依然有序', async () => {
+    const later = {
+      file_id: 'f0',
+      name: '最新的一场',
+      started_at: '2026-09-06T01:00:00+00:00',
+      duration_ms: 60000,
+      imported_meeting_id: null,
+    }
+    server.use(
+      statusHandler(LOGGED_IN),
+      http.get('/api/plaud/recordings', ({ request }) => {
+        const page = Number(new URL(request.url).searchParams.get('page') ?? '1')
+        return HttpResponse.json({
+          // 第一页故意倒着给；第二页给一条比第一页都新的
+          items: page === 1 ? [RECORDINGS[2], RECORDINGS[1], RECORDINGS[0]] : [later],
+          page,
+          page_size: 3,
+          has_more: page === 1,
+          filtered: false,
+        })
+      }),
+    )
+
+    const { container } = render(<PlaudRecordingPicker value={null} onChange={() => {}} />)
+    await screen.findByText('客户访谈')
+    const names = () =>
+      Array.from(container.querySelectorAll('.plaud-row-name')).map((el) => el.textContent)
+    expect(names()).toEqual(['2026-09-05 21:08:13', '客户访谈', '上周复盘'])
+
+    fireEvent.click(screen.getByRole('button', { name: '加载更多' }))
+    await screen.findByText('最新的一场')
+    expect(names()).toEqual(['最新的一场', '2026-09-05 21:08:13', '客户访谈', '上周复盘'])
   })
 
   it('已导入的录音：显示「已导入」与「打开」链接，且不可再选', async () => {

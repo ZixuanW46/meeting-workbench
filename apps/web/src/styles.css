@@ -1746,6 +1746,8 @@ svg.clip-wave {
 /* 视图切换：胶囊分组，选中 = surface-2 抬升 */
 .tabs {
   display: inline-flex;
+  /* 分段开关只该和内容一样宽：放进纵向表单里也别被拉成整行 */
+  width: fit-content;
   gap: 2px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-pill);
@@ -2466,6 +2468,13 @@ svg.clip-wave {
   overflow-y: auto;
 }
 
+/* 录音行一行读完：单选圆点 · 名称 · （自定义名才附开始时间）· 时长右对齐 */
+.plaud-list .list-row {
+  gap: 10px;
+  padding: 8px 14px;
+  min-height: 40px;
+}
+
 /* 可选录音行本身是按钮：借 .list-row 的排版，去掉按钮的原生外观 */
 .plaud-row {
   font: inherit;
@@ -2475,6 +2484,7 @@ svg.clip-wave {
   background: transparent;
   border: none;
   border-top: 1px solid var(--hairline);
+  color: var(--ink);
   cursor: pointer;
 }
 
@@ -2482,19 +2492,68 @@ svg.clip-wave {
   background: var(--surface-2);
 }
 
-/* 选中态 = 抬一级表面 + 左侧一道薰衣草，键盘走过去也看得出来 */
+/* 选中态 = 抬一级表面 + 左侧一道薰衣草 + 圆点点亮，键盘走过去也看得出来 */
 .plaud-row.selected {
   background: var(--surface-2);
   box-shadow: inset 2px 0 0 var(--primary);
 }
 
-.plaud-row-check {
-  color: var(--primary-hover);
+.plaud-radio {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--hairline-tertiary);
+  transition: border-color 0.12s var(--ease), background 0.12s var(--ease);
 }
 
-/* 已导入的行安静一档：只剩去工作台的出口 */
-.plaud-row-imported .list-row-title {
+.plaud-row:hover .plaud-radio {
+  border-color: var(--ink-subtle);
+}
+
+.plaud-row.selected .plaud-radio {
+  border-color: var(--primary-hover);
+  background: var(--primary-hover);
+  box-shadow: inset 0 0 0 3px var(--surface-2);
+}
+
+/* 已导入：圆点换成绿勾，名称退一档，只剩去工作台的出口 */
+.plaud-radio-done {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: transparent;
+  color: var(--success);
+}
+
+.plaud-row-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plaud-row-time,
+.plaud-row-duration {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--ink-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.plaud-row-duration {
+  min-width: 48px;
+  text-align: right;
+}
+
+.plaud-row-imported .plaud-row-name {
   color: var(--ink-subtle);
+}
+
+.plaud-row-imported .btn {
+  padding: 2px 8px;
 }
 
 .plaud-more {

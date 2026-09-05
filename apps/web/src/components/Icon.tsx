@@ -22,6 +22,7 @@ export const ICON_NAMES = [
   'search',
   'more',
   'grip',
+  'cloud',
 ] as const
 
 export type IconName = (typeof ICON_NAMES)[number]
@@ -86,6 +87,13 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="m11.15 2.85 2 2L5.6 12.4l-2.85.85.85-2.85z" />
       <path d="m9.65 4.35 2 2" />
+    </>
+  ),
+  // 云端下载：一朵云 + 向下的箭头，给「从 Plaud 导入」用
+  cloud: (
+    <>
+      <path d="M4.9 11.5a2.65 2.65 0 0 1-.15-5.29 3.6 3.6 0 0 1 6.9-.73 2.75 2.75 0 0 1 .55 5.44" />
+      <path d="M8 8v5.5M5.9 11.4 8 13.5l2.1-2.1" />
     </>
   ),
 }

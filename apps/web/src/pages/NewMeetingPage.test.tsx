@@ -190,6 +190,175 @@ describe('新建会议表单', () => {
   })
 })
 
+const PLAUD_RECORDINGS = [
+  {
+    file_id: 'f1',
+    name: '2026-09-05 21:08:13',
+    started_at: '2026-09-05T13:08:13+00:00',
+    duration_ms: 5220000,
+    imported_meeting_id: null,
+  },
+  {
+    file_id: 'f2',
+    name: '客户访谈',
+    started_at: '2026-09-04T02:00:00+00:00',
+    duration_ms: 312000,
+    imported_meeting_id: null,
+  },
+]
+
+/** 录音开始时间在观看者本地时区的日期，用例不挑 CI 的 TZ */
+function localDateOf(iso: string): string {
+  const date = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+function usePlaudRecordings() {
+  server.use(
+    http.get('/api/plaud/status', () =>
+      HttpResponse.json({
+        available: true,
+        logged_in: true,
+        user: { nickname: 'Will', email: 'will@example.com' },
+        message: null,
+      }),
+    ),
+    http.get('/api/plaud/recordings', () =>
+      HttpResponse.json({
+        items: PLAUD_RECORDINGS,
+        page: 1,
+        page_size: 20,
+        has_more: false,
+        filtered: false,
+      }),
+    ),
+  )
+}
+
+describe('新建会议 · 从 Plaud 导入', () => {
+  beforeEach(() => {
+    window.location.hash = '#/new'
+  })
+
+  it('默认是「稍后上传文件」，切到 Plaud 才出录音列表；没选录音不给提交', async () => {
+    usePlaudRecordings()
+
+    render(<NewMeetingPage />)
+
+    expect(screen.getByRole('button', { name: '稍后上传文件' })).toHaveClass('active')
+    expect(screen.queryByLabelText('按录音名称搜索')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '创建会议' })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '从 Plaud 导入' }))
+
+    expect(await screen.findByText('客户访谈')).toBeInTheDocument()
+    const submit = screen.getByRole('button', { name: '导入并开始处理' })
+    expect(submit).toBeDisabled()
+
+    fireEvent.click(await screen.findByRole('radio', { name: /客户访谈/ }))
+    expect(screen.getByRole('button', { name: '导入并开始处理' })).toBeEnabled()
+  })
+
+  it('选中录音后提交：POST /api/plaud/import 带 plaud_file_id 与表单字段，成功跳工作台', async () => {
+    let body: Record<string, unknown> | null = null
+    usePlaudRecordings()
+    useProjects()
+    server.use(
+      http.post('/api/plaud/import', async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ id: 'm-plaud', title: '客户访谈' }, { status: 201 })
+      }),
+    )
+
+    render(<NewMeetingPage />)
+    fireEvent.click(screen.getByRole('button', { name: '从 Plaud 导入' }))
+    fireEvent.click(await screen.findByRole('radio', { name: /客户访谈/ }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'English' }))
+    await screen.findByRole('option', { name: '声纹研究' })
+    fireEvent.change(screen.getByLabelText('项目'), { target: { value: 'p2' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '导入并开始处理' }))
+
+    await waitFor(() => expect(body).not.toBeNull())
+    expect(body).toEqual({
+      hotwords: [],
+      meeting_date: localDateOf('2026-09-04T02:00:00+00:00'),
+      language: 'en',
+      project_id: 'p2',
+      plaud_file_id: 'f2',
+    })
+    await waitFor(() => expect(window.location.hash).toBe('#/meetings/m-plaud'))
+  })
+
+  it('#/new?source=plaud 打开即选中 Plaud 来源', async () => {
+    window.location.hash = '#/new?source=plaud'
+    usePlaudRecordings()
+
+    render(<NewMeetingPage />)
+
+    expect(screen.getByRole('button', { name: '从 Plaud 导入' })).toHaveClass('active')
+    expect(await screen.findByText('客户访谈')).toBeInTheDocument()
+  })
+
+  it('选中录音后标题占位变成录音名、会议日期跟着录音；用户改过日期就不覆盖', async () => {
+    usePlaudRecordings()
+
+    render(<NewMeetingPage />)
+    fireEvent.click(screen.getByRole('button', { name: '从 Plaud 导入' }))
+    fireEvent.click(await screen.findByRole('radio', { name: /客户访谈/ }))
+
+    expect(screen.getByLabelText('标题')).toHaveAttribute('placeholder', '客户访谈')
+    const dateInput = screen.getByLabelText('会议日期') as HTMLInputElement
+    expect(dateInput.value).toBe(localDateOf('2026-09-04T02:00:00+00:00'))
+
+    fireEvent.change(dateInput, { target: { value: '2026-08-30' } })
+    fireEvent.click(screen.getByRole('radio', { name: /2026-09-05 21:08:13/ }))
+    expect(dateInput.value).toBe('2026-08-30')
+  })
+
+  it('在搜索框里回车只是搜索，不会顺手把表单提交掉', async () => {
+    let imports = 0
+    usePlaudRecordings()
+    server.use(
+      http.post('/api/plaud/import', () => {
+        imports += 1
+        return HttpResponse.json({ id: 'm-plaud' }, { status: 201 })
+      }),
+    )
+
+    render(<NewMeetingPage />)
+    fireEvent.click(screen.getByRole('button', { name: '从 Plaud 导入' }))
+    fireEvent.click(await screen.findByRole('radio', { name: /客户访谈/ }))
+
+    const search = screen.getByLabelText('按录音名称搜索')
+    fireEvent.change(search, { target: { value: '客户' } })
+    // 回车被 preventDefault 拦下（dispatchEvent 返回 false），浏览器就不会隐式提交表单
+    expect(fireEvent.keyDown(search, { key: 'Enter' })).toBe(false)
+
+    await waitFor(() => expect(imports).toBe(0))
+    expect(window.location.hash).toBe('#/new')
+  })
+
+  it('导入失败：错误显示在表单上，不跳转', async () => {
+    usePlaudRecordings()
+    server.use(
+      http.post('/api/plaud/import', () =>
+        HttpResponse.json({ detail: '该 Plaud 录音已导入' }, { status: 409 }),
+      ),
+    )
+
+    render(<NewMeetingPage />)
+    fireEvent.click(screen.getByRole('button', { name: '从 Plaud 导入' }))
+    fireEvent.click(await screen.findByRole('radio', { name: /客户访谈/ }))
+    fireEvent.click(screen.getByRole('button', { name: '导入并开始处理' }))
+
+    expect(await screen.findByText('该 Plaud 录音已导入')).toBeInTheDocument()
+    expect(window.location.hash).toBe('#/new')
+  })
+})
+
 function localToday(): string {
   const now = new Date()
   const month = String(now.getMonth() + 1).padStart(2, '0')

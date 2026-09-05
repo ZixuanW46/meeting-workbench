@@ -12,6 +12,15 @@ export const server = setupServer(
   ),
   // 项目默认为空：不关心项目的页面测试不必自己注册 handler
   http.get('/api/projects', () => HttpResponse.json({ items: [] })),
+  // Plaud 默认已装已登录：关心 Plaud 三态的用例自己 server.use 覆盖
+  http.get('/api/plaud/status', () =>
+    HttpResponse.json({
+      available: true,
+      logged_in: true,
+      user: { nickname: 'Will', email: 'will@example.com' },
+      message: null,
+    }),
+  ),
   // 重排默认按请求的 ids 把 fixture 重新排好并回全量列表，position 重新编号
   http.put('/api/projects/order', async ({ request }) => {
     const body = (await request.json()) as { ids: string[] }

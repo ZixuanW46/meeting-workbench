@@ -2,19 +2,43 @@ import { useEffect, useState, type KeyboardEvent } from 'react'
 import {
   createMeeting,
   formatApiError,
+  importPlaudRecording,
   listProjects,
   localToday,
   type MeetingLanguage,
+  type PlaudRecording,
   type Project,
 } from '../api/client'
 import { Icon } from '../components/Icon'
 import { InlineProjectCreate } from '../components/InlineProjectCreate'
+import { PlaudRecordingPicker, recordingLocalDate } from '../components/PlaudRecordingPicker'
+import { toast } from '../components/Toast'
+
+/** 录音来源：upload=先建会议稍后上传文件 / plaud=从 Plaud 云端导入 */
+type MeetingSource = 'upload' | 'plaud'
+
+/** #/new?source=plaud 打开即停在 Plaud 那一侧；其余情况都是默认的上传路径 */
+function initialSource(): MeetingSource {
+  const hash = window.location.hash
+  const queryAt = hash.indexOf('?')
+  if (queryAt === -1) {
+    return 'upload'
+  }
+  return new URLSearchParams(hash.slice(queryAt + 1)).get('source') === 'plaud'
+    ? 'plaud'
+    : 'upload'
+}
 
 export function NewMeetingPage() {
+  // 录音来源决定提交走哪条接口：上传路径只建会议，Plaud 路径连音频一起拿回来
+  const [source, setSource] = useState<MeetingSource>(initialSource)
+  const [recording, setRecording] = useState<PlaudRecording | null>(null)
   // 标题选填：留空先占位，上传后取录音文件名，纪要生成后自动命名
   const [title, setTitle] = useState('')
   // 会议发生日：纪要标题与「明天」「下周二」换算都以它为锚点，默认今天
   const [meetingDate, setMeetingDate] = useState(localToday())
+  // 用户自己动过日期后，选录音就不再覆盖它
+  const [meetingDateTouched, setMeetingDateTouched] = useState(false)
   // 转写目标语言：默认中文，决定后续转写识别的语言
   const [language, setLanguage] = useState<MeetingLanguage>('zh')
   // 归属项目：空串 = 无项目；决定这场会议叠加哪份项目热词
@@ -60,18 +84,34 @@ export function NewMeetingPage() {
     }
   }
 
+  const pickRecording = (picked: PlaudRecording) => {
+    setRecording(picked)
+    const localDate = recordingLocalDate(picked.started_at)
+    if (!meetingDateTouched && localDate !== '') {
+      setMeetingDate(localDate)
+    }
+  }
+
+  const importing = source === 'plaud'
   const handleSubmit = async () => {
     setError(null)
     setSubmitting(true)
     try {
       const trimmed = title.trim()
-      const meeting = await createMeeting({
+      const input = {
         ...(trimmed !== '' ? { title: trimmed } : {}),
         hotwords,
         ...(meetingDate !== '' ? { meeting_date: meetingDate } : {}),
         language,
         ...(projectId !== '' ? { project_id: projectId } : {}),
-      })
+      }
+      const meeting =
+        importing && recording !== null
+          ? await importPlaudRecording({ ...input, plaud_file_id: recording.file_id })
+          : await createMeeting(input)
+      if (importing && recording !== null) {
+        toast(`已从 Plaud 导入「${recording.name}」`)
+      }
       window.location.hash = `#/meetings/${meeting.id}`
     } catch (e: unknown) {
       setError(formatApiError(e))
@@ -94,7 +134,7 @@ export function NewMeetingPage() {
       </div>
 
       <form
-        className="form"
+        className={`form${importing ? ' form-wide' : ''}`}
         noValidate
         onSubmit={(event) => {
           event.preventDefault()
@@ -102,16 +142,54 @@ export function NewMeetingPage() {
         }}
       >
         <div className="form-field">
+          <label id="meeting-source-label">录音来源</label>
+          <div className="tabs" aria-labelledby="meeting-source-label">
+            <button
+              type="button"
+              className={`tab${!importing ? ' active' : ''}`}
+              onClick={() => setSource('upload')}
+            >
+              稍后上传文件
+            </button>
+            <button
+              type="button"
+              className={`tab${importing ? ' active' : ''}`}
+              onClick={() => setSource('plaud')}
+            >
+              从 Plaud 导入
+            </button>
+          </div>
+          <span className="form-hint">
+            {importing
+              ? '从 Plaud 云端挑一条录音，创建后直接下载并开始处理'
+              : '先建好会议，稍后在工作台上传录音文件'}
+          </span>
+        </div>
+
+        {importing && (
+          <div className="form-field">
+            <label id="plaud-recording-label">选择录音</label>
+            <PlaudRecordingPicker value={recording} onChange={pickRecording} />
+          </div>
+        )}
+
+        <div className="form-field">
           <label htmlFor="meeting-title">标题</label>
           <input
             id="meeting-title"
             className="input"
             value={title}
-            placeholder="可留空，纪要生成后自动命名"
+            placeholder={
+              importing && recording !== null
+                ? recording.name
+                : '可留空，纪要生成后自动命名'
+            }
             onChange={(event) => setTitle(event.target.value)}
           />
           <span className="form-hint">
-            留空则上传后先用录音文件名，纪要生成后按「日期：主题」自动命名；填了就以你的为准
+            {importing
+              ? '留空则先用 Plaud 上的录音名；那名字要还是设备默认的时间串，纪要生成后会自动改名'
+              : '留空则上传后先用录音文件名，纪要生成后按「日期：主题」自动命名；填了就以你的为准'}
           </span>
         </div>
 
@@ -122,7 +200,10 @@ export function NewMeetingPage() {
             type="date"
             className="input input-date"
             value={meetingDate}
-            onChange={(event) => setMeetingDate(event.target.value)}
+            onChange={(event) => {
+              setMeetingDate(event.target.value)
+              setMeetingDateTouched(true)
+            }}
           />
           <span className="form-hint">
             录音是哪天开的会；纪要标题与「明天」「下周二」的换算都以此为准
@@ -207,10 +288,19 @@ export function NewMeetingPage() {
 
         {error !== null && <div className="notice notice-error">{error}</div>}
 
-        <div>
-          <button type="submit" className="btn btn-primary" disabled={submitting}>
-            创建会议
+        <div className="form-actions">
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={submitting || (importing && recording === null)}
+          >
+            {importing ? '导入并开始处理' : '创建会议'}
           </button>
+          {importing && submitting && (
+            <span className="form-hint">
+              正在从 Plaud 下载录音，大文件可能需要一两分钟…
+            </span>
+          )}
         </div>
       </form>
     </div>

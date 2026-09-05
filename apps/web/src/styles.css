@@ -2402,6 +2402,118 @@ svg.clip-wave {
   color: var(--danger);
 }
 
+/* ---------- Plaud 导入：录音来源开关下的选择器 ---------- */
+
+.plaud-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 未安装提示里两行文字纵排：一句原因，一句可以照抄的命令 */
+.plaud-notice-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.plaud-install {
+  font-size: 12px;
+  color: var(--ink-tertiary);
+}
+
+.plaud-install code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-muted);
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.plaud-login {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.plaud-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.plaud-search {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 账号只是「现在连的是谁」的注脚，不抢搜索框 */
+.plaud-account {
+  font-size: 12px;
+  color: var(--ink-tertiary);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 录音再多也别把下面的表单顶出屏幕：列表自己滚，一屏大约八行 */
+.plaud-list {
+  max-height: 460px;
+  overflow-y: auto;
+}
+
+/* 可选录音行本身是按钮：借 .list-row 的排版，去掉按钮的原生外观 */
+.plaud-row {
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--hairline);
+  cursor: pointer;
+}
+
+.plaud-row:hover {
+  background: var(--surface-2);
+}
+
+/* 选中态 = 抬一级表面 + 左侧一道薰衣草，键盘走过去也看得出来 */
+.plaud-row.selected {
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.plaud-row-check {
+  color: var(--primary-hover);
+}
+
+/* 已导入的行安静一档：只剩去工作台的出口 */
+.plaud-row-imported .list-row-title {
+  color: var(--ink-subtle);
+}
+
+.plaud-more {
+  align-self: center;
+}
+
+/* 提交行：按钮与「正在下载」的说明并排 */
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* 选了 Plaud 来源时表单让出一点宽度给录音列表 */
+.form-wide {
+  max-width: 640px;
+}
+
 /* ---------- 骨架屏 ---------- */
 
 .skeleton {

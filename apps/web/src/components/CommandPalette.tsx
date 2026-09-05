@@ -67,6 +67,13 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
             <Icon name="plus" size={13} />
             <span className="cmdk-item-label">新建会议</span>
           </Command.Item>
+          <Command.Item
+            value="从 Plaud 导入录音 plaud import"
+            onSelect={() => go('#/new?source=plaud')}
+          >
+            <Icon name="cloud" size={13} />
+            <span className="cmdk-item-label">从 Plaud 导入录音</span>
+          </Command.Item>
           <Command.Item value="会议列表 meetings list" onSelect={() => go('#/')}>
             <Icon name="meetings" size={13} />
             <span className="cmdk-item-label">会议列表</span>

@@ -8,8 +8,8 @@ import { NewMeetingPage } from './pages/NewMeetingPage'
 import { VoiceprintsPage } from './pages/VoiceprintsPage'
 import { WorkbenchPage } from './pages/WorkbenchPage'
 
-// 极简 hash 路由：#/ 列表、#/new 新建、#/meetings/{id} 工作台、
-// #/voiceprints 声纹库、#/hotwords 词库（可带 ?project=<id> 直达某项目）
+// 极简 hash 路由：#/ 列表、#/new 新建（可带 ?source=plaud 直接从 Plaud 导入）、
+// #/meetings/{id} 工作台、#/voiceprints 声纹库、#/hotwords 词库（可带 ?project=<id>）
 function useHashRoute(): string {
   const [hash, setHash] = useState(window.location.hash)
   useEffect(() => {
@@ -44,7 +44,8 @@ export default function App() {
   const hotwordsProject = params.get('project')
   let page = <MeetingListPage />
   if (path === '/new') {
-    page = <NewMeetingPage />
+    // key 让 ?source= 换值时重新挂载，录音来源开关跟着 URL 走
+    page = <NewMeetingPage key={params.get('source') ?? '-'} />
   } else if (path === '/voiceprints') {
     page = <VoiceprintsPage />
   } else if (path === '/hotwords') {

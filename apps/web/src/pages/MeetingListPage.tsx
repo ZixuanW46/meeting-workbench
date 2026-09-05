@@ -255,6 +255,9 @@ export function MeetingListPage() {
                       {formatCreatedAt(meeting.created_at)}
                     </span>
                   </span>
+                  {meeting.plaud_file_id != null && (
+                    <span className="badge-lang">Plaud</span>
+                  )}
                   {meeting.language === 'en' && <span className="badge-lang">EN</span>}
                   <StateBadge state={meeting.state} />
                   <Icon name="chevron-right" size={12} className="list-row-chevron" />

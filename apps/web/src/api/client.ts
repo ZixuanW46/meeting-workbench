@@ -27,6 +27,8 @@ export interface Meeting {
   unknown_speaker_count: number
   /** FAILED / PARTIAL_READY 的失败原因，给人看的一句话 */
   processing_error: string | null
+  /** 来源是 Plaud 云端录音时的录音 id；手动上传的会议为 null */
+  plaud_file_id?: string | null
 }
 
 export interface MeetingCreateInput {
@@ -491,6 +493,87 @@ export function deleteProjectHotword(projectId: string, hotwordId: string): Prom
   return apiFetch<void>(`/api/projects/${projectId}/hotwords/${hotwordId}`, {
     method: 'DELETE',
   })
+}
+
+/* ---------- Plaud 云端录音导入 ---------- */
+
+/** Plaud 账号（昵称/邮箱都可能缺，取到哪个显示哪个） */
+export interface PlaudUser {
+  nickname: string | null
+  email: string | null
+}
+
+/**
+ * Plaud 可用性三态：未装 MCP（available=false）/ 未登录（logged_in=false）/ 就绪。
+ * 后端对 Plaud 的任何问题都回 200，把原因写在 message 里，前端照原文展示。
+ */
+export interface PlaudStatus {
+  available: boolean
+  logged_in: boolean
+  user: PlaudUser | null
+  message: string | null
+}
+
+export interface PlaudRecording {
+  file_id: string
+  name: string
+  /** 录音开始时间，带时区的 ISO；展示时转成观看者本地时间 */
+  started_at: string
+  duration_ms: number
+  /** 已经导入过的录音带上会议 id，不可再选 */
+  imported_meeting_id: string | null
+}
+
+export interface PlaudRecordingList {
+  items: PlaudRecording[]
+  page: number
+  page_size: number
+  has_more: boolean
+  /** 带搜索条件时后端忽略分页，filtered=true 时不出「加载更多」 */
+  filtered: boolean
+}
+
+/** 导入 = 新建会议的全部字段 + 选中的 Plaud 录音 */
+export interface PlaudImportInput extends MeetingCreateInput {
+  plaud_file_id: string
+}
+
+export function getPlaudStatus(): Promise<PlaudStatus> {
+  return apiFetch<PlaudStatus>('/api/plaud/status')
+}
+
+/** 触发服务器所在机器上的浏览器授权；最长等两分钟，返回 MCP 的原文 */
+export function plaudLogin(): Promise<{ logged_in: boolean; message: string }> {
+  return apiFetch<{ logged_in: boolean; message: string }>('/api/plaud/login', {
+    method: 'POST',
+  })
+}
+
+export function listPlaudRecordings(params: {
+  page?: number
+  page_size?: number
+  query?: string
+}): Promise<PlaudRecordingList> {
+  const search = new URLSearchParams()
+  if (params.page !== undefined) {
+    search.set('page', String(params.page))
+  }
+  if (params.page_size !== undefined) {
+    search.set('page_size', String(params.page_size))
+  }
+  const query = params.query?.trim() ?? ''
+  if (query !== '') {
+    search.set('query', query)
+  }
+  const suffix = search.toString()
+  return apiFetch<PlaudRecordingList>(
+    suffix === '' ? '/api/plaud/recordings' : `/api/plaud/recordings?${suffix}`,
+  )
+}
+
+/** 后端同步下载音频再建会议：大文件可能要一两分钟，成功即 QUEUED */
+export function importPlaudRecording(input: PlaudImportInput): Promise<Meeting> {
+  return postJson<Meeting>('/api/plaud/import', input)
 }
 
 /** 整场音频的波形峰值（后端算一次并缓存）：≤2000 桶、0～1，附时长秒数 */

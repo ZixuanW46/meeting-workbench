@@ -15,6 +15,7 @@ from meeting_api.events import EventStore
 from meeting_api.events import router as events_router
 from meeting_api.meeting_service import ensure_default_project
 from meeting_api.plaud.gateway import resolve_plaud_gateway
+from meeting_api.plaud.progress import ImportProgressRegistry
 from meeting_api.routes import (
     audio,
     export,
@@ -63,6 +64,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.events = EventStore()
         # Plaud 网关每次调用起一个短命子进程，这里只解析配置，不做任何探测。
         app.state.plaud_gateway = resolve_plaud_gateway(settings)
+        # 同步导入期间的下载进度只活在进程内存里，供前端轮询。
+        app.state.plaud_import_progress = ImportProgressRegistry()
         app.state.worker = Worker(
             app.state.session_factory,
             settings,

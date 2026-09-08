@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { server, useProjects } from '../test/server'
 import { NewMeetingPage } from './NewMeetingPage'
@@ -263,7 +263,36 @@ function usePlaudRecordings() {
         filtered: false,
       }),
     ),
+    // 默认「还没登记这次导入」：遮罩照样出，只是停在不确定态
+    http.get('/api/plaud/import-progress/:fileId', () =>
+      HttpResponse.json({ detail: '没有正在进行的导入' }, { status: 404 }),
+    ),
   )
+}
+
+/** 126.5 MB 的录音：字节数按 1 MB = 1024 * 1024 算，和遮罩里的排版口径一致 */
+const TOTAL_BYTES = 132644864
+const BYTES_AT_42 = 55710843
+const BYTES_AT_88 = 116727481
+
+function progressSnapshot(bytesDone: number) {
+  return {
+    file_id: 'f2',
+    phase: 'downloading',
+    bytes_done: bytesDone,
+    bytes_total: TOTAL_BYTES,
+    meeting_id: null,
+    error: null,
+  }
+}
+
+/** 让 POST /api/plaud/import 悬在半空，直到用例自己放行——模拟几十秒的同步下载 */
+function deferred(): { promise: Promise<void>; release: () => void } {
+  let release = () => {}
+  const promise = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return { promise, release }
 }
 
 describe('新建会议 · 从 Plaud 导入', () => {
@@ -369,6 +398,75 @@ describe('新建会议 · 从 Plaud 导入', () => {
 
     await waitFor(() => expect(imports).toBe(0))
     expect(window.location.hash).toBe('#/new')
+  })
+
+  it('点「导入并开始处理」立刻出全屏遮罩，并按轮询到的字节数显示下载进度', async () => {
+    const gate = deferred()
+    let polls = 0
+    usePlaudRecordings()
+    server.use(
+      http.get('/api/plaud/import-progress/:fileId', () => {
+        polls += 1
+        return HttpResponse.json(progressSnapshot(polls === 1 ? BYTES_AT_42 : BYTES_AT_88))
+      }),
+      http.post('/api/plaud/import', async () => {
+        await gate.promise
+        return HttpResponse.json({ id: 'm-plaud', title: '客户访谈' }, { status: 201 })
+      }),
+    )
+
+    render(<NewMeetingPage />)
+    fireEvent.click(screen.getByRole('button', { name: '从 Plaud 导入' }))
+    fireEvent.click(await screen.findByRole('radio', { name: /客户访谈/ }))
+    fireEvent.click(screen.getByRole('button', { name: '导入并开始处理' }))
+
+    // 遮罩是点下去就在，不等任何请求回来
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+    expect(dialog).toHaveAttribute('aria-busy', 'true')
+    expect(within(dialog).getByText('客户访谈')).toBeInTheDocument()
+    expect(within(dialog).getByText('请勿关闭页面')).toBeInTheDocument()
+
+    // 第一次轮询回来：确定态进度条 + 百分比 + MB 读数
+    expect(await screen.findByText('42%')).toBeInTheDocument()
+    expect(screen.getByText('53.1 MB / 126.5 MB')).toBeInTheDocument()
+    expect(screen.getByText('正在下载录音…')).toBeInTheDocument()
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '42')
+
+    // 轮询在继续跑：下一拍读数自己往上走
+    expect(await screen.findByText('88%', {}, { timeout: 2000 })).toBeInTheDocument()
+    expect(polls).toBeGreaterThan(1)
+
+    // 下载完成：照旧跳工作台，遮罩跟着收掉
+    gate.release()
+    await waitFor(() => expect(window.location.hash).toBe('#/meetings/m-plaud'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('导入失败：遮罩收掉，错误照旧显示在表单上', async () => {
+    const gate = deferred()
+    usePlaudRecordings()
+    server.use(
+      http.post('/api/plaud/import', async () => {
+        await gate.promise
+        return HttpResponse.json({ detail: '这条录音的音频暂不可下载，请稍后再试' }, { status: 502 })
+      }),
+    )
+
+    render(<NewMeetingPage />)
+    fireEvent.click(screen.getByRole('button', { name: '从 Plaud 导入' }))
+    fireEvent.click(await screen.findByRole('radio', { name: /客户访谈/ }))
+    fireEvent.click(screen.getByRole('button', { name: '导入并开始处理' }))
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    gate.release()
+    const notice = await screen.findByText('这条录音的音频暂不可下载，请稍后再试')
+    expect(notice).toHaveClass('notice-error')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(window.location.hash).toBe('#/new')
+    // 遮罩收掉后按钮可以再点，不会卡在提交中
+    expect(screen.getByRole('button', { name: '导入并开始处理' })).toBeEnabled()
   })
 
   it('导入失败：错误显示在表单上，不跳转', async () => {

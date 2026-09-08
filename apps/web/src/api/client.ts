@@ -605,6 +605,30 @@ export function importPlaudRecording(input: PlaudImportInput): Promise<Meeting> 
   return postJson<Meeting>('/api/plaud/import', input)
 }
 
+/** 导入的阶段：取直链 → 下载 → 落库排队；done/failed 是终态 */
+export type PlaudImportPhase = 'resolving' | 'downloading' | 'finalizing' | 'done' | 'failed'
+
+/** 导入进度快照：POST /api/plaud/import 还在跑的时候轮询它，拿字节数画进度条 */
+export interface PlaudImportProgress {
+  file_id: string
+  phase: PlaudImportPhase
+  bytes_done: number
+  /** Plaud 没给 Content-Length 时为 null，此时进度条走不确定态 */
+  bytes_total: number | null
+  meeting_id: string | null
+  error: string | null
+}
+
+/**
+ * 查一条录音的导入进度。后端还没登记这次导入时回 404（ApiError.status === 404），
+ * 调用方按「还没开始」处理、继续轮询即可。
+ */
+export function getPlaudImportProgress(fileId: string): Promise<PlaudImportProgress> {
+  return apiFetch<PlaudImportProgress>(
+    `/api/plaud/import-progress/${encodeURIComponent(fileId)}`,
+  )
+}
+
 /** 整场音频的波形峰值（后端算一次并缓存）：≤2000 桶、0～1，附时长秒数 */
 export interface AudioPeaks {
   duration: number

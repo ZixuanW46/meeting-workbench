@@ -2732,3 +2732,221 @@ svg.clip-wave {
     }
   }
 }
+
+/* ---------- Plaud 导入遮罩：同步下载几十秒，页面得有交代 ---------- */
+
+.import-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(1, 1, 2, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.import-overlay:focus {
+  outline: none;
+}
+
+.import-overlay-panel {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+  padding: 32px 28px 26px;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--edge-highlight);
+}
+
+/* 转环 + 里面的均衡器：录音产品该像在听，而不是像在等 */
+.import-pulse {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  margin-bottom: 6px;
+}
+
+.import-pulse-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    rgba(94, 106, 210, 0) 0deg,
+    rgba(94, 106, 210, 0.15) 140deg,
+    var(--primary) 300deg,
+    var(--primary-hover) 352deg,
+    rgba(94, 106, 210, 0) 360deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+}
+
+/* 环底：没转到的那一段也留一圈发丝线，环不至于断成一根弧 */
+.import-pulse::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid var(--hairline);
+}
+
+.import-pulse-bars {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.import-pulse-bar {
+  width: 3px;
+  height: 34%;
+  border-radius: var(--radius-pill);
+  background: var(--ink-subtle);
+  transform-origin: center;
+}
+
+.import-overlay-phase {
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.import-overlay-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-subtle);
+}
+
+.import-overlay-dot {
+  color: var(--ink-tertiary);
+}
+
+.import-overlay-track {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  margin-top: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--hairline);
+  overflow: hidden;
+}
+
+.import-overlay-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--primary), var(--primary-hover));
+  transition: width 0.45s var(--ease);
+}
+
+/* 不知道总大小（或还没开始下载）：一段流光来回跑，不假装知道百分比 */
+.import-overlay-track.indeterminate .import-overlay-fill {
+  width: 38%;
+  transition: none;
+}
+
+.import-overlay-meter {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.import-overlay-percent {
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.import-overlay-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-tertiary);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .import-overlay {
+    animation: import-overlay-in 0.18s var(--ease);
+  }
+
+  @keyframes import-overlay-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  .import-pulse-ring {
+    animation: spin 1.5s linear infinite;
+  }
+
+  .import-pulse-bar {
+    animation: import-eq 1.05s var(--ease) infinite;
+  }
+
+  @keyframes import-eq {
+    0%,
+    100% {
+      transform: scaleY(0.35);
+      opacity: 0.5;
+    }
+    50% {
+      transform: scaleY(1.5);
+      opacity: 1;
+    }
+  }
+
+  .import-overlay-track.indeterminate .import-overlay-fill {
+    animation: import-sweep 1.3s var(--ease) infinite;
+  }
+
+  @keyframes import-sweep {
+    0% {
+      transform: translateX(-110%);
+    }
+    100% {
+      transform: translateX(320%);
+    }
+  }
+}
+
+/* 减少动效：环与流光都停下，只留一次很轻的呼吸，仍看得出「在进行中」 */
+@media (prefers-reduced-motion: reduce) {
+  .import-pulse-ring,
+  .import-pulse-bar,
+  .import-overlay-track.indeterminate .import-overlay-fill {
+    animation-name: import-breathe !important;
+    animation-duration: 2.4s !important;
+    animation-timing-function: var(--ease) !important;
+    animation-iteration-count: infinite !important;
+    transform: none !important;
+  }
+
+  .import-overlay-track.indeterminate .import-overlay-fill {
+    width: 100%;
+  }
+
+  @keyframes import-breathe {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
+  }
+}

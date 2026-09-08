@@ -5,8 +5,10 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import shutil
+import time
 from datetime import date
 from typing import Annotated, NoReturn
 
@@ -32,8 +34,10 @@ from meeting_api.plaud.errors import (
     PlaudUnavailableError,
 )
 from meeting_api.plaud.gateway import PlaudGateway, PlaudRecording
+from meeting_api.plaud.progress import ImportProgressRegistry
 from meeting_api.schemas import (
     MeetingResponse,
+    PlaudImportProgressResponse,
     PlaudImportRequest,
     PlaudLoginResponse,
     PlaudRecordingListResponse,
@@ -50,6 +54,8 @@ from meeting_api.storage import (
 from meeting_api.titles import DEFAULT_MEETING_TITLE, TITLE_MAX_LENGTH
 from meeting_domain import MeetingState, transition
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/plaud")
 
 # 录音笔没改过名时用的设备默认名，如 "2026-09-05 21:08:13"：不算用户命名。
@@ -58,6 +64,10 @@ _DEVICE_DEFAULT_NAME = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
 
 def _gateway(request: Request) -> PlaudGateway:
     return request.app.state.plaud_gateway
+
+
+def _progress(request: Request) -> ImportProgressRegistry:
+    return request.app.state.plaud_import_progress
 
 
 def _http_error(exc: Exception) -> HTTPException | None:
@@ -94,6 +104,38 @@ def _raise_http_error(exc: Exception) -> NoReturn:
     if mapped is None:
         raise exc
     raise mapped from exc
+
+
+def _get_recording(gateway: PlaudGateway, file_id: str) -> PlaudRecording:
+    try:
+        return gateway.get_recording(file_id)
+    except Exception as exc:
+        _raise_http_error(exc)
+
+
+def _fetch_downloadable_recording(
+    gateway: PlaudGateway, file_id: str, *, attempts: int, delay_seconds: float
+) -> PlaudRecording:
+    """取到带直链的录音就返回；云端偶发少 presigned_url，隔一小会儿再问一次。
+
+    最后一次仍没有直链就把它原样交回，由调用方决定报什么错。
+    """
+    total = max(1, attempts)
+    recording = _get_recording(gateway, file_id)
+    for attempt in range(1, total):
+        if recording.presigned_url:
+            break
+        logger.warning(
+            "Plaud 录音 %s 第 %d/%d 次没拿到直链，%.1fs 后重试",
+            file_id,
+            attempt,
+            total,
+            delay_seconds,
+        )
+        if delay_seconds > 0:
+            time.sleep(delay_seconds)
+        recording = _get_recording(gateway, file_id)
+    return recording
 
 
 def _require_available(gateway: PlaudGateway) -> None:
@@ -220,8 +262,7 @@ def resolve_import_title(
     "/import", response_model=MeetingResponse, status_code=status.HTTP_201_CREATED
 )
 def import_plaud_recording(payload: PlaudImportRequest, request: Request) -> MeetingResponse:
-    settings = request.app.state.settings
-    gateway = _gateway(request)
+    progress = _progress(request)
     file_id = payload.plaud_file_id
 
     with request.app.state.session_factory() as session:
@@ -232,56 +273,106 @@ def import_plaud_recording(payload: PlaudImportRequest, request: Request) -> Mee
                 status_code=status.HTTP_409_CONFLICT, detail="该 Plaud 录音已导入"
             )
 
+        # 从这里开始整段下载都在同一个请求里同步跑，前端靠 import-progress 轮询看进度；
+        # 任何一条出错路径都要把进度落到 failed，不能停在 downloading。
+        progress.start(file_id)
         try:
-            recording = gateway.get_recording(file_id)
+            return _download_and_queue(session, request, payload, progress=progress)
         except Exception as exc:
-            _raise_http_error(exc)
-        if not recording.presigned_url:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="这条录音的音频暂不可下载，请稍后再试",
-            )
+            detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            progress.fail(file_id, str(detail))
+            raise
 
-        title, title_user_edited = resolve_import_title(payload, recording)
-        meeting = build_meeting(
-            session,
-            payload,
-            title=title,
-            title_user_edited=title_user_edited,
-            # 录音时间是 UTC，会议日期要按本机时区落到「那天」。
-            meeting_date=payload.meeting_date or recording.started_at.astimezone().date(),
-            plaud_file_id=file_id,
+
+def _download_and_queue(
+    session: Session,
+    request: Request,
+    payload: PlaudImportRequest,
+    *,
+    progress: ImportProgressRegistry,
+) -> MeetingResponse:
+    settings = request.app.state.settings
+    gateway = _gateway(request)
+    file_id = payload.plaud_file_id
+
+    recording = _fetch_downloadable_recording(
+        gateway,
+        file_id,
+        attempts=settings.plaud_presigned_url_retries + 1,
+        delay_seconds=settings.plaud_presigned_url_retry_seconds,
+    )
+    if not recording.presigned_url:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="这条录音的音频暂不可下载，请稍后再试",
         )
-        session.add(meeting)
+
+    title, title_user_edited = resolve_import_title(payload, recording)
+    meeting = build_meeting(
+        session,
+        payload,
+        title=title,
+        title_user_edited=title_user_edited,
+        # 录音时间是 UTC，会议日期要按本机时区落到「那天」。
+        meeting_date=payload.meeting_date or recording.started_at.astimezone().date(),
+        plaud_file_id=file_id,
+    )
+    session.add(meeting)
+    session.commit()
+    session.refresh(meeting)
+    meeting_id = meeting.id
+
+    def report(bytes_done: int, bytes_total: int | None) -> None:
+        progress.update(file_id, bytes_done=bytes_done, bytes_total=bytes_total)
+
+    try:
+        uploading = transition(MeetingState(meeting.state), MeetingState.UPLOADING)
+        meeting.state = uploading.value
         session.commit()
-        session.refresh(meeting)
-        meeting_id = meeting.id
 
-        try:
-            uploading = transition(MeetingState(meeting.state), MeetingState.UPLOADING)
-            meeting.state = uploading.value
-            session.commit()
+        progress.update(file_id, phase="downloading", bytes_done=0)
+        saved = download_to_meeting(
+            settings,
+            meeting_id,
+            recording.presigned_url,
+            filename_from_url(recording.presigned_url, file_id),
+            on_progress=report,
+        )
+        progress.update(file_id, phase="finalizing")
+        saved = transcode_audio_if_needed(settings, meeting_id, saved)
+        meeting.audio_filename = saved.filename
+        meeting.audio_sha256 = saved.sha256
+        meeting.audio_size = saved.size
+        # 文件名是哈希，别拿它当标题（所以不调 apply_filename_title）。
+        meeting.state = transition(uploading, MeetingState.QUEUED).value
+        session.commit()
+    except Exception as exc:
+        session.rollback()
+        _discard_meeting(session, settings, meeting_id)
+        _raise_http_error(exc)
 
-            saved = download_to_meeting(
-                settings,
-                meeting_id,
-                recording.presigned_url,
-                filename_from_url(recording.presigned_url, file_id),
-            )
-            saved = transcode_audio_if_needed(settings, meeting_id, saved)
-            meeting.audio_filename = saved.filename
-            meeting.audio_sha256 = saved.sha256
-            meeting.audio_size = saved.size
-            # 文件名是哈希，别拿它当标题（所以不调 apply_filename_title）。
-            meeting.state = transition(uploading, MeetingState.QUEUED).value
-            session.commit()
-        except Exception as exc:
-            session.rollback()
-            _discard_meeting(session, settings, meeting_id)
-            _raise_http_error(exc)
+    session.refresh(meeting)
+    response = to_meeting_response(meeting)
+    progress.finish(file_id, meeting_id)
+    return response
 
-        session.refresh(meeting)
-        return to_meeting_response(meeting)
+
+@router.get("/import-progress/{file_id}", response_model=PlaudImportProgressResponse)
+def plaud_import_progress(file_id: str, request: Request) -> PlaudImportProgressResponse:
+    """导入在途/刚结束时的下载进度；终态多留 120 s 再过期。"""
+    entry = _progress(request).get(file_id)
+    if entry is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="没有该 Plaud 导入的进度"
+        )
+    return PlaudImportProgressResponse(
+        file_id=entry.file_id,
+        phase=entry.phase,
+        bytes_done=entry.bytes_done,
+        bytes_total=entry.bytes_total,
+        meeting_id=entry.meeting_id,
+        error=entry.error,
+    )
 
 
 def _discard_meeting(session: Session, settings: Settings, meeting_id: str) -> None:

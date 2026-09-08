@@ -226,8 +226,14 @@ class FakePlaudGateway:
         user: PlaudUser | None = None,
         installed: bool = True,
         error: PlaudError | None = None,
+        recording_queue: dict[str, list[PlaudRecording]] | None = None,
     ) -> None:
         self.recordings = list(recordings or [])
+        # 每个 file_id 排队的定制返回：用完自动落回 recordings，用来模拟「先没有直链、再有」。
+        self.recording_queue: dict[str, list[PlaudRecording]] = {
+            key: list(value) for key, value in (recording_queue or {}).items()
+        }
+        self.get_recording_calls: list[str] = []
         self.user = user or PlaudUser(nickname="Plaud 用户", email="user@example.com")
         self.installed = installed
         self.error = error
@@ -267,7 +273,11 @@ class FakePlaudGateway:
         return window, len(window) == page_size
 
     def get_recording(self, file_id: str) -> PlaudRecording:
+        self.get_recording_calls.append(file_id)
         self._raise_if_configured()
+        queued = self.recording_queue.get(file_id)
+        if queued:
+            return replace(queued.pop(0))
         for recording in self.recordings:
             if recording.file_id == file_id:
                 return replace(recording)

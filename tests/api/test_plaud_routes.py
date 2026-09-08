@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from meeting_api.config import Settings
 from meeting_api.main import create_app
 from meeting_api.models import Meeting
-from meeting_api.plaud.download import filename_from_url
+from meeting_api.plaud.download import download_to_meeting, filename_from_url
 from meeting_api.plaud.gateway import (
     PlaudAuthError,
     PlaudError,
@@ -28,6 +28,7 @@ from meeting_api.plaud.gateway import (
     PlaudUnavailableError,
     PlaudUser,
 )
+from meeting_api.plaud.progress import ImportProgressRegistry
 
 AUDIO_BYTES = b"RIFF\x00\x01plaud-downloaded-audio"
 
@@ -43,6 +44,8 @@ def client(tmp_path, monkeypatch):
         diarization_backend="fake",
         embedding_backend="fake",
         plaud_backend="fake",
+        # 直链重试逻辑照跑，但别让测试真的睡过去。
+        plaud_presigned_url_retry_seconds=0,
     )
     app = create_app(settings)
     with TestClient(app) as test_client:
@@ -354,14 +357,39 @@ def test_import_rejects_duplicate_recording(client):
 
 
 def test_import_without_presigned_url_returns_422(client):
-    _gateway(client).recordings = [_recording("rec-1", presigned_url=None)]
+    gateway = _gateway(client)
+    gateway.recordings = [_recording("rec-1", presigned_url=None)]
 
     response = client.post("/api/plaud/import", json={"plaud_file_id": "rec-1"})
 
     assert response.status_code == 422
     assert response.json()["detail"] == "这条录音的音频暂不可下载，请稍后再试"
+    # 每次都没直链才判死：首次 + 配置的重试次数。
+    expected_calls = 1 + client.app.state.settings.plaud_presigned_url_retries
+    assert gateway.get_recording_calls == ["rec-1"] * expected_calls
     with client.app.state.session_factory() as session:
         assert session.query(Meeting).count() == 0
+
+
+def test_import_retries_when_presigned_url_missing_then_succeeds(client):
+    """云端偶发少了直链，重试一次就有——不该把用户挡在 422 上。"""
+    gateway = _gateway(client)
+    with _audio_server() as base:
+        gateway.recording_queue = {
+            "rec-1": [
+                _recording("rec-1", presigned_url=None),
+                _recording("rec-1", presigned_url=f"{base}/audiofiles/rec-1.wav"),
+            ]
+        }
+        response = client.post("/api/plaud/import", json={"plaud_file_id": "rec-1"})
+
+    assert response.status_code == 201, response.text
+    assert gateway.get_recording_calls == ["rec-1", "rec-1"]
+    with client.app.state.session_factory() as session:
+        meeting = session.get(Meeting, response.json()["id"])
+        assert meeting is not None
+        assert meeting.plaud_file_id == "rec-1"
+        assert meeting.state == "QUEUED"
 
 
 def test_import_cleans_up_meeting_when_download_fails(client):
@@ -425,3 +453,115 @@ def test_filename_from_url_keeps_basename_and_defaults_to_mp3():
     assert filename_from_url("https://x.invalid/", "abc123") == "abc123.mp3"
     # 路径里的目录穿越必须被抹掉。
     assert filename_from_url("https://x.invalid/a/../..", "abc123") == "abc123.mp3"
+
+
+def test_import_progress_unknown_file_id_returns_404(client):
+    response = client.get("/api/plaud/import-progress/rec-unknown")
+
+    assert response.status_code == 404
+    assert response.json()["detail"]
+
+
+def test_import_progress_reports_done_after_successful_import(client):
+    with _audio_server() as base:
+        _gateway(client).recordings = [
+            _recording("rec-1", presigned_url=f"{base}/audiofiles/rec-1.wav")
+        ]
+        imported = client.post("/api/plaud/import", json={"plaud_file_id": "rec-1"})
+
+    assert imported.status_code == 201, imported.text
+    body = client.get("/api/plaud/import-progress/rec-1").json()
+
+    assert body == {
+        "file_id": "rec-1",
+        "phase": "done",
+        "bytes_done": len(AUDIO_BYTES),
+        "bytes_total": len(AUDIO_BYTES),
+        "meeting_id": imported.json()["id"],
+        "error": None,
+    }
+
+
+def test_import_progress_reports_failure_with_response_detail(client):
+    with _audio_server() as base:
+        # 服务器只认 /audiofiles/ 前缀，其它路径一律 404 → 导入以 502 收场。
+        _gateway(client).recordings = [
+            _recording("rec-1", presigned_url=f"{base}/missing/rec-1.wav")
+        ]
+        failed = client.post("/api/plaud/import", json={"plaud_file_id": "rec-1"})
+
+    assert failed.status_code == 502
+    body = client.get("/api/plaud/import-progress/rec-1").json()
+
+    assert body["phase"] == "failed"
+    assert body["error"] == failed.json()["detail"]
+    assert body["meeting_id"] is None
+
+
+def test_import_progress_reports_failure_when_no_presigned_url(client):
+    _gateway(client).recordings = [_recording("rec-1", presigned_url=None)]
+
+    failed = client.post("/api/plaud/import", json={"plaud_file_id": "rec-1"})
+
+    assert failed.status_code == 422
+    body = client.get("/api/plaud/import-progress/rec-1").json()
+    assert body["phase"] == "failed"
+    assert body["error"] == failed.json()["detail"]
+
+
+def test_progress_registry_evicts_finished_entries_after_retention():
+    now = [1000.0]
+    registry = ImportProgressRegistry(retention_seconds=120.0, clock=lambda: now[0])
+
+    registry.start("rec-1")
+    registry.finish("rec-1", "meeting-1")
+
+    now[0] += 119.0
+    entry = registry.get("rec-1")
+    assert entry is not None
+    assert entry.phase == "done"
+    assert entry.meeting_id == "meeting-1"
+
+    now[0] += 2.0
+    assert registry.get("rec-1") is None
+    # 已清理的条目不会被后续回调复活。
+    assert registry.update("rec-1", bytes_done=5) is None
+
+
+def test_progress_registry_keeps_in_flight_entries_past_retention():
+    now = [0.0]
+    registry = ImportProgressRegistry(
+        retention_seconds=120.0, stale_seconds=3600.0, clock=lambda: now[0]
+    )
+    registry.start("rec-1")
+    registry.update("rec-1", phase="downloading", bytes_done=1024)
+
+    now[0] += 600.0
+    entry = registry.get("rec-1")
+    assert entry is not None
+    assert entry.phase == "downloading"
+    assert entry.bytes_done == 1024
+
+    now[0] += 3601.0
+    assert registry.get("rec-1") is None
+
+
+def test_download_to_meeting_reports_final_progress(tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    settings = Settings(data_dir=data_dir, plaud_backend="fake")
+    calls: list[tuple[int, int | None]] = []
+
+    with _audio_server() as base:
+        saved = download_to_meeting(
+            settings,
+            "meeting-1",
+            f"{base}/audiofiles/rec-1.wav",
+            "rec-1.wav",
+            on_progress=lambda done, total: calls.append((done, total)),
+        )
+
+    total = len(AUDIO_BYTES)
+    assert saved.size == total
+    assert calls[-1] == (total, total)
+    assert all(done <= total for done, _ in calls)

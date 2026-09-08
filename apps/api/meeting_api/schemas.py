@@ -155,6 +155,20 @@ class PlaudRecordingResponse(BaseModel):
         return value.isoformat()
 
 
+class PlaudImportProgressResponse(BaseModel):
+    """POST /api/plaud/import 在途时的下载进度（同步 handler 里实时更新）。"""
+
+    file_id: str
+    # resolving=在取直链，downloading=正在下字节，finalizing=下完在排队，
+    # done=导入已返回 201，failed=导入抛错。
+    phase: Literal["resolving", "downloading", "finalizing", "done", "failed"]
+    bytes_done: int
+    # Content-Length；上游没给就是 None。
+    bytes_total: int | None = None
+    meeting_id: str | None = None
+    error: str | None = None
+
+
 class PlaudRecordingListResponse(BaseModel):
     items: list[PlaudRecordingResponse]
     page: int

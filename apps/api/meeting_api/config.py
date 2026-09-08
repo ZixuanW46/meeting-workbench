@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     plaud_login_timeout_seconds: float = 150.0
     # 下载整段音频的总时长上限（单次 socket 读另有 60 s 超时）。
     plaud_download_timeout_seconds: float = 900.0
+    # 云端偶尔会短暂返回缺 presigned_url 的录音（立刻重试就好了）：
+    # 判定「暂不可下载」前额外再问几次，以及两次之间等多久。
+    plaud_presigned_url_retries: int = 2
+    plaud_presigned_url_retry_seconds: float = 1.5
 
     def resolved_database_url(self) -> str:
         if self.database_url:

@@ -2,17 +2,23 @@ import { useEffect, useState, type KeyboardEvent } from 'react'
 import {
   createMeeting,
   formatApiError,
+  getPlaudImportProgress,
   importPlaudRecording,
   listProjects,
   localToday,
   type MeetingLanguage,
+  type PlaudImportProgress,
   type PlaudRecording,
   type Project,
 } from '../api/client'
 import { Icon } from '../components/Icon'
 import { InlineProjectCreate } from '../components/InlineProjectCreate'
+import { PlaudImportOverlay } from '../components/PlaudImportOverlay'
 import { PlaudRecordingPicker, recordingLocalDate } from '../components/PlaudRecordingPicker'
 import { toast } from '../components/Toast'
+
+/** 下载进度轮询间隔：后端按块累加字节，半秒一次够跟手又不吵 */
+const PROGRESS_POLL_MS = 500
 
 /** 录音来源：upload=先建会议稍后上传文件 / plaud=从 Plaud 云端导入 */
 type MeetingSource = 'upload' | 'plaud'
@@ -48,6 +54,9 @@ export function NewMeetingPage() {
   const [hotwordInput, setHotwordInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 正在导入的那条录音：非 null 就等于遮罩开着，POST 一落地（成功或失败）立刻清掉
+  const [importingRecording, setImportingRecording] = useState<PlaudRecording | null>(null)
+  const [progress, setProgress] = useState<PlaudImportProgress | null>(null)
 
   useEffect(() => {
     let stale = false
@@ -70,6 +79,31 @@ export function NewMeetingPage() {
       stale = true
     }
   }, [])
+
+  // 遮罩开着的时候轮询下载进度；卸载或导入结束时 cleanup 关掉定时器，绝不留后台请求
+  useEffect(() => {
+    if (importingRecording === null) {
+      setProgress(null)
+      return
+    }
+    let stale = false
+    const poll = () => {
+      getPlaudImportProgress(importingRecording.file_id)
+        .then((snapshot) => {
+          if (!stale) {
+            setProgress(snapshot)
+          }
+        })
+        // 404 = 后端还没登记这次导入，别的错也一样：进度只是装饰，接着轮询就是
+        .catch(() => {})
+    }
+    poll()
+    const timer = window.setInterval(poll, PROGRESS_POLL_MS)
+    return () => {
+      stale = true
+      window.clearInterval(timer)
+    }
+  }, [importingRecording])
 
   const addHotword = () => {
     const word = hotwordInput.trim()
@@ -100,6 +134,9 @@ export function NewMeetingPage() {
   const handleSubmit = async () => {
     setError(null)
     setSubmitting(true)
+    if (importing && recording !== null) {
+      setImportingRecording(recording)
+    }
     try {
       const trimmed = title.trim()
       const input = {
@@ -120,6 +157,8 @@ export function NewMeetingPage() {
     } catch (e: unknown) {
       setError(formatApiError(e))
     } finally {
+      // 无论成功、失败还是抛异常，遮罩都在这里收掉：不给它留下卡住的可能
+      setImportingRecording(null)
       setSubmitting(false)
     }
   }
@@ -299,13 +338,18 @@ export function NewMeetingPage() {
           >
             {importing ? '导入并开始处理' : '创建会议'}
           </button>
-          {importing && submitting && (
-            <span className="form-hint">
-              正在从 Plaud 下载录音，大文件可能需要一两分钟…
-            </span>
-          )}
         </div>
       </form>
+
+      {importingRecording !== null && (
+        <PlaudImportOverlay
+          phase={progress?.phase ?? null}
+          bytesDone={progress?.bytes_done ?? 0}
+          bytesTotal={progress?.bytes_total ?? null}
+          recordingName={importingRecording.name}
+          recordingDurationMs={importingRecording.duration_ms}
+        />
+      )}
     </div>
   )
 }
